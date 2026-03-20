@@ -1,0 +1,84 @@
+{
+  "specs": [
+    {
+      "ref": "SPEC-008",
+      "path": "specs/rate-limit-legacy/spec.toml",
+      "status": "superseded",
+      "domain": "api",
+      "depends_on": [],
+      "supersedes": [],
+      "applies_to": [
+        "code://src/api/middleware/ratelimiter.go",
+        "config://src/api/config/limits.yaml"
+      ]
+    },
+    {
+      "ref": "SPEC-042",
+      "path": "specs/rate-limit-v2/spec.toml",
+      "status": "accepted",
+      "domain": "api",
+      "depends_on": [],
+      "supersedes": [
+        "SPEC-008"
+      ],
+      "applies_to": [
+        "code://src/api/middleware/ratelimiter.go",
+        "config://src/api/config/limits.yaml"
+      ]
+    },
+    {
+      "ref": "SPEC-055",
+      "path": "specs/burst-handling/spec.toml",
+      "status": "accepted",
+      "domain": "api",
+      "depends_on": [
+        "SPEC-042"
+      ],
+      "supersedes": [],
+      "applies_to": [
+        "code://src/api/middleware/ratelimiter.go",
+        "config://src/api/config/limits.yaml"
+      ]
+    }
+  ],
+  "overlap_pairs": [
+    {
+      "left": "SPEC-008",
+      "right": "SPEC-042",
+      "shared_applies_to": [
+        "code://src/api/middleware/ratelimiter.go",
+        "config://src/api/config/limits.yaml"
+      ]
+    }
+  ],
+  "docs": [
+    {
+      "path": "docs/guides/api-rate-limits.md",
+      "classification": "drifted",
+      "must_contain": [
+        "fixed-window",
+        "100 requests per minute",
+        "tenant-specific overrides are not supported"
+      ],
+      "must_not_contain": [
+        "per-tenant",
+        "200 requests per minute",
+        "burst"
+      ]
+    },
+    {
+      "path": "docs/runbooks/rate-limit-rollout.md",
+      "classification": "aligned",
+      "must_contain": [
+        "per-tenant",
+        "200 requests per minute",
+        "burst"
+      ],
+      "must_not_contain": [
+        "100 requests per minute",
+        "fixed-window",
+        "tenant-specific overrides are not supported"
+      ]
+    }
+  ]
+}

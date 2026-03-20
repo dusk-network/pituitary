@@ -1,0 +1,9 @@
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "invalid-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "missing-body"

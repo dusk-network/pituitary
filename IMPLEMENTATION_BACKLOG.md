@@ -14,6 +14,24 @@ Ship a local, filesystem-only Pituitary that can index Markdown-based specs and 
 - `review_spec`
 
 `check_compliance` is explicitly deferred until after the first ship.
+`MCP` is not part of the first-ship acceptance criteria, even though a post-v1 wrapper may be shipped later.
+
+## Milestone 0: Contract Freeze
+
+- [ ] Freeze canonical `ref`, `source_ref`, and `applies_to` schemes
+- [ ] Freeze status and supersession semantics
+- [ ] Define one shared JSON envelope plus per-command request/result shapes for shipped commands
+- [ ] Define the embedding and qualitative-analysis provider contracts, including config shape, env-based credentials, timeout/retry policy, and degraded-mode behavior
+- [ ] Freeze the targeted `check_doc_drift` scope contract used by `review_spec`
+- [ ] Add a deterministic fixture provider mode for tests and CI
+- [ ] Lock the expected findings for the bootstrap fixture workspace
+
+Definition of done:
+
+- the architecture, backlog, README, and fixtures agree on identifier, status, discovery, and output rules
+- every shipped command has a documented JSON request/result shape and shared error object
+- tests and CI can run against the deterministic fixture provider without live model credentials
+- AI-backed commands have explicit dependency-unavailable behavior
 
 ## Milestone 1: Workspace and Config
 
@@ -31,8 +49,10 @@ Definition of done:
 ## Milestone 2: Source Adapters
 
 - [ ] Implement `filesystem` adapter for `spec_bundle`
+- [ ] Discover spec bundles recursively by directories containing `spec.toml`
 - [ ] Require exactly one `spec.toml` and one referenced body file per spec bundle
 - [ ] Implement `filesystem` adapter for `markdown_docs`
+- [ ] Derive doc refs from workspace-relative Markdown paths
 - [ ] Normalize spec bundles into canonical artifact records
 - [ ] Normalize docs into canonical artifact records
 - [ ] Emit stable `source_ref` values and content hashes
@@ -45,6 +65,7 @@ Definition of done:
 ## Milestone 3: Index and Rebuild
 
 - [ ] Create SQLite schema for `artifacts`, `chunks`, `chunks_vec`, and `edges`
+- [ ] Size `chunks_vec` from the configured embedder dimension rather than a hardcoded constant
 - [ ] Add secondary indexes for filtered retrieval and graph traversal
 - [ ] Implement full rebuild into a staging DB
 - [ ] Run integrity checks before swap
@@ -72,11 +93,12 @@ Definition of done:
 
 ## Milestone 5: Core Spec Analysis
 
-- [ ] Implement `check_overlap`
-- [ ] Implement `compare_specs`
-- [ ] Implement `analyze_impact`
-- [ ] Implement `check_doc_drift`
-- [ ] Implement `review_spec` as a composition layer over the other tools
+- [x] Implement `check_overlap`
+- [x] Implement `compare_specs`
+- [x] Implement `analyze_impact`
+- [x] Support `doc_ref`, `doc_refs[]`, and `scope=all` in `check_doc_drift`
+- [x] Implement `check_doc_drift`
+- [x] Implement `review_spec` as a composition layer over the other tools
 
 Definition of done:
 
@@ -86,10 +108,9 @@ Definition of done:
 
 ## Milestone 6: CLI and Output
 
-- [ ] Add a JSON-first CLI contract for every shipped command
-- [ ] Add Markdown rendering for human-readable output
-- [ ] Keep CLI logic thin over shared analysis packages
-- [ ] Optionally add MCP if it does not delay the first ship
+- [x] Add a JSON-first CLI contract for every shipped command
+- [x] Add shared human-readable rendering derived from the shipped result types
+- [x] Keep CLI logic thin over shared analysis packages
 
 Definition of done:
 
@@ -98,6 +119,7 @@ Definition of done:
 
 ## Deferred Until After First Ship
 
+- [x] MCP transport
 - [ ] `check_compliance`
 - [ ] non-filesystem adapters
 - [ ] GitHub or CI vendor integrations
@@ -109,6 +131,7 @@ Definition of done:
 The scaffolded fixture workspace is intended to support early end-to-end checks:
 
 - `SPEC-008` and `SPEC-042` intentionally overlap
+- `SPEC-008` is marked `superseded`
 - `SPEC-042` supersedes `SPEC-008`
 - `SPEC-055` depends on `SPEC-042`
 - `docs/guides/api-rate-limits.md` intentionally contains stale values
@@ -116,10 +139,11 @@ The scaffolded fixture workspace is intended to support early end-to-end checks:
 
 ## Suggested Build Order
 
-1. Make `pituitary index --rebuild` work on the fixture workspace.
-2. Ship `search_specs`.
-3. Ship `check_overlap`.
-4. Ship `compare_specs`.
-5. Ship `analyze_impact`.
-6. Ship `check_doc_drift`.
-7. Ship `review_spec`.
+1. Freeze the v1 contracts, provider behavior, and fixture expectations.
+2. Make `pituitary index --rebuild` work on the fixture workspace.
+3. Ship `search_specs`.
+4. Ship `check_overlap`.
+5. Ship `compare_specs`.
+6. Ship `analyze_impact`.
+7. Ship `check_doc_drift`.
+8. Ship `review_spec`.

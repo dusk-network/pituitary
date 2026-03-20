@@ -24,7 +24,7 @@ Pituitary core is responsible for:
 - Normalizing source material into canonical spec and document records
 - Building a searchable index plus an explicit dependency graph
 - Running overlap, comparison, impact, compliance, and doc-drift analysis
-- Exposing those capabilities through stable CLI and MCP interfaces
+- Exposing those capabilities through a stable CLI and later thin programmatic transports such as MCP
 
 Pituitary core is **not** responsible for:
 
@@ -48,7 +48,6 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 - One body format for specs and docs: Markdown
 - One index backend: local SQLite + `sqlite-vec`
 - One required transport: CLI
-- One optional thin transport: MCP server over the same core packages
 - Five required analysis capabilities:
   - `search_specs`
   - `check_overlap`
@@ -60,6 +59,7 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 ### Explicitly out of scope for the first ship
 
 - GitHub Actions, PR comments, and vendor-specific CI flows
+- MCP server transport
 - PDF ingestion
 - Database-backed source adapters
 - Incremental index updates
@@ -152,7 +152,8 @@ This keeps the first ship explicit and easy to reason about. No auto-discovery, 
 ┌──────────────────────────────────────────────────────────────┐
 │                     Transport / Extensions                    │
 │                                                              │
-│  Core transports: CLI, MCP                                   │
+│  V1 transport: CLI                                            │
+│  Later thin transport: MCP                                    │
 │  Later integrations: CI, git hooks, PR comments, editors     │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -206,6 +207,28 @@ DocRecord
   body_text
   metadata
 ```
+
+#### V1 reference rules
+
+Pituitary should distinguish between three different identifier classes:
+
+- `ref`: the canonical identifier used by the index and tool inputs.
+  - Specs use their declared spec IDs such as `SPEC-042`.
+  - Docs use a canonical doc ref derived from the workspace-relative Markdown path, for example `docs/guides/api-rate-limits.md` -> `doc://guides/api-rate-limits`.
+- `source_ref`: provenance for where a record came from.
+  - For the filesystem adapter, this should be a `file://` URI rooted at the workspace, for example `file://specs/rate-limit-v2/spec.toml` or `file://docs/guides/api-rate-limits.md`.
+- `applies_to`: logical references governed by a spec.
+  - V1 uses canonical scheme-specific refs such as `code://...` and `config://...`.
+
+Tool inputs for indexed artifacts should use canonical `ref` values, not `source_ref` values. Provenance should remain available in outputs and stored metadata, but it is not the primary query surface.
+
+#### V1 status and supersession rules
+
+- Valid persisted spec statuses are `draft`, `review`, `accepted`, `superseded`, and `deprecated`.
+- If spec `A` declares `supersedes = ["B"]`, then persisted fixture data for `B` should normally use `status = "superseded"` once `A` is accepted.
+- Default semantic search should include `draft`, `review`, and `accepted` specs, and should exclude `superseded` and `deprecated` specs unless the caller explicitly asks for them.
+- Overlap analysis should include `superseded` specs as historical comparison candidates, but it should exclude `deprecated` specs by default.
+- Impact analysis should traverse explicit graph relations regardless of status, and should label superseded artifacts as historical findings in the response when they appear.
 
 Pituitary v1 should ship exactly **one first-party source format** for specs:
 
@@ -285,6 +308,15 @@ The adapter contract keeps that variability out of the analysis engine.
 - `filesystem` adapter for spec bundles
 - `filesystem` adapter for docs directories
 
+**V1 filesystem enumeration rules:**
+
+- For `kind = "spec_bundle"`, recursively walk the configured source root and treat each directory containing a `spec.toml` file as one bundle.
+- A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
+- Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
+- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root.
+- A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
+- A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
+
 **Later, as extensions:**
 
 - `pdf` adapter
@@ -330,6 +362,48 @@ Step 6: Atomic Swap
 
 **Embedding model recommendation:** At 20-100 specs, a local model such as `nomic-embed-text` is sufficient and keeps the system offline-friendly. Cloud embeddings remain easy to swap in behind an `Embedder` interface.
 
+**V1 AI runtime contract:**
+
+- Embeddings and qualitative adjudication should each live behind explicit provider interfaces.
+- The embedder must report its vector dimension, and the rebuilt index must validate that a single rebuild uses one consistent dimension end to end.
+- Tests and CI should use a deterministic fixture provider rather than a live model dependency.
+- If no qualitative analysis provider is configured, deterministic commands such as config validation, ingestion, indexing, and `search_specs` should still work, while AI-backed tools should fail fast with actionable dependency-unavailable errors.
+- V1 should prefer local providers where practical, but must not hardcode one provider into the canonical model or storage contract.
+
+V1 runtime configuration should be explicit in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`:
+
+| Field | Embedder | Qualitative analysis | Notes |
+|---|---|---|---|
+| `provider` | required | required | V1 supports `fixture` and `openai_compatible`; qualitative analysis also allows `disabled` |
+| `model` | required | required unless `provider = "disabled"` | Provider-specific model identifier |
+| `endpoint` | optional | optional | Required for local or self-hosted OpenAI-compatible endpoints |
+| `api_key_env` | optional | optional | Names an environment variable; secrets never live in repo config |
+| `timeout_ms` | required | required | Per-request deadline |
+| `max_retries` | required | required | Retries only for transient transport or provider failures |
+
+Provider responsibilities:
+
+- `Embedder`: report `dimension`, embed batches of text, and classify retryable vs terminal failures.
+- `QualitativeAnalyzer`: accept structured prompts plus a response-schema identifier, return machine-readable JSON, and classify retryable vs terminal failures.
+
+Credential and local-model rules:
+
+- Local deployments should use the same config shape by pointing `endpoint` at a local OpenAI-compatible server.
+- Remote deployments may omit `endpoint` when the provider supplies a default base URL.
+- If `api_key_env` is set but the environment variable is missing, the provider is considered unavailable rather than partially configured.
+
+Degraded behavior rules:
+
+- If the embedder is unavailable, commands that need fresh embeddings, including `index`, `search_specs`, and draft-spec overlap checks, must fail with `dependency_unavailable`.
+- If the qualitative provider is `disabled` or unavailable, deterministic stages may still run internally, but commands that require qualitative adjudication must fail with `dependency_unavailable` rather than returning half-complete analysis.
+- The `fixture` provider mode must be deterministic, require no network access, and be the default mode for CI and local tests.
+
+Retry and timeout rules:
+
+- `timeout_ms` applies per provider request, not to an entire multi-step CLI command.
+- Providers may retry only idempotent transient failures such as timeouts, `429`, or `5xx` responses.
+- Validation, authentication, and schema-mismatch failures are terminal and must not be retried.
+
 **Chunking strategy:** Use `goldmark` for Markdown and split on H2 headings by default. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
 
 **Filtered vector queries:** `chunks_vec` should store only vectors. Metadata filters stay in canonical tables: vector search returns candidate `chunk_id`s, then the query joins back through `chunks` and `artifacts` to filter by `kind`, `status`, `domain`, or other metadata before ranking the final candidate set.
@@ -338,7 +412,7 @@ Step 6: Atomic Swap
 
 ### 4. Storage Layer — Unified SQLite Index
 
-All indexed state lives in a **single SQLite database** (`pituitary.db`) using `sqlite-vec` for vector operations. At this scale, SQLite is enough, keeps deployment simple, and makes full atomic rebuilds straightforward.
+All indexed state lives in a **single SQLite database** (`pituitary.db`) using `sqlite-vec` for vector operations. At this scale, SQLite is enough, keeps deployment simple, and makes full atomic rebuilds straightforward. In the current Go implementation, `vec0` is wired through `github.com/mattn/go-sqlite3` plus `github.com/asg017/sqlite-vec-go-bindings/cgo`, so local and CI builds need a CGO-capable C toolchain.
 
 #### Schema
 
@@ -350,7 +424,7 @@ CREATE TABLE artifacts (
   title         TEXT,
   status        TEXT,               -- NULL for docs
   domain        TEXT,
-  source_ref    TEXT NOT NULL,      -- file path, URL, DB key, etc.
+  source_ref    TEXT NOT NULL,      -- provenance such as "file://docs/guides/api-rate-limits.md"
   adapter       TEXT NOT NULL,      -- "filesystem", "pdf", "database", ...
   body_format   TEXT NOT NULL,      -- "markdown", "plaintext", ...
   content_hash  TEXT NOT NULL,
@@ -369,7 +443,7 @@ CREATE TABLE chunks (
 -- sqlite-vec virtual table for similarity search
 CREATE VIRTUAL TABLE chunks_vec USING vec0(
   chunk_id INTEGER PRIMARY KEY,
-  embedding float[768]
+  embedding float[EMBEDDING_DIM]
 );
 
 -- Canonical graph edges
@@ -439,6 +513,70 @@ All tools follow the same pattern:
 
 This keeps retrieval reproducible, testable, and cheap.
 
+All shipped commands should also share one JSON envelope and one issue-item shape:
+
+```json
+{
+  "request": { "...": "normalized tool input" },
+  "result": { "...": "tool-specific payload" },
+  "warnings": [
+    {
+      "code": "string",
+      "message": "human-readable warning",
+      "path": "optional/workspace-relative/path"
+    }
+  ],
+  "errors": [
+    {
+      "code": "string",
+      "message": "human-readable error",
+      "path": "optional/workspace-relative/path"
+    }
+  ]
+}
+```
+
+Contract rules:
+
+- `request` echoes the normalized input after CLI parsing, using canonical `ref` values rather than `source_ref`.
+- `result` is command-specific and should be `null` when a command exits with errors before producing a domain result.
+- `warnings` and `errors` use the same object shape. `path` is optional and should stay workspace-relative when present.
+- Common `errors[].code` values in v1 are `validation_error`, `config_error`, `not_found`, `dependency_unavailable`, and `internal_error`.
+
+CLI exit codes should stay simple:
+
+- `0` success, including success-with-warnings
+- `2` validation or configuration error
+- `3` dependency unavailable, such as a missing analysis provider
+
+#### V1 JSON command contracts
+
+- `index` (`pituitary index --rebuild`)
+  - Request: `{ "rebuild": true }`
+  - Result: `{ "workspace_root": ".", "index_path": ".pituitary/pituitary.db", "artifact_counts": { "spec": N, "doc": N }, "chunk_count": N, "edge_count": N }`
+- `search_specs` (`pituitary search-specs`)
+  - Request: `{ "query": "...", "filters": { "domain": "...", "statuses": ["accepted"] }, "limit": 10 }`
+  - Result: `{ "matches": [{ "ref": "SPEC-042", "title": "...", "section_heading": "...", "score": 0.0, "excerpt": "...", "source_ref": "file://..." }] }`
+- `check_overlap` (`pituitary check-overlap`)
+  - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
+  - Result: `{ "candidate": { "ref": "SPEC-042", "title": "..." }, "overlaps": [{ "ref": "SPEC-008", "score": 0.0, "overlap_degree": "high", "relationship": "extends" }], "recommendation": "proceed_with_supersedes" }`
+- `compare_specs` (`pituitary compare-specs`)
+  - Request: `{ "spec_refs": ["SPEC-008", "SPEC-042"] }`
+  - Result: `{ "spec_refs": ["SPEC-008", "SPEC-042"], "comparison": { "shared_scope": [...], "differences": [...], "tradeoffs": [...], "recommendation": "..." } }`
+- `analyze_impact` (`pituitary analyze-impact`)
+  - Request: `{ "spec_ref": "SPEC-042", "change_type": "accepted" | "modified" | "deprecated" }`
+  - Result: `{ "spec_ref": "SPEC-042", "change_type": "accepted", "affected_specs": [...], "affected_refs": [...], "affected_docs": [...] }`
+- `check_doc_drift` (`pituitary check-doc-drift`)
+  - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
+  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [...] }`
+- `review_spec` (`pituitary review-spec`)
+  - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
+  - Result: `{ "spec_ref": "SPEC-042", "overlap": { ... }, "comparison": { ... } | null, "impact": { ... }, "doc_drift": { ... } }`
+
+The shared `errors[]` shape above applies to every shipped command. Path-specific validation errors should use `code = "validation_error"` or `code = "config_error"` with the offending workspace-relative path.
+
+`search_specs.limit` defaults to `10` when omitted and must stay within `1..50` in v1 so retrieval work stays bounded.
+
 #### V1 tool matrix
 
 | Tool | First shipping slice | Notes |
@@ -469,6 +607,7 @@ Process:
   3. Query chunks_vec for candidate chunk_ids
   4. Join through chunks + artifacts to keep kind = "spec"
      and status != "deprecated"
+     while still allowing `superseded` specs as historical candidates
   5. Group by artifact_ref and rank by similarity
 
   Phase 2 — adjudication
@@ -521,7 +660,7 @@ Output:
 
 ```text
 Input:
-  { code_ref: "file://src/api/middleware/ratelimiter.go" }
+  { code_ref: "code://src/api/middleware/ratelimiter.go" }
   OR { diff_text: "..." }
 
 Process:
@@ -547,16 +686,19 @@ Output:
 
 ```text
 Input:
-  { doc_ref: "file://docs/guides/api-rate-limits.md" }
+  { doc_ref: "doc://guides/api-rate-limits" }
+  OR { doc_refs: ["doc://guides/api-rate-limits", "doc://runbooks/rate-limit-rollout"] }
   OR { scope: "all" }
 
 Output:
   drift_items[]
 ```
 
+Exactly one selector must be present in v1: `doc_ref`, `doc_refs`, or `scope`. The only valid `scope` value is `"all"`.
+
 #### Tool: `search_specs`
 
-**Purpose:** general semantic search across accepted or draft specs.
+**Purpose:** general semantic search across active specs by default.
 
 ```text
 Input:
@@ -566,6 +708,8 @@ Input:
 Output:
   ranked spec sections with excerpts
 ```
+
+Unless the caller explicitly asks otherwise, `search_specs` should search `draft`, `review`, and `accepted` specs and exclude `superseded` and `deprecated` specs.
 
 #### Tool: `review_spec`
 
@@ -580,22 +724,22 @@ Process:
   1. Run check_overlap
   2. If overlaps exist, run compare_specs
   3. Run analyze_impact
-  4. Run check_doc_drift scoped to affected docs
+  4. Run check_doc_drift with `doc_refs` from `analyze_impact.affected_docs`
   5. Return one combined report
 ```
 
 This tool adds convenience, not a new architectural layer.
+It should not silently widen doc drift to `{ scope: "all" }` in v1.
 
 ---
 
 ### 6. Transport Surfaces
 
-Pituitary core should expose the same functionality through two first-party surfaces:
+Pituitary core should expose the required v1 functionality through one first-party surface:
 
 - **CLI** for local automation and scripts
-- **MCP server** for editor and agent integration
 
-For the first shipping slice, the CLI is the required interface. The MCP server should be a thin wrapper over the same analysis packages and should not introduce separate logic, state, or workflows. If schedule pressure exists, do not block the first ship on MCP polish.
+After the first shipping slice, Pituitary may add an **MCP server** as a thin wrapper over the same analysis packages. That later transport must not introduce separate logic, state, or workflows.
 
 CLI examples:
 
@@ -607,7 +751,7 @@ pituitary check-doc-drift --scope all --format json
 pituitary review-spec --spec-ref SPEC-042 --format json
 ```
 
-For the first shipping slice, MCP tool names should mirror the shipped analysis tools:
+When MCP is present, its tool names should mirror the shipped analysis tools:
 
 - `check_overlap`
 - `compare_specs`
@@ -615,6 +759,8 @@ For the first shipping slice, MCP tool names should mirror the shipped analysis 
 - `check_doc_drift`
 - `search_specs`
 - `review_spec`
+
+`index` remains a CLI-only operation in this architecture. MCP is a query-and-analysis wrapper over an already-built local workspace index, not a second orchestration surface for rebuilds.
 
 ---
 
@@ -646,7 +792,7 @@ For v1, it is enough to document one example integration flow. It is **not** nec
 
 ---
 
-### 8. MCP/CLI Server Structure (Go)
+### 8. CLI Server Structure (Go) and Later MCP Extension
 
 ```text
 pituitary/
@@ -654,16 +800,16 @@ pituitary/
 ├── go.sum
 ├── main.go
 ├── cmd/
-│   ├── serve.go                 # MCP server mode
 │   ├── index.go                 # rebuild index from configured adapters
 │   ├── check.go                 # invoke core analysis from the CLI
-│   └── report.go                # render JSON / markdown / table output
+│   ├── report.go                # render JSON / markdown / table output
+│   └── serve.go                 # post-v1 MCP server mode
 ├── internal/
-│   ├── mcp/
-│   │   ├── server.go            # MCP server setup and tool registration
-│   │   └── tools.go             # MCP handlers -> core analysis calls
 │   ├── model/
 │   │   └── types.go             # SpecRecord, DocRecord, relation types
+│   ├── mcp/                     # post-v1 MCP transport
+│   │   ├── server.go            # post-v1 MCP setup and tool registration
+│   │   └── tools.go             # post-v1 MCP handlers -> core analysis calls
 │   ├── source/
 │   │   ├── adapter.go           # SourceAdapter interface
 │   │   ├── filesystem.go        # V1 filesystem adapter
@@ -687,24 +833,24 @@ pituitary/
 │   └── rate-limit/
 │       ├── spec.toml
 │       └── body.md
-└── pituitary.json               # MCP manifest
+└── pituitary.json               # optional later MCP manifest
 ```
 
 #### Key Dependency Choices
 
 | Dependency | Purpose | Why |
 |---|---|---|
-| `github.com/mark3labs/mcp-go` | MCP server framework | Mature Go MCP SDK |
-| `github.com/asg017/sqlite-vec-go-bindings` | Vector search | In-process cosine similarity |
-| `modernc.org/sqlite` | SQLite engine | Pure Go, simple deployment |
+| `github.com/mark3labs/mcp-go` | Optional later MCP server framework | Useful once the CLI surface is stable |
+| `github.com/asg017/sqlite-vec-go-bindings` | Vector search | Provides the `vec0` virtual table used by the index |
+| `github.com/mattn/go-sqlite3` | SQLite engine | Reliable `database/sql` driver for the cgo-backed `sqlite-vec` path |
 | `github.com/pelletier/go-toml/v2` | V1 spec metadata parsing | Simpler and safer than YAML for human-edited metadata |
 | `github.com/yuin/goldmark` | Markdown parsing | Strong CommonMark support for spec bodies |
-| `github.com/spf13/cobra` | CLI framework | Straightforward dual CLI/MCP binary |
+| `github.com/spf13/cobra` | CLI framework | Straightforward CLI surface that can host MCP later if needed |
 
 **Why this works well in Go:**
 
 - Single binary distribution
-- Fast startup for on-demand MCP processes
+- Fast startup for the CLI today, with room for an on-demand MCP process later
 - Easy parallel embedding calls during rebuilds
 - Clean interfaces between adapters, index, and analysis
 
@@ -725,6 +871,14 @@ All tools keep the same discipline: retrieval first, LLM judgment second.
 ---
 
 ## Implementation Roadmap
+
+### Workstream 0: Contract Freeze
+
+- Freeze canonical ref, source-ref, and applies-to schemes
+- Freeze status and supersession semantics
+- Freeze JSON request, response, and error envelopes
+- Define embedding and analysis provider contracts with deterministic fixture mode
+- Lock fixture expectations for overlap, impact, and doc drift
 
 ### Workstream 1: Workspace and Ingestion
 
@@ -755,11 +909,12 @@ All tools keep the same discipline: retrieval first, LLM judgment second.
 
 - Ship a JSON-first CLI for every required command
 - Add Markdown rendering for human-readable reports
-- Expose the same operations through MCP if time permits
-- Keep all transport code as a thin layer over the same analysis packages
+- Keep transport code as a thin layer over the same analysis packages
+- Document the seams required for a later MCP wrapper without blocking the first ship
 
 ### Deferred Until After First Ship
 
+- MCP transport
 - `check_compliance`
 - Non-filesystem source adapters
 - CI vendor integrations
@@ -783,6 +938,7 @@ The first shipping slice is done when all of the following are true:
 8. `pituitary review-spec --spec-ref SPEC-XXX --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
 9. All required commands work without GitHub, git metadata, or network-only integrations.
 10. All required commands fail with clear validation errors when a spec bundle is malformed.
+11. All shipped commands follow the documented JSON envelope, and AI-backed commands fail with clear dependency-unavailable errors when no analysis provider is configured.
 
 ---
 

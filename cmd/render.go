@@ -1,0 +1,127 @@
+package cmd
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/dusk-network/pituitary/internal/analysis"
+	"github.com/dusk-network/pituitary/internal/index"
+)
+
+func renderCommandResult(w io.Writer, command string, result any) error {
+	description, ok := commands[command]
+	if !ok {
+		return fmt.Errorf("unknown command %q", command)
+	}
+
+	fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
+
+	switch typed := result.(type) {
+	case *index.RebuildResult:
+		renderIndexResult(w, typed)
+	case *index.SearchSpecResult:
+		renderSearchSpecsResult(w, typed)
+	case *analysis.OverlapResult:
+		renderOverlapResult(w, typed)
+	case *analysis.CompareResult:
+		renderCompareResult(w, typed)
+	case *analysis.AnalyzeImpactResult:
+		renderAnalyzeImpactResult(w, typed)
+	case *analysis.DocDriftResult:
+		renderDocDriftResult(w, typed)
+	case *analysis.ReviewResult:
+		renderReviewResult(w, typed)
+	default:
+		return fmt.Errorf("unsupported result type %T", result)
+	}
+
+	return nil
+}
+
+func renderIndexResult(w io.Writer, result *index.RebuildResult) {
+	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
+	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+}
+
+func renderSearchSpecsResult(w io.Writer, result *index.SearchSpecResult) {
+	if len(result.Matches) == 0 {
+		fmt.Fprintln(w, "no matches")
+		return
+	}
+
+	for i, match := range result.Matches {
+		fmt.Fprintf(w, "%d. %s | %s | %.3f\n", i+1, match.Ref, match.SectionHeading, match.Score)
+		if match.Excerpt != "" {
+			fmt.Fprintln(w, match.Excerpt)
+		}
+		if i < len(result.Matches)-1 {
+			fmt.Fprintln(w)
+		}
+	}
+}
+
+func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {
+	fmt.Fprintf(w, "candidate: %s | %s\n", result.Candidate.Ref, result.Candidate.Title)
+	if len(result.Overlaps) == 0 {
+		fmt.Fprintln(w, "no overlaps")
+		fmt.Fprintf(w, "recommendation: %s\n", result.Recommendation)
+		return
+	}
+	for i, overlap := range result.Overlaps {
+		fmt.Fprintf(w, "%d. %s | %s | %.3f | %s | %s\n", i+1, overlap.Ref, overlap.Title, overlap.Score, overlap.OverlapDegree, overlap.Relationship)
+	}
+	fmt.Fprintf(w, "recommendation: %s\n", result.Recommendation)
+}
+
+func renderCompareResult(w io.Writer, result *analysis.CompareResult) {
+	fmt.Fprintf(w, "specs: %s\n", strings.Join(result.SpecRefs, ", "))
+	fmt.Fprintf(w, "recommendation: %s\n", result.Comparison.Recommendation)
+	for _, tradeoff := range result.Comparison.Tradeoffs {
+		fmt.Fprintf(w, "%s: %s\n", tradeoff.Topic, tradeoff.Summary)
+	}
+}
+
+func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult) {
+	fmt.Fprintf(w, "spec: %s | change_type: %s\n", result.SpecRef, result.ChangeType)
+	fmt.Fprintf(w, "affected specs: %d\n", len(result.AffectedSpecs))
+	fmt.Fprintf(w, "affected refs: %d\n", len(result.AffectedRefs))
+	fmt.Fprintf(w, "affected docs: %d\n", len(result.AffectedDocs))
+}
+
+func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
+	if len(result.DriftItems) == 0 {
+		fmt.Fprintln(w, "no drift items")
+		return
+	}
+	for i, item := range result.DriftItems {
+		fmt.Fprintf(w, "%d. %s | %s | findings: %d\n", i+1, item.DocRef, item.Title, len(item.Findings))
+	}
+}
+
+func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
+	fmt.Fprintf(w, "spec: %s\n", result.SpecRef)
+
+	if result.Overlap != nil {
+		fmt.Fprintf(w, "overlaps: %d | recommendation: %s\n", len(result.Overlap.Overlaps), result.Overlap.Recommendation)
+		if len(result.Overlap.Overlaps) > 0 {
+			top := result.Overlap.Overlaps[0]
+			fmt.Fprintf(w, "top overlap: %s | %s | %.3f\n", top.Ref, top.Relationship, top.Score)
+		}
+	}
+	if result.Comparison != nil {
+		fmt.Fprintf(w, "comparison: %s\n", result.Comparison.Comparison.Recommendation)
+	} else {
+		fmt.Fprintln(w, "comparison: none")
+	}
+	if result.Impact != nil {
+		fmt.Fprintf(w, "impact: %d spec(s), %d ref(s), %d doc(s)\n", len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
+	} else {
+		fmt.Fprintln(w, "impact: none")
+	}
+	if result.DocDrift != nil {
+		fmt.Fprintf(w, "doc drift: %d item(s)\n", len(result.DocDrift.DriftItems))
+	} else {
+		fmt.Fprintln(w, "doc drift: none")
+	}
+}
