@@ -1,2 +1,2 @@
-// Package mcp contains the optional post-v1 MCP transport.
+// Package mcp contains the optional MCP transport.
 package mcp

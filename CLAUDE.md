@@ -1,4 +1,4 @@
-<!-- GENERATED: source=AGENTS.md format-version=1 sha256=a57e5972882e4d713f35cce0665c22e1cb39f6517382fb4ddfac5e6fc1ebf819 -->
+<!-- GENERATED: source=AGENTS.md format-version=1 sha256=55962d79a17214d157357b5e1d77c003372767ae221b7d21255895a5340e26ba -->
 
 > Generated from `AGENTS.md`. Edit `AGENTS.md`, then rerun `scripts/sync-ai-docs.sh --write`.
 > If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
@@ -10,7 +10,7 @@
 
 ## Project
 
-Pituitary is a spec-management tool for keeping specifications and documentation aligned during the first shipping slice. The current repo is an early bootstrap focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, and a CLI-first interface.
+Pituitary is a spec-management tool for keeping specifications and documentation aligned during the first shipping slice. The current repo is an early bootstrap focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, a CLI-first interface, an optional MCP wrapper, and repo CI validation.
 
 ## Coding Standards
 
@@ -21,8 +21,9 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 
 ## Architecture Rules
 
-- First ship is CLI-only. Do not add or depend on MCP in the v1 path.
+- First ship is CLI-first. Keep the CLI as the required transport and do not make core behavior depend on MCP, even though the repo also ships an optional MCP wrapper.
 - Scope is local filesystem only: `spec.toml` + `body.md` bundles, Markdown docs, SQLite, and `sqlite-vec`.
+- The repo ships CI for fmt, readiness, test, and vet validation, but GitHub- or vendor-specific reporting integrations remain out of scope.
 - Spec and doc analysis come before code-compliance features.
 - Canonical contract decisions live in `ARCHITECTURE.md`; update docs and backlog together when those contracts change.
 

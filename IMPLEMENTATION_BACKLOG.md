@@ -14,7 +14,8 @@ Ship a local, filesystem-only Pituitary that can index Markdown-based specs and 
 - `review_spec`
 
 `check_compliance` is explicitly deferred until after the first ship.
-`MCP` is not part of the first-ship acceptance criteria, even though a post-v1 wrapper may be shipped later.
+The minimum first-ship contract remains CLI-first, but the repo also ships an optional MCP wrapper over the same analysis packages.
+The repo also ships CI for fmt, readiness, test, and vet validation, while GitHub- or vendor-specific reporting integrations remain deferred.
 
 ## Milestone 0: Contract Freeze
 
@@ -117,12 +118,16 @@ Definition of done:
 - every required command supports `--format json`
 - `review_spec` returns one composed JSON report suitable for automation
 
-## Deferred Until After First Ship
+## Shipped Alongside the Minimum First Ship
 
 - [x] MCP transport
+- [x] Repository CI workflow for fmt, readiness, test, and vet validation
+
+## Still Deferred
+
 - [ ] `check_compliance`
 - [ ] non-filesystem adapters
-- [ ] GitHub or CI vendor integrations
+- [ ] GitHub or CI vendor integrations beyond the shipped repo CI workflow
 - [ ] incremental indexing
 - [ ] stored code-summary embeddings
 

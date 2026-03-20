@@ -8,8 +8,9 @@ The current repository is the bootstrap for the first shipping slice defined in 
 - `spec.toml` + `body.md` spec bundles
 - Markdown docs
 - SQLite + `sqlite-vec`
-- CLI-only first ship
-- MCP is not required for the first ship; the optional post-v1 wrapper runs through `pituitary serve`
+- CLI-first required transport
+- the repo also ships an optional MCP wrapper through `pituitary serve`
+- the repo also ships CI validation, but not GitHub-specific review or reporting integrations
 - spec/doc analysis before code compliance
 
 ## Repository Layout
@@ -53,7 +54,7 @@ go run . check-doc-drift --scope all --format json
 go run . review-spec --spec-ref SPEC-042 --format json
 ```
 
-## Post-V1 MCP
+## Optional MCP
 
 Pituitary also exposes an optional stdio MCP server through:
 
@@ -66,7 +67,7 @@ The MCP transport is intentionally thin:
 - it exposes only `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, and `review_spec`
 - it reuses the same shared analysis and retrieval packages as the CLI
 - it does not replace `pituitary index --rebuild`, which remains a CLI-only operation
-- it is not required for the first-shipping-slice definition in `ARCHITECTURE.md`
+- it ships in this repo as an optional wrapper rather than a separate product path
 
 ## Frozen V1 Contracts
 
@@ -104,3 +105,5 @@ make ci
 The `Makefile` sets `GOCACHE` to a repo-local `.cache/` directory so build and test commands do not depend on a user-global cache path.
 
 Local builds also require a CGO-capable C toolchain because the current `sqlite-vec` integration is wired through `github.com/mattn/go-sqlite3` plus `github.com/asg017/sqlite-vec-go-bindings/cgo`. `make smoke-sqlite-vec` is the explicit readiness probe for that runtime path, and CI runs with `CGO_ENABLED=1`.
+
+The repository also ships a GitHub Actions CI job that runs the same fmt, readiness, test, and vet workflow defined in `Makefile`.

@@ -5,7 +5,7 @@
 
 ## Project
 
-Pituitary is a spec-management tool for keeping specifications and documentation aligned during the first shipping slice. The current repo is an early bootstrap focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, and a CLI-first interface.
+Pituitary is a spec-management tool for keeping specifications and documentation aligned during the first shipping slice. The current repo is an early bootstrap focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, a CLI-first interface, an optional MCP wrapper, and repo CI validation.
 
 ## Coding Standards
 
@@ -16,8 +16,9 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 
 ## Architecture Rules
 
-- First ship is CLI-only. Do not add or depend on MCP in the v1 path.
+- First ship is CLI-first. Keep the CLI as the required transport and do not make core behavior depend on MCP, even though the repo also ships an optional MCP wrapper.
 - Scope is local filesystem only: `spec.toml` + `body.md` bundles, Markdown docs, SQLite, and `sqlite-vec`.
+- The repo ships CI for fmt, readiness, test, and vet validation, but GitHub- or vendor-specific reporting integrations remain out of scope.
 - Spec and doc analysis come before code-compliance features.
 - Canonical contract decisions live in `ARCHITECTURE.md`; update docs and backlog together when those contracts change.
 

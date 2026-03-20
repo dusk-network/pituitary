@@ -13,8 +13,9 @@ import (
 )
 
 var sqliteDriverOnce sync.Once
-var sqliteReadyOnce sync.Once
-var sqliteReadyErr error
+var sqliteReadyMu sync.Mutex
+var sqliteReady bool
+var sqliteReadinessProbe = probeSQLiteReadyContext
 
 const sqliteReadinessDSN = "file:pituitary-sqlite-ready?mode=memory&cache=shared"
 
@@ -92,12 +93,16 @@ func CheckSQLiteReadyContext(ctx context.Context) error {
 		return err
 	}
 
-	sqliteReadyOnce.Do(func() {
-		sqliteReadyErr = probeSQLiteReady()
-	})
-	if sqliteReadyErr != nil {
-		return sqliteReadyErr
+	sqliteReadyMu.Lock()
+	defer sqliteReadyMu.Unlock()
+
+	if sqliteReady {
+		return ctx.Err()
 	}
+	if err := sqliteReadinessProbe(ctx); err != nil {
+		return err
+	}
+	sqliteReady = true
 	return ctx.Err()
 }
 
@@ -108,7 +113,7 @@ func configureDB(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func probeSQLiteReady() error {
+func probeSQLiteReadyContext(ctx context.Context) error {
 	ensureSQLiteDriver()
 
 	db, err := sql.Open("sqlite3", sqliteReadinessDSN)
@@ -117,16 +122,16 @@ func probeSQLiteReady() error {
 	}
 	defer db.Close()
 
-	if err := configureDB(context.Background(), db); err != nil {
+	if err := configureDB(ctx, db); err != nil {
 		return fmt.Errorf("configure sqlite readiness probe: %w", err)
 	}
-	if _, err := db.Exec(`CREATE VIRTUAL TABLE pituitary_vec_probe USING vec0(
+	if _, err := db.ExecContext(ctx, `CREATE VIRTUAL TABLE pituitary_vec_probe USING vec0(
 chunk_id integer primary key,
 embedding float[8] distance_metric=cosine
 )`); err != nil {
 		return fmt.Errorf("initialize sqlite-vec extension: %w", err)
 	}
-	if _, err := db.Exec(`DROP TABLE pituitary_vec_probe`); err != nil {
+	if _, err := db.ExecContext(ctx, `DROP TABLE pituitary_vec_probe`); err != nil {
 		return fmt.Errorf("drop sqlite-vec readiness probe: %w", err)
 	}
 	return nil

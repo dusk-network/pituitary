@@ -24,7 +24,7 @@ Pituitary core is responsible for:
 - Normalizing source material into canonical spec and document records
 - Building a searchable index plus an explicit dependency graph
 - Running overlap, comparison, impact, compliance, and doc-drift analysis
-- Exposing those capabilities through a stable CLI and later thin programmatic transports such as MCP
+- Exposing those capabilities through a stable CLI and thin programmatic transports such as MCP
 
 Pituitary core is **not** responsible for:
 
@@ -58,13 +58,19 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 
 ### Explicitly out of scope for the first ship
 
-- GitHub Actions, PR comments, and vendor-specific CI flows
-- MCP server transport
+- GitHub PR comments and vendor-specific CI or reporting flows
 - PDF ingestion
 - Database-backed source adapters
 - Incremental index updates
 - Stored code-summary embeddings
 - Code compliance checks against diffs or source files
+
+### Also shipped in this repo during v1
+
+- An optional MCP server transport that wraps the same analysis packages as the CLI
+- A repository CI workflow that runs fmt, readiness, test, and vet validation
+
+These are shipped alongside the first slice, but only the CLI is required for first-ship completeness. The CI job is delivery plumbing, not a GitHub-specific product integration surface.
 
 ### Workspace configuration
 
@@ -152,9 +158,10 @@ This keeps the first ship explicit and easy to reason about. No auto-discovery, 
 ┌──────────────────────────────────────────────────────────────┐
 │                     Transport / Extensions                    │
 │                                                              │
-│  V1 transport: CLI                                            │
-│  Later thin transport: MCP                                    │
-│  Later integrations: CI, git hooks, PR comments, editors     │
+│  V1 required transport: CLI                                   │
+│  V1 optional wrapper: MCP                                     │
+│  Shipped repo validation: CI                                  │
+│  Later integrations: git hooks, PR comments, editors         │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -404,7 +411,7 @@ Retry and timeout rules:
 - Providers may retry only idempotent transient failures such as timeouts, `429`, or `5xx` responses.
 - Validation, authentication, and schema-mismatch failures are terminal and must not be retried.
 
-**Chunking strategy:** Use `goldmark` for Markdown and split on H2 headings by default. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
+**Chunking strategy:** The current implementation uses a lightweight internal Markdown scanner that splits on ATX headings, preserves the nested heading path in each section title, and falls back to one title-scoped chunk when a document has no headings. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
 
 **Filtered vector queries:** `chunks_vec` should store only vectors. Metadata filters stay in canonical tables: vector search returns candidate `chunk_id`s, then the query joins back through `chunks` and `artifacts` to filter by `kind`, `status`, `domain`, or other metadata before ranking the final candidate set.
 
@@ -735,11 +742,12 @@ It should not silently widen doc drift to `{ scope: "all" }` in v1.
 
 ### 6. Transport Surfaces
 
-Pituitary core should expose the required v1 functionality through one first-party surface:
+Pituitary core ships two first-party surfaces in this repo:
 
-- **CLI** for local automation and scripts
+- **CLI** for local automation and scripts, and the required transport for v1 completeness
+- **MCP server** as an optional thin wrapper over the same analysis packages
 
-After the first shipping slice, Pituitary may add an **MCP server** as a thin wrapper over the same analysis packages. That later transport must not introduce separate logic, state, or workflows.
+MCP must not introduce separate logic, state, or workflows. `index` remains CLI-only.
 
 CLI examples:
 
@@ -788,11 +796,11 @@ Not:
 GitHub workflow logic -> buried inside storage or analysis code
 ```
 
-For v1, it is enough to document one example integration flow. It is **not** necessary to make GitHub Actions part of the architecture itself.
+The repo may ship a CI job that runs the checked-in `make ci` flow, but GitHub-specific review, commenting, and reporting behavior still lives outside the core architecture.
 
 ---
 
-### 8. CLI Server Structure (Go) and Later MCP Extension
+### 8. CLI Server Structure (Go) and Shipped MCP Wrapper
 
 ```text
 pituitary/
@@ -803,13 +811,13 @@ pituitary/
 │   ├── index.go                 # rebuild index from configured adapters
 │   ├── check.go                 # invoke core analysis from the CLI
 │   ├── report.go                # render JSON / markdown / table output
-│   └── serve.go                 # post-v1 MCP server mode
+│   └── serve.go                 # optional MCP server mode
 ├── internal/
 │   ├── model/
 │   │   └── types.go             # SpecRecord, DocRecord, relation types
-│   ├── mcp/                     # post-v1 MCP transport
-│   │   ├── server.go            # post-v1 MCP setup and tool registration
-│   │   └── tools.go             # post-v1 MCP handlers -> core analysis calls
+│   ├── mcp/                     # optional MCP transport
+│   │   ├── server.go            # MCP setup and tool registration
+│   │   └── tools.go             # MCP handlers -> core analysis calls
 │   ├── source/
 │   │   ├── adapter.go           # SourceAdapter interface
 │   │   ├── filesystem.go        # V1 filesystem adapter
@@ -836,16 +844,16 @@ pituitary/
 └── pituitary.json               # optional later MCP manifest
 ```
 
-#### Key Dependency Choices
+#### Key Dependency and Implementation Choices
 
-| Dependency | Purpose | Why |
+| Choice | Purpose | Why |
 |---|---|---|
-| `github.com/mark3labs/mcp-go` | Optional later MCP server framework | Useful once the CLI surface is stable |
+| `github.com/mark3labs/mcp-go` | Optional MCP server framework | Keeps the shipped MCP wrapper thin over the same analysis packages |
 | `github.com/asg017/sqlite-vec-go-bindings` | Vector search | Provides the `vec0` virtual table used by the index |
 | `github.com/mattn/go-sqlite3` | SQLite engine | Reliable `database/sql` driver for the cgo-backed `sqlite-vec` path |
-| `github.com/pelletier/go-toml/v2` | V1 spec metadata parsing | Simpler and safer than YAML for human-edited metadata |
-| `github.com/yuin/goldmark` | Markdown parsing | Strong CommonMark support for spec bodies |
-| `github.com/spf13/cobra` | CLI framework | Straightforward CLI surface that can host MCP later if needed |
+| Go standard library `flag` package | CLI parsing | The current command surface is small enough that stdlib flags keep startup and dependencies minimal |
+| Internal restricted TOML parsers in `internal/config` and `internal/source` | `pituitary.toml` and `spec.toml` parsing | The bootstrap only needs a narrow validated TOML subset, so the parser stays internal instead of adding a TOML dependency |
+| Internal heading-aware Markdown chunker in `internal/chunk` | Markdown sectioning | Retrieval only needs ATX heading splits plus title-scoped fallback chunks, not a full Markdown AST |
 
 **Why this works well in Go:**
 
@@ -910,15 +918,13 @@ All tools keep the same discipline: retrieval first, LLM judgment second.
 - Ship a JSON-first CLI for every required command
 - Add Markdown rendering for human-readable reports
 - Keep transport code as a thin layer over the same analysis packages
-- Document the seams required for a later MCP wrapper without blocking the first ship
+- Keep the shipped MCP wrapper thin and aligned with CLI behavior without blocking the first ship
 
 ### Deferred Until After First Ship
 
-- MCP transport
 - `check_compliance`
 - Non-filesystem source adapters
-- CI vendor integrations
-- GitHub-specific flows
+- GitHub-specific flows and vendor-specific CI/reporting integrations
 - Incremental indexing
 - Stored code embeddings or code-summary corpora
 

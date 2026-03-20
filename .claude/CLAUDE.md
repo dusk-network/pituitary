@@ -1,4 +1,4 @@
-<!-- GENERATED: source=AGENTS.md format-version=1 sha256=7ae1f471bb48f7f964d80a8ba99c2d863a4be56dfafa4916713f7bd0ffbc09bd -->
+<!-- GENERATED: source=AGENTS.md format-version=1 sha256=55962d79a17214d157357b5e1d77c003372767ae221b7d21255895a5340e26ba -->
 
 # CLAUDE.md
 
