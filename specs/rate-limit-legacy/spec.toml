@@ -1,0 +1,12 @@
+id = "SPEC-008"
+title = "Legacy Rate Limiting for Public API Endpoints"
+status = "accepted"
+domain = "api"
+authors = ["emanuele"]
+tags = ["rate-limiting", "api", "legacy"]
+body = "body.md"
+
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+]

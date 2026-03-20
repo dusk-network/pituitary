@@ -1,0 +1,125 @@
+# Pituitary First-Ship Backlog
+
+This backlog is derived from the first-shipping-slice definition in `ARCHITECTURE.md`.
+
+## Goal
+
+Ship a local, filesystem-only Pituitary that can index Markdown-based specs and docs, build a consistent SQLite index, and answer the core spec-management questions:
+
+- `search_specs`
+- `check_overlap`
+- `compare_specs`
+- `analyze_impact`
+- `check_doc_drift`
+- `review_spec`
+
+`check_compliance` is explicitly deferred until after the first ship.
+
+## Milestone 1: Workspace and Config
+
+- [ ] Parse `pituitary.toml`
+- [ ] Resolve workspace root relative to the config file
+- [ ] Validate `workspace.index_path`
+- [ ] Validate configured `sources`
+- [ ] Produce actionable config errors for unknown adapters or missing paths
+
+Definition of done:
+
+- `pituitary index --rebuild` fails fast on invalid config with human-readable errors
+- relative paths in `pituitary.toml` resolve consistently
+
+## Milestone 2: Source Adapters
+
+- [ ] Implement `filesystem` adapter for `spec_bundle`
+- [ ] Require exactly one `spec.toml` and one referenced body file per spec bundle
+- [ ] Implement `filesystem` adapter for `markdown_docs`
+- [ ] Normalize spec bundles into canonical artifact records
+- [ ] Normalize docs into canonical artifact records
+- [ ] Emit stable `source_ref` values and content hashes
+
+Definition of done:
+
+- the current fixture workspace indexes at least 3 specs and 2 docs
+- malformed spec bundles fail with a clear path-specific error
+
+## Milestone 3: Index and Rebuild
+
+- [ ] Create SQLite schema for `artifacts`, `chunks`, `chunks_vec`, and `edges`
+- [ ] Add secondary indexes for filtered retrieval and graph traversal
+- [ ] Implement full rebuild into a staging DB
+- [ ] Run integrity checks before swap
+- [ ] Atomically swap staging DB into the configured index path
+- [ ] Open a fresh read-only DB handle per request or implement generation-based reload
+
+Definition of done:
+
+- `pituitary index --rebuild` produces a complete index from the fixture workspace
+- a failed rebuild never corrupts the last good index
+
+## Milestone 4: Chunking and Retrieval
+
+- [ ] Chunk Markdown by heading-aware sections
+- [ ] Generate embeddings for every spec/doc chunk
+- [ ] Insert chunk vectors into `chunks_vec`
+- [ ] Implement vector retrieval as `chunks_vec -> chunks -> artifacts`
+- [ ] Support filtering by `kind`, `status`, and `domain`
+- [ ] Ship `search_specs` as the first end-to-end query
+
+Definition of done:
+
+- `pituitary search-specs --query "rate limiting" --format json` returns ranked sections with stable artifact refs
+- filtered vector queries do not require denormalized metadata in `chunks_vec`
+
+## Milestone 5: Core Spec Analysis
+
+- [ ] Implement `check_overlap`
+- [ ] Implement `compare_specs`
+- [ ] Implement `analyze_impact`
+- [ ] Implement `check_doc_drift`
+- [ ] Implement `review_spec` as a composition layer over the other tools
+
+Definition of done:
+
+- known overlap between `SPEC-008` and `SPEC-042` is detected
+- `SPEC-055` is reported as impacted by changes to `SPEC-042`
+- the outdated API guide is reported as drifting from `SPEC-042`
+
+## Milestone 6: CLI and Output
+
+- [ ] Add a JSON-first CLI contract for every shipped command
+- [ ] Add Markdown rendering for human-readable output
+- [ ] Keep CLI logic thin over shared analysis packages
+- [ ] Optionally add MCP if it does not delay the first ship
+
+Definition of done:
+
+- every required command supports `--format json`
+- `review_spec` returns one composed JSON report suitable for automation
+
+## Deferred Until After First Ship
+
+- [ ] `check_compliance`
+- [ ] non-filesystem adapters
+- [ ] GitHub or CI vendor integrations
+- [ ] incremental indexing
+- [ ] stored code-summary embeddings
+
+## Fixture Expectations
+
+The scaffolded fixture workspace is intended to support early end-to-end checks:
+
+- `SPEC-008` and `SPEC-042` intentionally overlap
+- `SPEC-042` supersedes `SPEC-008`
+- `SPEC-055` depends on `SPEC-042`
+- `docs/guides/api-rate-limits.md` intentionally contains stale values
+- `docs/runbooks/rate-limit-rollout.md` is aligned with the newer design
+
+## Suggested Build Order
+
+1. Make `pituitary index --rebuild` work on the fixture workspace.
+2. Ship `search_specs`.
+3. Ship `check_overlap`.
+4. Ship `compare_specs`.
+5. Ship `analyze_impact`.
+6. Ship `check_doc_drift`.
+7. Ship `review_spec`.

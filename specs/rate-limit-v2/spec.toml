@@ -1,0 +1,13 @@
+id = "SPEC-042"
+title = "Per-Tenant Rate Limiting for Public API Endpoints"
+status = "accepted"
+domain = "api"
+authors = ["emanuele"]
+tags = ["rate-limiting", "api", "multi-tenant", "security"]
+body = "body.md"
+
+supersedes = ["SPEC-008"]
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+]

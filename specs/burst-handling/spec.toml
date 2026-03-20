@@ -1,0 +1,13 @@
+id = "SPEC-055"
+title = "Burst Handling for Public API Rate Limits"
+status = "accepted"
+domain = "api"
+authors = ["emanuele"]
+tags = ["rate-limiting", "api", "burst"]
+body = "body.md"
+
+depends_on = ["SPEC-042"]
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+]

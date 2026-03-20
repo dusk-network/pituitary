@@ -1,0 +1,5 @@
+.DS_Store
+.pituitary/
+bin/
+dist/
+coverage.out
