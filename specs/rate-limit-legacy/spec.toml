@@ -1,6 +1,6 @@
 id = "SPEC-008"
 title = "Legacy Rate Limiting for Public API Endpoints"
-status = "accepted"
+status = "superseded"
 domain = "api"
 authors = ["emanuele"]
 tags = ["rate-limiting", "api", "legacy"]

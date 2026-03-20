@@ -1,0 +1,11 @@
+id = "SPEC-999"
+title = "Malformed Missing Body Fixture"
+status = "draft"
+domain = "test"
+authors = ["pituitary"]
+tags = ["invalid", "fixture"]
+body = "body.md"
+
+applies_to = [
+  "code://test/fixture/missing-body.go",
+]
