@@ -11,6 +11,7 @@ import (
 var commands = map[string]string{
 	"index":           "rebuild the local Pituitary index",
 	"status":          "show current index status",
+	"version":         "show Pituitary and Go runtime versions",
 	"preview-sources": "show which files each source will index",
 	"search-specs":    "search spec sections semantically",
 	"check-overlap":   "find overlapping specs",
@@ -62,6 +63,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if name == "status" {
 		return runStatusContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "version" {
+		return runVersionContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "preview-sources" {
 		return runPreviewSourcesContext(ctx, remainingArgs[1:], stdout, stderr)

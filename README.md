@@ -148,6 +148,7 @@ Every command supports `--format json` for machine-readable output.
 |---|---|
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
+| `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
 | `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |

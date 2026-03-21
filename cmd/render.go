@@ -23,6 +23,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderIndexResult(w, typed)
 	case *statusResult:
 		renderStatusResult(w, typed)
+	case *versionResult:
+		renderVersionResult(w, typed)
 	case *source.PreviewResult:
 		renderPreviewSourcesResult(w, typed)
 	case *index.SearchSpecResult:
@@ -60,6 +62,17 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
 	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
 	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
+}
+
+func renderVersionResult(w io.Writer, result *versionResult) {
+	fmt.Fprintf(w, "version: %s\n", result.Version)
+	fmt.Fprintf(w, "go version: %s\n", result.GoVersion)
+	if result.Commit != "" {
+		fmt.Fprintf(w, "commit: %s\n", result.Commit)
+	}
+	if result.BuildDate != "" {
+		fmt.Fprintf(w, "build date: %s\n", result.BuildDate)
+	}
 }
 
 func renderPreviewSourcesResult(w io.Writer, result *source.PreviewResult) {

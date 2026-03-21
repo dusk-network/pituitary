@@ -31,11 +31,13 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "index" || name == "status" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "index" {
 					args = []string{name, "--rebuild"}
 				} else if name == "status" {
+					args = []string{name}
+				} else if name == "version" {
 					args = []string{name}
 				} else if name == "preview-sources" {
 					args = []string{name}
