@@ -181,11 +181,31 @@ func parse(file *os.File) (rawConfig, error) {
 	var section string
 	var currentSource *rawSource
 	var activeSourceArrayKey string
+	var activeSourceArrayLine int
 
 	scanner := bufio.NewScanner(file)
 	for lineNo := 1; scanner.Scan(); lineNo++ {
 		line := strings.TrimSpace(stripComment(scanner.Text()))
 		if line == "" {
+			continue
+		}
+
+		if activeSourceArrayKey != "" {
+			if line == "]" {
+				activeSourceArrayKey = ""
+				activeSourceArrayLine = 0
+				continue
+			}
+			if currentSource == nil {
+				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
+			}
+			values, err := parseQuotedValues(line)
+			if err != nil {
+				return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, activeSourceArrayKey, err)
+			}
+			if err := assignSourceArrayField(currentSource, activeSourceArrayKey, values); err != nil {
+				return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
+			}
 			continue
 		}
 
@@ -198,7 +218,6 @@ func parse(file *os.File) (rawConfig, error) {
 			cfg.sources = append(cfg.sources, rawSource{})
 			currentSource = &cfg.sources[len(cfg.sources)-1]
 			section = name
-			activeSourceArrayKey = ""
 			continue
 		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
 			name := strings.TrimSpace(line[1 : len(line)-1])
@@ -206,27 +225,8 @@ func parse(file *os.File) (rawConfig, error) {
 			case "workspace", "runtime.embedder", "runtime.analysis":
 				section = name
 				currentSource = nil
-				activeSourceArrayKey = ""
 			default:
 				return rawConfig{}, fmt.Errorf("line %d: unsupported section %q", lineNo, name)
-			}
-			continue
-		}
-
-		if activeSourceArrayKey != "" {
-			if line == "]" {
-				activeSourceArrayKey = ""
-				continue
-			}
-			if currentSource == nil {
-				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
-			}
-			values, err := parseQuotedValues(line)
-			if err != nil {
-				return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, activeSourceArrayKey, err)
-			}
-			if err := assignSourceArrayField(currentSource, activeSourceArrayKey, values); err != nil {
-				return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
 			}
 			continue
 		}
@@ -260,6 +260,7 @@ func parse(file *os.File) (rawConfig, error) {
 					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
 				}
 				activeSourceArrayKey = key
+				activeSourceArrayLine = lineNo
 				if err := assignSourceArrayField(currentSource, key, nil); err != nil {
 					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
 				}
@@ -288,6 +289,9 @@ func parse(file *os.File) (rawConfig, error) {
 
 	if err := scanner.Err(); err != nil {
 		return rawConfig{}, fmt.Errorf("read config: %w", err)
+	}
+	if activeSourceArrayKey != "" {
+		return rawConfig{}, fmt.Errorf("line %d: sources.%s: unterminated array", activeSourceArrayLine, activeSourceArrayKey)
 	}
 	return cfg, nil
 }

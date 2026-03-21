@@ -197,6 +197,36 @@ include = ["["]
 	}
 }
 
+func TestLoadRejectsUnterminatedSourceSelectorArray(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = [
+  "guides/*.md",
+  "runbooks/*.md"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unterminated array error")
+	}
+	if !strings.Contains(err.Error(), `sources.include: unterminated array`) {
+		t.Fatalf("Load() error = %q, want unterminated selector-array detail", err)
+	}
+}
+
 func TestLoadRejectsUnsupportedEmbedderProvider(t *testing.T) {
 	t.Parallel()
 
