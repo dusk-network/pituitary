@@ -22,7 +22,7 @@ The repo also ships CI for fmt, readiness, test, and vet validation, while GitHu
 - [ ] Freeze canonical `ref`, `source_ref`, and `applies_to` schemes
 - [ ] Freeze status and supersession semantics
 - [ ] Define one shared JSON envelope plus per-command request/result shapes for shipped commands
-- [ ] Define the embedding and qualitative-analysis provider contracts, including config shape, env-based credentials, timeout/retry policy, and degraded-mode behavior
+- [x] Freeze the bootstrap runtime contract: `runtime.embedder` supports `fixture`, `runtime.analysis` remains `disabled`, and richer provider-backed runtime work is deferred without changing the config shape
 - [ ] Freeze the targeted `check_doc_drift` scope contract used by `review_spec`
 - [ ] Add a deterministic fixture provider mode for tests and CI
 - [ ] Lock the expected findings for the bootstrap fixture workspace
@@ -32,7 +32,7 @@ Definition of done:
 - the architecture, backlog, README, and fixtures agree on identifier, status, discovery, and output rules
 - every shipped command has a documented JSON request/result shape and shared error object
 - tests and CI can run against the deterministic fixture provider without live model credentials
-- AI-backed commands have explicit dependency-unavailable behavior
+- unsupported runtime providers fail clearly during config validation
 
 ## Milestone 1: Workspace and Config
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
-	"os"
 	"strings"
 	"unicode"
 
@@ -44,17 +43,8 @@ func NewEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 			return nil, err
 		}
 		return fixtureEmbedder{dimension: dimension}, nil
-	case "openai_compatible":
-		if provider.APIKeyEnv != "" && strings.TrimSpace(os.Getenv(provider.APIKeyEnv)) == "" {
-			return nil, &DependencyUnavailableError{
-				Message: fmt.Sprintf("runtime.embedder.api_key_env %q is not set", provider.APIKeyEnv),
-			}
-		}
-		return nil, &DependencyUnavailableError{
-			Message: fmt.Sprintf("runtime.embedder.provider %q is not implemented in the bootstrap", provider.Provider),
-		}
 	default:
-		return nil, fmt.Errorf("runtime.embedder.provider %q is not supported for index rebuilds", provider.Provider)
+		return nil, fmt.Errorf("runtime.embedder.provider %q is not supported in the bootstrap; use %q", provider.Provider, "fixture")
 	}
 }
 

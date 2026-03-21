@@ -102,6 +102,39 @@ path = "docs"
 	}
 }
 
+func TestLoadDefaultsBootstrapRuntimeContract(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := cfg.Runtime.Embedder.Provider, "fixture"; got != want {
+		t.Fatalf("runtime.embedder.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.Model, "fixture-8d"; got != want {
+		t.Fatalf("runtime.embedder.model = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.Provider, "disabled"; got != want {
+		t.Fatalf("runtime.analysis.provider = %q, want %q", got, want)
+	}
+}
 func TestLoadPreservesSourceSelectors(t *testing.T) {
 	t.Parallel()
 
@@ -180,15 +213,84 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = [
-  "guides/*.md"
+  "guides/*.md",
+  "runbooks/*.md"
 `)
 
 	_, err := Load(configPath)
 	if err == nil {
-		t.Fatal("Load() error = nil, want unterminated selector array error")
+		t.Fatal("Load() error = nil, want unterminated array error")
 	}
-	if !strings.Contains(err.Error(), `unterminated array for "include"`) {
-		t.Fatalf("Load() error = %q, want unterminated selector array detail", err)
+	if !strings.Contains(err.Error(), `sources.include: unterminated array`) {
+		t.Fatalf("Load() error = %q, want unterminated selector-array detail", err)
+	}
+}
+
+func TestLoadRejectsUnsupportedEmbedderProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want runtime validation error")
+	}
+	if !strings.Contains(err.Error(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
+		t.Fatalf("Load() error = %q, want embedder provider detail", err)
+	}
+	if !strings.Contains(err.Error(), `supports only "fixture"`) {
+		t.Fatalf("Load() error = %q, want bootstrap support detail", err)
+	}
+}
+
+func TestLoadRejectsUnsupportedAnalysisProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.analysis]
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want runtime validation error")
+	}
+	if !strings.Contains(err.Error(), `runtime.analysis.provider: unsupported provider "anthropic"`) {
+		t.Fatalf("Load() error = %q, want analysis provider detail", err)
+	}
+	if !strings.Contains(err.Error(), `supports only "disabled"`) {
+		t.Fatalf("Load() error = %q, want bootstrap support detail", err)
 	}
 }
 

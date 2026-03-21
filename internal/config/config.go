@@ -181,6 +181,7 @@ func parse(file *os.File) (rawConfig, error) {
 	var section string
 	var currentSource *rawSource
 	var activeSourceArrayKey string
+	var activeSourceArrayLine int
 
 	scanner := bufio.NewScanner(file)
 	for lineNo := 1; scanner.Scan(); lineNo++ {
@@ -189,39 +190,10 @@ func parse(file *os.File) (rawConfig, error) {
 			continue
 		}
 
-		switch {
-		case strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]"):
-			if activeSourceArrayKey != "" {
-				return rawConfig{}, fmt.Errorf("line %d: unterminated array for %q", lineNo, activeSourceArrayKey)
-			}
-			name := strings.TrimSpace(line[2 : len(line)-2])
-			if name != "sources" {
-				return rawConfig{}, fmt.Errorf("line %d: unsupported array section %q", lineNo, name)
-			}
-			cfg.sources = append(cfg.sources, rawSource{})
-			currentSource = &cfg.sources[len(cfg.sources)-1]
-			section = name
-			activeSourceArrayKey = ""
-			continue
-		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
-			if activeSourceArrayKey != "" {
-				return rawConfig{}, fmt.Errorf("line %d: unterminated array for %q", lineNo, activeSourceArrayKey)
-			}
-			name := strings.TrimSpace(line[1 : len(line)-1])
-			switch name {
-			case "workspace", "runtime.embedder", "runtime.analysis":
-				section = name
-				currentSource = nil
-				activeSourceArrayKey = ""
-			default:
-				return rawConfig{}, fmt.Errorf("line %d: unsupported section %q", lineNo, name)
-			}
-			continue
-		}
-
 		if activeSourceArrayKey != "" {
 			if line == "]" {
 				activeSourceArrayKey = ""
+				activeSourceArrayLine = 0
 				continue
 			}
 			if currentSource == nil {
@@ -233,6 +205,28 @@ func parse(file *os.File) (rawConfig, error) {
 			}
 			if err := assignSourceArrayField(currentSource, activeSourceArrayKey, values); err != nil {
 				return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
+			}
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]"):
+			name := strings.TrimSpace(line[2 : len(line)-2])
+			if name != "sources" {
+				return rawConfig{}, fmt.Errorf("line %d: unsupported array section %q", lineNo, name)
+			}
+			cfg.sources = append(cfg.sources, rawSource{})
+			currentSource = &cfg.sources[len(cfg.sources)-1]
+			section = name
+			continue
+		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			name := strings.TrimSpace(line[1 : len(line)-1])
+			switch name {
+			case "workspace", "runtime.embedder", "runtime.analysis":
+				section = name
+				currentSource = nil
+			default:
+				return rawConfig{}, fmt.Errorf("line %d: unsupported section %q", lineNo, name)
 			}
 			continue
 		}
@@ -266,6 +260,7 @@ func parse(file *os.File) (rawConfig, error) {
 					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
 				}
 				activeSourceArrayKey = key
+				activeSourceArrayLine = lineNo
 				if err := assignSourceArrayField(currentSource, key, nil); err != nil {
 					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
 				}
@@ -296,7 +291,7 @@ func parse(file *os.File) (rawConfig, error) {
 		return rawConfig{}, fmt.Errorf("read config: %w", err)
 	}
 	if activeSourceArrayKey != "" {
-		return rawConfig{}, fmt.Errorf("unterminated array for %q", activeSourceArrayKey)
+		return rawConfig{}, fmt.Errorf("line %d: sources.%s: unterminated array", activeSourceArrayLine, activeSourceArrayKey)
 	}
 	return cfg, nil
 }
@@ -561,37 +556,36 @@ func validate(cfg *Config) error {
 func validateRuntime(runtime Runtime) error {
 	var errs validationErrors
 
-	validateProvider := func(label string, provider RuntimeProvider, allowDisabled bool) {
-		if provider.Provider == "" {
-			errs.add("%s.provider: value is required", label)
-			return
-		}
-		switch provider.Provider {
+	if runtime.Embedder.Provider == "" {
+		errs.add("runtime.embedder.provider: value is required")
+	} else {
+		switch runtime.Embedder.Provider {
 		case "fixture":
-			if provider.Model == "" {
-				errs.add("%s.model: value is required for provider %q", label, provider.Provider)
-			}
-		case "disabled":
-			if !allowDisabled {
-				errs.add("%s.provider: %q is not valid for the embedder", label, provider.Provider)
-			}
-		case "openai_compatible":
-			if provider.Model == "" {
-				errs.add("%s.model: value is required for provider %q", label, provider.Provider)
+			if runtime.Embedder.Model == "" {
+				errs.add("runtime.embedder.model: value is required for provider %q", runtime.Embedder.Provider)
 			}
 		default:
-			errs.add("%s.provider: unsupported provider %q", label, provider.Provider)
-		}
-		if provider.TimeoutMS < 0 {
-			errs.add("%s.timeout_ms: must be >= 0", label)
-		}
-		if provider.MaxRetries < 0 {
-			errs.add("%s.max_retries: must be >= 0", label)
+			errs.add("runtime.embedder.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Embedder.Provider, "fixture")
 		}
 	}
+	if runtime.Embedder.TimeoutMS < 0 {
+		errs.add("runtime.embedder.timeout_ms: must be >= 0")
+	}
+	if runtime.Embedder.MaxRetries < 0 {
+		errs.add("runtime.embedder.max_retries: must be >= 0")
+	}
 
-	validateProvider("runtime.embedder", runtime.Embedder, false)
-	validateProvider("runtime.analysis", runtime.Analysis, true)
+	if runtime.Analysis.Provider == "" {
+		errs.add("runtime.analysis.provider: value is required")
+	} else if runtime.Analysis.Provider != "disabled" {
+		errs.add("runtime.analysis.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Analysis.Provider, "disabled")
+	}
+	if runtime.Analysis.TimeoutMS < 0 {
+		errs.add("runtime.analysis.timeout_ms: must be >= 0")
+	}
+	if runtime.Analysis.MaxRetries < 0 {
+		errs.add("runtime.analysis.max_retries: must be >= 0")
+	}
 	return errs.err()
 }
 

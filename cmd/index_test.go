@@ -154,7 +154,7 @@ body = "body.md"
 	}
 }
 
-func TestRunIndexReportsDependencyUnavailable(t *testing.T) {
+func TestRunIndexRejectsUnsupportedEmbedderProvider(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `
 [workspace]
@@ -164,7 +164,6 @@ index_path = ".pituitary/pituitary.db"
 [runtime.embedder]
 provider = "openai_compatible"
 model = "text-embedding-3-small"
-api_key_env = "PITUITARY_API_KEY"
 
 [[sources]]
 name = "specs"
@@ -180,14 +179,17 @@ path = "specs"
 	exitCode := withWorkingDir(t, repo, func() int {
 		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
 	})
-	if exitCode != 3 {
-		t.Fatalf("runIndex() exit code = %d, want 3", exitCode)
+	if exitCode != 2 {
+		t.Fatalf("runIndex() exit code = %d, want 2", exitCode)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("runIndex() wrote unexpected stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), `pituitary index: dependency unavailable:`) {
-		t.Fatalf("runIndex() stderr %q does not contain dependency-unavailable prefix", stderr.String())
+	if !strings.Contains(stderr.String(), `pituitary index: invalid config:`) {
+		t.Fatalf("runIndex() stderr %q does not contain config-error prefix", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
+		t.Fatalf("runIndex() stderr %q does not contain unsupported-provider detail", stderr.String())
 	}
 }
 

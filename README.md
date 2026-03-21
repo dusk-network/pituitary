@@ -1,45 +1,32 @@
-# Pituitary
+<p align="center">
+  <strong>Pituitary</strong><br>
+  <em>The master gland for your specification corpus.</em>
+</p>
 
-Pituitary is a spec-management tool for keeping specifications, docs, and eventually code behavior aligned.
+<p align="center">
+  <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How It Works</a> · <a href="#commands">Commands</a> · <a href="#mcp-server">MCP Server</a> · <a href="#contributing">Contributing</a>
+</p>
 
-The current repository is the bootstrap for the first shipping slice defined in `ARCHITECTURE.md`. The initial scope is intentionally narrow:
+---
 
-- local filesystem only
-- `spec.toml` + `body.md` spec bundles
-- Markdown docs
-- SQLite + `sqlite-vec`
-- CLI-first required transport
-- the repo also ships an optional MCP wrapper through `pituitary serve`
-- the repo also ships CI validation, but not GitHub-specific review or reporting integrations
-- spec/doc analysis before code compliance
+Pituitary keeps your specifications, code, and documentation from drifting out of sync. Point it at a folder of spec files, and it builds a semantic index that can detect overlapping specs, compare competing designs, trace impact when a spec changes, and catch documentation that has gone stale.
 
-## Repository Layout
+It ships as a single Go binary — no Docker, no external services. Just `pituitary` and one SQLite file.
 
-- `ARCHITECTURE.md`: architecture and first-ship scope
-- `CONTRIBUTING.md`: developer workflow and repository guardrails
-- `IMPLEMENTATION_BACKLOG.md`: milestone backlog derived from the architecture
-- `Makefile`: local format, test, vet, and CI entrypoints
-- `cmd/`: reserved CLI transport layer
-- `internal/`: reserved core package boundaries
-- `pituitary.toml`: repo-local workspace config
-- `specs/`: fixture spec bundles for bootstrap and testing
-- `docs/`: fixture docs, including one intentional drift case
-- `testdata/`: reserved test-only fixtures
-- `main.go`: minimal CLI bootstrap
+## Why
 
-## Bootstrap CLI
+Specs are easy to write and hard to maintain. As a corpus grows, common problems emerge:
 
-The bootstrap now has seven working end-to-end commands. Every shipped command supports `--format json` with the shared response envelope described below:
+- A new spec gets written that unknowingly duplicates an existing one.
+- Two specs propose conflicting approaches and nobody notices until implementation.
+- A spec is updated, but the three docs that reference it aren't.
+- Code implements behavior that no spec covers — or contradicts one that does.
 
-- `index --rebuild`: rebuild the local SQLite index from configured sources
-- `search-specs --query "...":` search indexed spec sections
-- `check-overlap --spec-ref SPEC-042`: detect overlapping indexed specs, or use `--spec-record-file` for a draft canonical `spec_record`
-- `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042`: compare exactly two indexed specs and return structured tradeoffs
-- `analyze-impact --spec-ref SPEC-042`: traverse dependent specs, affected refs, and semantically related docs
-- `check-doc-drift --scope all`: detect drifting docs, or target one or more docs with repeated `--doc-ref`
-- `review-spec --spec-ref SPEC-042`: compose overlap, comparison, impact, and targeted doc-drift in one report, or use `--spec-record-file` for a draft canonical `spec_record`
+Pituitary catches these problems automatically, either from the CLI, via an MCP server plugged into your editor, or as a check in CI.
 
-Example:
+## Quickstart
+
+**Prerequisites:** Go 1.25+, a C toolchain (required for the sqlite-vec extension). For platform-specific setup, see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 
 ```sh
 # Clone and build
@@ -48,7 +35,6 @@ cd pituitary
 go build -o pituitary .
 
 # Build the index from the included example specs
-export ANTHROPIC_API_KEY="your-key"   # or configure another provider
 ./pituitary index --rebuild
 
 # Try some queries
@@ -162,56 +148,94 @@ All commands share a consistent JSON envelope:
 }
 ```
 
-## Optional MCP
+Pass `--format json` to any command to get this format, suitable for piping into `jq`, CI scripts, or other tools.
 
-Pituitary also exposes an optional stdio MCP server through:
+## MCP Server
+
+Pituitary ships an optional MCP server over stdio, exposing the same analysis tools to any MCP-compatible client (Claude Code, Cursor, Cowork, etc.):
 
 ```sh
-go run . serve --config pituitary.toml
+./pituitary serve --config pituitary.toml
 ```
 
-The MCP transport is intentionally thin:
+The MCP server exposes: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, and `review_spec`. It reuses the same analysis packages as the CLI — the MCP layer is intentionally thin.
 
-- it exposes only `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, and `review_spec`
-- it reuses the same shared analysis and retrieval packages as the CLI
-- it does not replace `pituitary index --rebuild`, which remains a CLI-only operation
-- it ships in this repo as an optional wrapper rather than a separate product path
+`index --rebuild` remains CLI-only by design: indexing is an explicit, infrequent operation that shouldn't be triggered implicitly by an MCP client.
 
-## Frozen V1 Contracts
+### Editor integration
 
-Before feature work continues, the repository treats these v1 rules as fixed:
+Add to your MCP client config (e.g., Claude Code `settings.json`):
 
-- Canonical `ref` values use declared spec IDs such as `SPEC-042` for specs, `doc://...` refs derived from workspace-relative Markdown paths for docs, and logical `code://...` / `config://...` refs for governed artifacts.
-- `source_ref` is provenance-only and uses workspace-rooted `file://...` URIs.
-- Persisted spec statuses are `draft`, `review`, `accepted`, `superseded`, and `deprecated`. Default search covers active specs (`draft`, `review`, `accepted`), while overlap analysis may still surface `superseded` specs as historical context.
-- `spec_bundle` sources are discovered recursively by directories containing `spec.toml`; nested bundles are invalid. Markdown docs are discovered recursively as `*.md`.
-- `search-specs` normalizes an optional `limit` request field; it defaults to `10` and must stay within `1..50`.
-- JSON CLI responses share one envelope with normalized `request`, tool-specific `result`, and structured `warnings` / `errors`.
-- `check_doc_drift` accepts exactly one of `doc_ref`, `doc_refs`, or `scope = "all"`. `review_spec` reuses `check_doc_drift` with targeted `doc_refs` from impact analysis rather than widening to the whole workspace by default.
+```json
+{
+  "mcpServers": {
+    "pituitary": {
+      "command": "/path/to/pituitary",
+      "args": ["serve", "--config", "/path/to/pituitary.toml"]
+    }
+  }
+}
+```
 
-## Frozen V1 AI Runtime
+## AI Runtime Configuration
 
-- Embeddings and qualitative analysis are configured independently under `[runtime.embedder]` and `[runtime.analysis]`.
-- Each provider contract includes `provider`, `model`, `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries`. Secrets come only from environment variables named by `api_key_env`, never from tracked config.
-- CI and local tests must use the deterministic `fixture` provider mode instead of live model credentials or network calls.
-- The embedder owns vector dimension discovery, and storage must size vector tables from that reported dimension rather than a hardcoded constant.
-- If the qualitative provider is disabled or unavailable, deterministic commands can still run, but AI-backed analysis commands must fail with `dependency_unavailable`. If the embedder is unavailable, embedding-dependent commands must fail the same way.
+Pituitary's current bootstrap runtime is intentionally narrow and deterministic:
+
+- **Embedder** — `fixture` only. This deterministic embedder is the only supported runtime provider today.
+- **Analysis** — `disabled` only. The shipped analysis commands are deterministic and do not call an external qualitative-analysis provider yet.
+
+The runtime blocks are optional. If omitted, Pituitary defaults to:
+
+```toml
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[runtime.analysis]
+provider = "disabled"
+```
+
+Fields such as `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain in the config shape for future runtime work, but non-bootstrap providers are currently rejected during config validation.
+
+This means the repo works out of the box with no model credentials. If you configure any provider other than `fixture` for `runtime.embedder` or `disabled` for `runtime.analysis`, Pituitary fails fast with a clear unsupported-provider error.
+
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design, including storage schema, tool design, data flow diagrams, and the implementation roadmap.
+
+Key design decisions:
+
+- **Deterministic bootstrap today.** Retrieval and the shipped analysis commands run without an external LLM. Richer provider-backed runtime integration is deferred until the runtime contract is implemented end to end.
+- **Tools-only, no embedded agent.** Pituitary exposes discrete tools, not an autonomous agent. Orchestration is the caller's responsibility (your editor, CI, or a wrapper script).
+- **Single file storage.** All state lives in one SQLite database (`pituitary.db`). Atomic rebuild via staging DB + swap ensures consistency.
+
+## Project Status
+
+Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See [IMPLEMENTATION_BACKLOG.md](IMPLEMENTATION_BACKLOG.md) for what's shipped and what's planned.
+
+**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, doc drift detection, composite review, JSON output, MCP server.
+
+**Coming next:** `check_compliance` (code compliance checking), incremental indexing, non-filesystem source adapters, CI vendor integrations.
 
 ## Development
 
-Use the repo-local task targets to keep the bootstrap predictable:
-
 ```sh
-make fmt
-make smoke-sqlite-vec
-make test
-make vet
-make bench
-make ci
+make fmt              # Format code
+make smoke-sqlite-vec # Verify sqlite-vec is working
+make test             # Run all tests
+make vet              # Static analysis
+make bench            # Run benchmarks
+make ci               # Full CI pipeline (fmt + smoke + test + vet)
 ```
 
-The `Makefile` sets `GOCACHE` to a repo-local `.cache/` directory so build and test commands do not depend on a user-global cache path.
+Requires `CGO_ENABLED=1` and a C toolchain — the sqlite-vec extension is linked via CGo. Run `make smoke-sqlite-vec` as a quick readiness check before the full suite.
 
-Local builds also require a CGO-capable C toolchain because the current `sqlite-vec` integration is wired through `github.com/mattn/go-sqlite3` plus `github.com/asg017/sqlite-vec-go-bindings/cgo`. `make smoke-sqlite-vec` is the explicit readiness probe for that runtime path, and CI runs with `CGO_ENABLED=1`.
+## Contributing
 
-The repository also ships a GitHub Actions CI job that runs the same fmt, readiness, test, and vet workflow defined in `Makefile`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and guidelines.
+
+In short: the project is early and welcomes contributors. The best way to get started is to pick an item from the [backlog](IMPLEMENTATION_BACKLOG.md), open an issue to claim it, and submit a PR. The codebase is structured with clear package boundaries (`internal/analysis`, `internal/index`, `internal/mcp`, etc.) so you can contribute to one area without needing to understand the whole system.
+
+## License
+
+Pituitary is released under the [MIT License](LICENSE).
