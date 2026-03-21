@@ -18,6 +18,7 @@ func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
 func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("analyze-impact", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact --spec-ref REF [--change-type TYPE] [--format FORMAT]")
 
 	var (
 		specRef    string
@@ -30,11 +31,13 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
+	} else if handled {
+		return 0
 	}
 	if fs.NArg() != 0 {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{

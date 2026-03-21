@@ -187,3 +187,83 @@ This draft updates public API rate limiting.
 		t.Fatalf("doc_drift = %+v, want targeted doc_refs scope", payload.Result.DocDrift)
 	}
 }
+
+func TestRunReviewSpecWithSpecRecordFromStdinJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	record := model.SpecRecord{
+		Ref:        "SPEC-900",
+		Kind:       model.ArtifactKindSpec,
+		Title:      "Draft Rate Limit Update",
+		Status:     model.StatusDraft,
+		Domain:     "api",
+		SourceRef:  "file://drafts/spec-900/spec.toml",
+		BodyFormat: model.BodyFormatMarkdown,
+		BodyText: strings.TrimSpace(`
+## Overview
+
+This draft updates public API rate limiting.
+
+## Requirements
+
+- Apply limits per tenant rather than per API key.
+- Enforce a default limit of 200 requests per minute.
+- Allow tenant-specific overrides through configuration.
+
+## Design Decisions
+
+- Use a sliding-window limiter rather than a fixed-window counter.
+- Keep the shared middleware path but load tenant-specific limits.
+`),
+		AppliesTo: []string{
+			"code://src/api/middleware/ratelimiter.go",
+			"config://src/api/config/limits.yaml",
+		},
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	oldStdin := cliStdin
+	cliStdin = bytes.NewReader(data)
+	t.Cleanup(func() {
+		cliStdin = oldStdin
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--spec-record-file", "-", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			SpecRef string `json:"spec_ref"`
+			Overlap struct {
+				Overlaps []struct {
+					Ref string `json:"ref"`
+				} `json:"overlaps"`
+			} `json:"overlap"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal stdin review payload: %v", err)
+	}
+	if payload.Result.SpecRef != "SPEC-900" {
+		t.Fatalf("spec_ref = %q, want SPEC-900", payload.Result.SpecRef)
+	}
+	if len(payload.Result.Overlap.Overlaps) == 0 || payload.Result.Overlap.Overlaps[0].Ref != "SPEC-042" {
+		t.Fatalf("overlap = %+v, want SPEC-042 first", payload.Result.Overlap)
+	}
+}

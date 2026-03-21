@@ -14,6 +14,8 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
+var cliStdin io.Reader = os.Stdin
+
 func runCheckOverlap(args []string, stdout, stderr io.Writer) int {
 	return runCheckOverlapContext(context.Background(), args, stdout, stderr)
 }
@@ -21,6 +23,7 @@ func runCheckOverlap(args []string, stdout, stderr io.Writer) int {
 func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-overlap", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	help := newCommandHelp("check-overlap", "pituitary [--config PATH] check-overlap (--spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]")
 
 	var (
 		specRef        string
@@ -29,15 +32,17 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
-	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON")
+	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
+	} else if handled {
+		return 0
 	}
 	if fs.NArg() != 0 {
 		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
@@ -98,12 +103,26 @@ func overlapRequestFromFlags(specRef, specRecordFile string) (analysis.OverlapRe
 }
 
 func loadSpecRecordFile(path string) (model.SpecRecord, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return model.SpecRecord{}, fmt.Errorf("read spec record file %q: %w", path, err)
+	var (
+		data []byte
+		err  error
+	)
+	if path == "-" {
+		data, err = io.ReadAll(cliStdin)
+		if err != nil {
+			return model.SpecRecord{}, fmt.Errorf("read spec record from stdin: %w", err)
+		}
+	} else {
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return model.SpecRecord{}, fmt.Errorf("read spec record file %q: %w", path, err)
+		}
 	}
 	var record model.SpecRecord
 	if err := json.Unmarshal(data, &record); err != nil {
+		if path == "-" {
+			return model.SpecRecord{}, fmt.Errorf("parse spec record from stdin: %w", err)
+		}
 		return model.SpecRecord{}, fmt.Errorf("parse spec record file %q: %w", path, err)
 	}
 	return record, nil

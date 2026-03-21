@@ -29,6 +29,7 @@ func runSearchSpecs(args []string, stdout, stderr io.Writer) int {
 func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("search-specs", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	help := newCommandHelp("search-specs", "pituitary [--config PATH] search-specs --query TEXT [--domain VALUE] [--status VALUE]... [--limit N] [--format FORMAT]")
 
 	var (
 		query      string
@@ -45,11 +46,13 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
 	fs.IntVar(&limit, "limit", 10, "maximum matches to return")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
+	} else if handled {
+		return 0
 	}
 	if fs.NArg() != 0 {
 		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{

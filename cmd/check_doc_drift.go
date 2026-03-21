@@ -29,6 +29,7 @@ func runCheckDocDrift(args []string, stdout, stderr io.Writer) int {
 func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-doc-drift", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	help := newCommandHelp("check-doc-drift", "pituitary [--config PATH] check-doc-drift [--doc-ref REF]... [--scope all] [--format FORMAT]")
 
 	var (
 		docRefs    docRefList
@@ -41,11 +42,13 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
+	} else if handled {
+		return 0
 	}
 	if fs.NArg() != 0 {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
