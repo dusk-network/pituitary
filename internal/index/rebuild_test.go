@@ -211,6 +211,63 @@ func TestPrepareRebuildValidatesIndexPathFilesystemPreconditions(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildAcceptsSymlinkedStaleStagePathLikeRebuild(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	indexDir := filepath.Join(root, ".pituitary")
+	if err := os.MkdirAll(indexDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", indexDir, err)
+	}
+
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(indexDir, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	staleTarget := filepath.Join(root, "stale-stage-target")
+	if err := os.MkdirAll(staleTarget, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", staleTarget, err)
+	}
+	mustWriteFile(t, filepath.Join(staleTarget, "keep.txt"), "keep")
+
+	stagePath := cfg.Workspace.ResolvedIndexPath + ".new"
+	if err := os.Symlink(staleTarget, stagePath); err != nil {
+		t.Fatalf("symlink %s -> %s: %v", stagePath, staleTarget, err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v, want symlinked stale stage path to validate", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	info, err := os.Lstat(stagePath)
+	if err != nil {
+		t.Fatalf("lstat %s after PrepareRebuild(): %v", stagePath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("stage path mode = %v, want symlink after PrepareRebuild()", info.Mode())
+	}
+
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v, want parity with PrepareRebuild()", err)
+	}
+	if _, err := os.Lstat(stagePath); !os.IsNotExist(err) {
+		t.Fatalf("Rebuild() left stale stage path behind: %v", err)
+	}
+	if info, err := os.Stat(cfg.Workspace.ResolvedIndexPath); err != nil {
+		t.Fatalf("stat %s after Rebuild(): %v", cfg.Workspace.ResolvedIndexPath, err)
+	} else if info.IsDir() {
+		t.Fatalf("index path %s is a directory after Rebuild()", cfg.Workspace.ResolvedIndexPath)
+	}
+	if _, err := os.Stat(filepath.Join(staleTarget, "keep.txt")); err != nil {
+		t.Fatalf("stale target directory was modified: %v", err)
+	}
+}
+
 func loadFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 

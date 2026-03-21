@@ -258,7 +258,7 @@ func validateIndexTargetPath(indexPath string) error {
 }
 
 func validateStaleStagePath(stagePath string) error {
-	info, err := os.Stat(stagePath)
+	info, err := os.Lstat(stagePath)
 	switch {
 	case os.IsNotExist(err):
 		return nil
