@@ -154,6 +154,38 @@ func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildDoesNotLeaveCreatedIndexDirectoriesBehind(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	indexDir := filepath.Join(root, ".pituitary")
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(indexDir, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := os.Stat(indexDir); !os.IsNotExist(err) {
+		t.Fatalf("index directory exists before dry run: %v", err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	if _, err := os.Stat(indexDir); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() left index directory behind: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created database: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created staging database: %v", err)
+	}
+}
+
 func TestPrepareRebuildValidatesIndexPathFilesystemPreconditions(t *testing.T) {
 	t.Parallel()
 

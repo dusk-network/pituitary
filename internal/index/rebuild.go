@@ -70,11 +70,7 @@ func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	if err != nil {
 		return nil, err
 	}
-	stagePath, err := prepareStagingPath(cfg.Workspace.ResolvedIndexPath)
-	if err != nil {
-		return nil, err
-	}
-	if err := probeStagingDatabaseContext(ctx, stagePath, embedder.Dimension()); err != nil {
+	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Dimension()); err != nil {
 		return nil, err
 	}
 
@@ -82,6 +78,27 @@ func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
 	return result, nil
+}
+
+func prepareDryRunPreflightContext(ctx context.Context, indexPath string, dimension int) error {
+	createdDirs, err := ensureIndexDirectory(indexPath)
+	if err != nil {
+		return err
+	}
+	defer cleanupCreatedDirectories(createdDirs)
+
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return err
+	}
+	stagePath := indexPath + ".new"
+	if err := validateStaleStagePath(stagePath); err != nil {
+		return err
+	}
+	probePath, err := allocateDryRunProbePath(filepath.Dir(indexPath))
+	if err != nil {
+		return err
+	}
+	return probeStagingDatabaseContext(ctx, probePath, dimension)
 }
 
 // RebuildContext writes a fresh staging database and atomically swaps it into place.
@@ -152,26 +169,136 @@ func prepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 }
 
 func prepareStagingPath(indexPath string) (string, error) {
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-		return "", fmt.Errorf("create index directory: %w", err)
+	if _, err := ensureIndexDirectory(indexPath); err != nil {
+		return "", err
 	}
-	info, err := os.Stat(indexPath)
-	switch {
-	case err == nil && info.IsDir():
-		return "", fmt.Errorf("index path %s is a directory", indexPath)
-	case err == nil:
-		// Existing files are fine; rebuild swaps the staging file into place.
-	case os.IsNotExist(err):
-		// Missing targets are expected for first-time rebuilds.
-	case err != nil:
-		return "", fmt.Errorf("stat index path %s: %w", indexPath, err)
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return "", err
 	}
 
 	stagePath := indexPath + ".new"
-	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
-		return "", fmt.Errorf("remove stale staging database: %w", err)
+	if err := removeStaleStagePath(stagePath); err != nil {
+		return "", err
 	}
 	return stagePath, nil
+}
+
+func ensureIndexDirectory(indexPath string) ([]string, error) {
+	createdDirs, err := ensureDirectoryPath(filepath.Dir(indexPath))
+	if err != nil {
+		return nil, fmt.Errorf("create index directory: %w", err)
+	}
+	return createdDirs, nil
+}
+
+func ensureDirectoryPath(dirPath string) ([]string, error) {
+	info, err := os.Stat(dirPath)
+	switch {
+	case err == nil:
+		if !info.IsDir() {
+			return nil, fmt.Errorf("mkdir %s: not a directory", dirPath)
+		}
+		return nil, nil
+	case !os.IsNotExist(err):
+		return nil, err
+	}
+
+	missing := make([]string, 0, 4)
+	for current := dirPath; ; current = filepath.Dir(current) {
+		info, err := os.Stat(current)
+		switch {
+		case err == nil:
+			if !info.IsDir() {
+				return nil, fmt.Errorf("mkdir %s: not a directory", current)
+			}
+			created := make([]string, 0, len(missing))
+			for i := len(missing) - 1; i >= 0; i-- {
+				if err := os.Mkdir(missing[i], 0o755); err != nil {
+					cleanupCreatedDirectories(created)
+					if os.IsExist(err) {
+						if info, statErr := os.Stat(missing[i]); statErr == nil && info.IsDir() {
+							continue
+						}
+					}
+					return nil, err
+				}
+				created = append(created, missing[i])
+			}
+			return created, nil
+		case os.IsNotExist(err):
+			missing = append(missing, current)
+			parent := filepath.Dir(current)
+			if parent == current {
+				return nil, fmt.Errorf("mkdir %s: path does not exist", current)
+			}
+		default:
+			return nil, err
+		}
+	}
+}
+
+func cleanupCreatedDirectories(paths []string) {
+	for i := len(paths) - 1; i >= 0; i-- {
+		_ = os.Remove(paths[i])
+	}
+}
+
+func validateIndexTargetPath(indexPath string) error {
+	info, err := os.Stat(indexPath)
+	switch {
+	case err == nil && info.IsDir():
+		return fmt.Errorf("index path %s is a directory", indexPath)
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
+		return nil
+	default:
+		return fmt.Errorf("stat index path %s: %w", indexPath, err)
+	}
+}
+
+func validateStaleStagePath(stagePath string) error {
+	info, err := os.Stat(stagePath)
+	switch {
+	case os.IsNotExist(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("stat staging database %s: %w", stagePath, err)
+	case !info.IsDir():
+		return nil
+	}
+
+	entries, err := os.ReadDir(stagePath)
+	if err != nil {
+		return fmt.Errorf("remove stale staging database: %w", err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("remove stale staging database: remove %s: directory not empty", stagePath)
+	}
+	return nil
+}
+
+func removeStaleStagePath(stagePath string) error {
+	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale staging database: %w", err)
+	}
+	return nil
+}
+
+func allocateDryRunProbePath(dirPath string) (string, error) {
+	file, err := os.CreateTemp(dirPath, ".pituitary-dry-run-*.db")
+	if err != nil {
+		return "", fmt.Errorf("open staging database: %w", err)
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close staging database probe: %w", err)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("remove staging database probe seed: %w", err)
+	}
+	return path, nil
 }
 
 func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimension int) error {
