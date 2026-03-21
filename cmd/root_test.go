@@ -31,12 +31,14 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "index" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "index" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "index" {
 					args = []string{name, "--rebuild"}
 				} else if name == "preview-sources" {
 					args = []string{name}
+				} else if name == "explain-file" {
+					args = []string{name, "docs/guides/api-rate-limits.md"}
 				} else if name == "search-specs" {
 					indexStdout := bytes.Buffer{}
 					indexStderr := bytes.Buffer{}

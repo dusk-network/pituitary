@@ -130,6 +130,8 @@ Every command supports `--format json` for machine-readable output.
 | Command | What it does |
 |---|---|
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
+| `preview-sources` | Show which files each configured source will index |
+| `explain-file PATH` | Explain how one file is classified by configured sources |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
 | `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |
@@ -184,7 +186,7 @@ Before feature work continues, the repository treats these v1 rules as fixed:
 - Canonical `ref` values use declared spec IDs such as `SPEC-042` for specs, `doc://...` refs derived from workspace-relative Markdown paths for docs, and logical `code://...` / `config://...` refs for governed artifacts.
 - `source_ref` is provenance-only and uses workspace-rooted `file://...` URIs.
 - Persisted spec statuses are `draft`, `review`, `accepted`, `superseded`, and `deprecated`. Default search covers active specs (`draft`, `review`, `accepted`), while overlap analysis may still surface `superseded` specs as historical context.
-- `spec_bundle` sources are discovered recursively by directories containing `spec.toml`; nested bundles are invalid. Markdown docs are discovered recursively as `*.md`.
+- `spec_bundle` sources are discovered recursively by directories containing `spec.toml`; nested bundles are invalid after selector filtering. Markdown docs are discovered recursively as `*.md`, then narrowed by optional source selectors.
 - `search-specs` normalizes an optional `limit` request field; it defaults to `10` and must stay within `1..50`.
 - JSON CLI responses share one envelope with normalized `request`, tool-specific `result`, and structured `warnings` / `errors`.
 - `check_doc_drift` accepts exactly one of `doc_ref`, `doc_refs`, or `scope = "all"`. `review_spec` reuses `check_doc_drift` with targeted `doc_refs` from impact analysis rather than widening to the whole workspace by default.

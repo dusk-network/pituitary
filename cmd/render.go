@@ -23,6 +23,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderIndexResult(w, typed)
 	case *source.PreviewResult:
 		renderPreviewSourcesResult(w, typed)
+	case *source.ExplainFileResult:
+		renderExplainFileResult(w, typed)
 	case *index.SearchSpecResult:
 		renderSearchSpecsResult(w, typed)
 	case *analysis.OverlapResult:
@@ -70,6 +72,41 @@ func renderPreviewSourcesResult(w io.Writer, result *source.PreviewResult) {
 		}
 		if i < len(result.Sources)-1 {
 			fmt.Fprintln(w)
+		}
+	}
+}
+
+func renderExplainFileResult(w io.Writer, result *source.ExplainFileResult) {
+	fmt.Fprintf(w, "file: %s\n", result.AbsolutePath)
+	if result.WorkspacePath != "" {
+		fmt.Fprintf(w, "workspace path: %s\n", result.WorkspacePath)
+	}
+	fmt.Fprintf(w, "summary: %s\n", result.Summary.Status)
+	if len(result.Summary.IndexedBy) > 0 {
+		fmt.Fprintf(w, "indexed by: %s\n", strings.Join(result.Summary.IndexedBy, ", "))
+	}
+	for i, explanation := range result.Sources {
+		fmt.Fprintf(w, "%d. %s | %s | reason: %s\n", i+1, explanation.Name, explanation.Kind, explanation.Reason)
+		if explanation.UnderSourceRoot {
+			fmt.Fprintf(w, "   relative path: %s\n", explanation.RelativePath)
+			fmt.Fprintf(w, "   selected: %t\n", explanation.Selected)
+		} else {
+			fmt.Fprintln(w, "   outside source root")
+		}
+		if explanation.ArtifactKind != "" {
+			fmt.Fprintf(w, "   artifact: %s\n", explanation.ArtifactKind)
+		}
+		if explanation.BundlePath != "" {
+			fmt.Fprintf(w, "   bundle: %s\n", explanation.BundlePath)
+		}
+		if len(explanation.IncludeMatches) > 0 {
+			fmt.Fprintf(w, "   include matches: %s\n", strings.Join(explanation.IncludeMatches, ", "))
+		}
+		if len(explanation.ExcludeMatches) > 0 {
+			fmt.Fprintf(w, "   exclude matches: %s\n", strings.Join(explanation.ExcludeMatches, ", "))
+		}
+		if explanation.ConflictsWith != "" {
+			fmt.Fprintf(w, "   conflicts with: %s\n", explanation.ConflictsWith)
 		}
 	}
 }

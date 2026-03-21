@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -356,33 +355,11 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 }
 
 func sourcePathAllowed(source config.Source, relPath string) (bool, error) {
-	relPath = filepath.ToSlash(relPath)
-	if len(source.Include) > 0 {
-		matched := false
-		for _, pattern := range source.Include {
-			ok, err := pathpkg.Match(pattern, relPath)
-			if err != nil {
-				return false, fmt.Errorf("include pattern %q is invalid: %w", pattern, err)
-			}
-			if ok {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false, nil
-		}
+	selection, err := evaluateSourcePathSelection(source, relPath)
+	if err != nil {
+		return false, err
 	}
-	for _, pattern := range source.Exclude {
-		ok, err := pathpkg.Match(pattern, relPath)
-		if err != nil {
-			return false, fmt.Errorf("exclude pattern %q is invalid: %w", pattern, err)
-		}
-		if ok {
-			return false, nil
-		}
-	}
-	return true, nil
+	return selection.Selected, nil
 }
 
 func docRefForPath(sourceRoot, path string) (string, error) {

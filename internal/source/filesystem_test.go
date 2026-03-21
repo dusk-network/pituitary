@@ -534,6 +534,92 @@ func TestPreviewFromConfigUsesSelectors(t *testing.T) {
 	}
 }
 
+func TestExplainFileReportsExcludedMarkdownDoc(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "docs", "development", "testing-guide.md"), "# Testing Guide\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := ExplainFile(cfg, filepath.Join(repo, "docs", "development", "testing-guide.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile() error = %v", err)
+	}
+	if got, want := result.Summary.Status, "excluded"; got != want {
+		t.Fatalf("summary status = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[0].Reason, explainReasonNotMatchedByInclude; got != want {
+		t.Fatalf("docs source reason = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[0].RelativePath, "development/testing-guide.md"; got != want {
+		t.Fatalf("docs source relative path = %q, want %q", got, want)
+	}
+}
+
+func TestExplainFileReportsIndexedMarkdownDoc(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := repoRoot(t)
+	cfg, err := config.Load(filepath.Join(repoRoot, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := ExplainFile(cfg, filepath.Join(repoRoot, "docs", "guides", "api-rate-limits.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile() error = %v", err)
+	}
+	if got, want := result.Summary.Status, "indexed"; got != want {
+		t.Fatalf("summary status = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[1].Reason, explainReasonIndexedMarkdownDoc; got != want {
+		t.Fatalf("docs source reason = %q, want %q", got, want)
+	}
+	if !result.Sources[1].Selected || result.Sources[1].ArtifactKind != "doc" {
+		t.Fatalf("docs source = %+v, want selected doc explanation", result.Sources[1])
+	}
+}
+
+func TestExplainFileReportsBundleMemberNotIndexedDirectly(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := repoRoot(t)
+	cfg, err := config.Load(filepath.Join(repoRoot, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := ExplainFile(cfg, filepath.Join(repoRoot, "specs", "rate-limit-v2", "body.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile() error = %v", err)
+	}
+	if got, want := result.Summary.Status, "not_indexed"; got != want {
+		t.Fatalf("summary status = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[0].Reason, explainReasonBundleMemberNotIndexed; got != want {
+		t.Fatalf("spec source reason = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[0].BundlePath, "specs/rate-limit-v2/spec.toml"; got != want {
+		t.Fatalf("bundle path = %q, want %q", got, want)
+	}
+}
+
 func TestLoadFromConfigReadsOversizedSpecArrayValues(t *testing.T) {
 	t.Parallel()
 
