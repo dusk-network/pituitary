@@ -90,8 +90,11 @@ func assertKnownCommandResult(t *testing.T, name, description string, exitCode i
 	if exitCode != 0 {
 		t.Fatalf("Run(%q) exit code = %d, want 0", name, exitCode)
 	}
-	if stderr != "" {
+	if stderr != "" && name != "index" {
 		t.Fatalf("Run(%q) wrote unexpected stderr: %q", name, stderr)
+	}
+	if name == "index" && stderr != "" && !strings.Contains(stderr, "pituitary index: chunking") {
+		t.Fatalf("Run(%q) stderr %q does not contain rebuild progress", name, stderr)
 	}
 
 	if !strings.Contains(stdout, description) {

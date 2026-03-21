@@ -326,6 +326,95 @@ path = "specs"
 	}
 }
 
+func TestRunIndexVerboseTextReportsSourceCountsAndProgress(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--verbose"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex(--verbose) exit code = %d, want 0", exitCode)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "indexed 5 artifact(s), 17 chunk(s), and 8 edge(s)") {
+		t.Fatalf("runIndex(--verbose) output %q does not contain rebuild summary", out)
+	}
+	if !strings.Contains(out, "source: specs | spec_bundle | root: specs | items: 3 | specs: 3") {
+		t.Fatalf("runIndex(--verbose) output %q does not contain spec source summary", out)
+	}
+	if !strings.Contains(out, "source: docs | markdown_docs | root: docs | items: 2 | docs: 2") {
+		t.Fatalf("runIndex(--verbose) output %q does not contain doc source summary", out)
+	}
+
+	progress := stderr.String()
+	if !strings.Contains(progress, "pituitary index: chunking") {
+		t.Fatalf("runIndex(--verbose) stderr %q does not contain chunking progress", progress)
+	}
+	if !strings.Contains(progress, "pituitary index: embedding") {
+		t.Fatalf("runIndex(--verbose) stderr %q does not contain embedding progress", progress)
+	}
+}
+
+func TestRunIndexVerboseJSONIncludesSourceSummariesAndNoProgressOutput(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--verbose", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex(--verbose --format json) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runIndex(--verbose --format json) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Rebuild bool `json:"rebuild"`
+			Verbose bool `json:"verbose"`
+		} `json:"request"`
+		Result struct {
+			ArtifactCount int `json:"artifact_count"`
+			Sources       []struct {
+				Name      string `json:"name"`
+				Kind      string `json:"kind"`
+				Path      string `json:"path"`
+				ItemCount int    `json:"item_count"`
+				SpecCount int    `json:"spec_count"`
+				DocCount  int    `json:"doc_count"`
+			} `json:"sources"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal verbose index payload: %v", err)
+	}
+	if !payload.Request.Rebuild || !payload.Request.Verbose {
+		t.Fatalf("request = %+v, want rebuild=true verbose=true", payload.Request)
+	}
+	if payload.Result.ArtifactCount != 5 {
+		t.Fatalf("result = %+v, want 5 artifacts", payload.Result)
+	}
+	if len(payload.Result.Sources) != 2 {
+		t.Fatalf("result.sources = %+v, want 2 summaries", payload.Result.Sources)
+	}
+	if payload.Result.Sources[0].Name != "specs" || payload.Result.Sources[0].SpecCount != 3 {
+		t.Fatalf("result.sources[0] = %+v, want specs summary", payload.Result.Sources[0])
+	}
+	if payload.Result.Sources[1].Name != "docs" || payload.Result.Sources[1].DocCount != 2 {
+		t.Fatalf("result.sources[1] = %+v, want docs summary", payload.Result.Sources[1])
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunIndexDryRunTextDoesNotCreateDatabase(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 	indexPath := filepath.Join(repo, ".pituitary", "pituitary.db")

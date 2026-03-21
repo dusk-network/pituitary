@@ -15,6 +15,7 @@ import (
 type indexRequest struct {
 	Rebuild bool `json:"rebuild"`
 	DryRun  bool `json:"dry_run,omitempty"`
+	Verbose bool `json:"verbose,omitempty"`
 }
 
 func runIndex(args []string, stdout, stderr io.Writer) int {
@@ -29,11 +30,13 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	var (
 		rebuild    bool
 		dryRun     bool
+		verbose    bool
 		format     string
 		configPath string
 	)
 	fs.BoolVar(&rebuild, "rebuild", false, "rebuild the local index")
 	fs.BoolVar(&dryRun, "dry-run", false, "validate config and sources without writing the index")
+	fs.BoolVar(&verbose, "verbose", false, "include per-source details for index planning and rebuild output")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
@@ -52,12 +55,12 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		}, 2)
 	}
 	if !isSupportedFormat(format) {
-		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, DryRun: dryRun}, cliIssue{
+		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, DryRun: dryRun, Verbose: verbose}, cliIssue{
 			Code:    "validation_error",
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
-	request := indexRequest{Rebuild: rebuild, DryRun: dryRun}
+	request := indexRequest{Rebuild: rebuild, DryRun: dryRun, Verbose: verbose}
 	if rebuild && dryRun {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "validation_error",
@@ -107,9 +110,20 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 				Message: "dry run failed:\n" + err.Error(),
 			}, 2)
 		}
+		if !verbose {
+			result.Sources = nil
+		}
 		return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)
 	}
-	result, err := index.RebuildContext(ctx, cfg, records)
+
+	var result *index.RebuildResult
+	if format == "text" {
+		result, err = index.RebuildWithProgressContext(ctx, cfg, records, func(event index.RebuildProgressEvent) {
+			fmt.Fprintf(stderr, "pituitary index: %s %d/%d %s %s (%d chunk(s))\n", event.Phase, event.Current, event.Total, event.ArtifactKind, event.ArtifactRef, event.ChunkCount)
+		})
+	} else {
+		result, err = index.RebuildContext(ctx, cfg, records)
+	}
 	if err != nil {
 		if index.IsDependencyUnavailable(err) {
 			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
@@ -121,6 +135,9 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 			Code:    "internal_error",
 			Message: "rebuild failed:\n" + err.Error(),
 		}, 2)
+	}
+	if !verbose {
+		result.Sources = nil
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)

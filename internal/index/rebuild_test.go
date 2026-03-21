@@ -39,6 +39,9 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	if result.EmbedderDimension != 8 {
 		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
 	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("result.Sources = %+v, want 2 source summaries", result.Sources)
+	}
 	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
 		t.Fatalf("staging database still exists: %v", err)
 	}
@@ -139,6 +142,9 @@ func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
 	}
 	if result.EmbedderDimension != 8 {
 		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
+	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("result.Sources = %+v, want 2 source summaries", result.Sources)
 	}
 	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath); !os.IsNotExist(err) {
 		t.Fatalf("PrepareRebuild() created database: %v", err)

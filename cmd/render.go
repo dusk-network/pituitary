@@ -50,11 +50,26 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	if result.DryRun {
 		fmt.Fprintf(w, "dry run validated %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 		fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
+		renderIndexSourceSummaries(w, result.Sources)
 		fmt.Fprintln(w, "database write: skipped")
 		return
 	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+	renderIndexSourceSummaries(w, result.Sources)
+}
+
+func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary) {
+	for _, summary := range sources {
+		fmt.Fprintf(w, "source: %s | %s | root: %s | items: %d", summary.Name, summary.Kind, summary.Path, summary.ItemCount)
+		if summary.SpecCount > 0 {
+			fmt.Fprintf(w, " | specs: %d", summary.SpecCount)
+		}
+		if summary.DocCount > 0 {
+			fmt.Fprintf(w, " | docs: %d", summary.DocCount)
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 func renderStatusResult(w io.Writer, result *statusResult) {
