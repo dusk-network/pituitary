@@ -19,6 +19,7 @@ type SourcePreview struct {
 	Adapter   string        `json:"adapter"`
 	Kind      string        `json:"kind"`
 	Path      string        `json:"path"`
+	Files     []string      `json:"files,omitempty"`
 	Include   []string      `json:"include,omitempty"`
 	Exclude   []string      `json:"exclude,omitempty"`
 	ItemCount int           `json:"item_count"`
@@ -54,6 +55,7 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 		Adapter: source.Adapter,
 		Kind:    source.Kind,
 		Path:    source.Path,
+		Files:   append([]string(nil), source.Files...),
 		Include: append([]string(nil), source.Include...),
 		Exclude: append([]string(nil), source.Exclude...),
 	}

@@ -109,6 +109,37 @@ path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
 ```
 
+Selectors are always evaluated relative to the configured source `path`:
+
+- `files` is an exact allowlist of source-relative files.
+- `include` and `exclude` are glob filters over those same source-relative paths.
+- If `files` is present, a path must be listed there before `include` / `exclude` are applied.
+- For `spec_bundle`, `files` entries must point to `spec.toml`.
+- For `markdown_docs`, `files` entries must point to `.md` files.
+
+Example for a mixed-layout repo without changing source roots:
+
+```toml
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "."
+files = [
+  "docs/guides/api-rate-limits.md",
+  "docs/runbooks/rate-limit-rollout.md",
+]
+
+[[sources]]
+name = "accepted-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+files = ["rate-limit-v2/spec.toml", "burst-handling/spec.toml"]
+```
+
+Selectors narrow what gets indexed; they do not rewrite refs. For example, a docs source rooted at `.` still produces refs like `doc://docs/guides/api-rate-limits` even when `files` narrows the selection to one file.
+
 ## Commands
 
 Every command supports `--format json` for machine-readable output.

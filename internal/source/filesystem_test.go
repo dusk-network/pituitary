@@ -499,6 +499,86 @@ exclude = ["runbooks/draft-*.md"]
 	}
 }
 
+func TestLoadFromConfigFiltersMarkdownDocsByExplicitFilesAndKeepsStableRefs(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "."
+files = ["docs/guides/api-rate-limits.md", "docs/runbooks/rate-limit-rollout.md"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "api-rate-limits.md"), "# API Rate Limits\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "runbooks", "rate-limit-rollout.md"), "# Rollout\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "development", "testing-guide.md"), "# Testing Guide\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Docs), 2; got != want {
+		t.Fatalf("doc count = %d, want %d", got, want)
+	}
+
+	refs := []string{result.Docs[0].Ref, result.Docs[1].Ref}
+	sort.Strings(refs)
+	wantRefs := []string{"doc://docs/guides/api-rate-limits", "doc://docs/runbooks/rate-limit-rollout"}
+	if !equalStrings(refs, wantRefs) {
+		t.Fatalf("doc refs = %#v, want %#v", refs, wantRefs)
+	}
+}
+
+func TestLoadFromConfigFiltersSpecBundlesByExplicitFiles(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := repoRoot(t)
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(repoRoot)+`"
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+files = ["rate-limit-v2/spec.toml", "burst-handling/spec.toml"]
+`)
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Specs), 2; got != want {
+		t.Fatalf("spec count = %d, want %d", got, want)
+	}
+
+	refs := []string{result.Specs[0].Ref, result.Specs[1].Ref}
+	sort.Strings(refs)
+	wantRefs := []string{"SPEC-042", "SPEC-055"}
+	if !equalStrings(refs, wantRefs) {
+		t.Fatalf("spec refs = %#v, want %#v", refs, wantRefs)
+	}
+}
+
 func TestPreviewFromConfigUsesSelectors(t *testing.T) {
 	t.Parallel()
 
@@ -531,6 +611,47 @@ func TestPreviewFromConfigUsesSelectors(t *testing.T) {
 	wantPaths := []string{"docs/guides/api-rate-limits.md", "docs/runbooks/rate-limit-rollout.md"}
 	if !equalStrings(paths, wantPaths) {
 		t.Fatalf("doc preview paths = %#v, want %#v", paths, wantPaths)
+	}
+}
+
+func TestPreviewFromConfigUsesExplicitFiles(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := repoRoot(t)
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(repoRoot)+`"
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+files = ["guides/api-rate-limits.md"]
+`)
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := PreviewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("PreviewFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Sources), 1; got != want {
+		t.Fatalf("source count = %d, want %d", got, want)
+	}
+	if got, want := result.Sources[0].Files, []string{"guides/api-rate-limits.md"}; !equalStrings(got, want) {
+		t.Fatalf("preview files = %#v, want %#v", got, want)
+	}
+	if got, want := result.Sources[0].ItemCount, 1; got != want {
+		t.Fatalf("item count = %d, want %d", got, want)
+	}
+	if got, want := result.Sources[0].Items[0].Path, "docs/guides/api-rate-limits.md"; got != want {
+		t.Fatalf("preview path = %q, want %q", got, want)
 	}
 }
 

@@ -319,9 +319,15 @@ The adapter contract keeps that variability out of the analysis engine.
 **V1 filesystem enumeration rules:**
 
 - For `kind = "spec_bundle"`, recursively walk the configured source root and treat each directory containing a `spec.toml` file as one bundle.
+- Selector matching for spec bundles is done against the source-relative `spec.toml` path.
 - A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
 - Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
-- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply optional `include` / `exclude` selectors against source-relative paths.
+- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply selectors against source-relative paths.
+- `files` is an optional exact allowlist of source-relative files.
+- `include` and `exclude` are optional glob filters over those same source-relative paths.
+- If `files` is present, it narrows the candidate set before `include` / `exclude` are applied.
+- For `kind = "spec_bundle"`, `files` entries must point to `spec.toml`.
+- For `kind = "markdown_docs"`, `files` entries must point to `.md` files.
 - A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
 - A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
 

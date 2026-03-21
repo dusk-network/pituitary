@@ -55,6 +55,9 @@ func renderPreviewSourcesResult(w io.Writer, result *source.PreviewResult) {
 
 	for i, preview := range result.Sources {
 		fmt.Fprintf(w, "source: %s | %s | root: %s | items: %d\n", preview.Name, preview.Kind, preview.Path, preview.ItemCount)
+		if len(preview.Files) > 0 {
+			fmt.Fprintf(w, "files: %s\n", strings.Join(preview.Files, ", "))
+		}
 		if len(preview.Include) > 0 {
 			fmt.Fprintf(w, "include: %s\n", strings.Join(preview.Include, ", "))
 		}
