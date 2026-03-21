@@ -37,3 +37,14 @@ make ci
 ```
 
 If `make smoke-sqlite-vec` passes, the local CGO and SQLite setup is usable for development.
+
+## Container Alternative
+
+If you prefer not to install the toolchain locally, build the checked-in contributor image:
+
+```sh
+docker build -t pituitary-dev .
+docker run --rm -it pituitary-dev
+```
+
+The image installs the required build tools and runs `make ci` during the build.

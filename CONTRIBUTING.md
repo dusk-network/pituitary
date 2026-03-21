@@ -48,6 +48,20 @@ make ci                 # Full check: fmt + smoke + test + vet
 
 If `make smoke-sqlite-vec` passes, your C toolchain is working and you're ready to develop.
 
+If you do not want to install the local toolchain, the repo also ships a contributor `Dockerfile`:
+
+```sh
+docker build -t pituitary-dev .
+docker run --rm -it pituitary-dev
+```
+
+Contributor docs:
+
+- [docs/development/prerequisites.md](docs/development/prerequisites.md)
+- [docs/development/architecture-guide.md](docs/development/architecture-guide.md)
+- [docs/development/testing-guide.md](docs/development/testing-guide.md)
+- [docs/development/adding-a-command.md](docs/development/adding-a-command.md)
+
 ## Project Structure
 
 ```
