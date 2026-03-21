@@ -154,11 +154,41 @@ func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildValidatesIndexPathFilesystemPreconditions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	lockedPath := filepath.Join(root, "locked")
+	mustWriteFile(t, lockedPath, "not a directory")
+
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(lockedPath, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	_, err = PrepareRebuild(cfg, records)
+	if err == nil {
+		t.Fatal("PrepareRebuild() error = nil, want filesystem preflight failure")
+	}
+	if !strings.Contains(err.Error(), "create index directory") {
+		t.Fatalf("PrepareRebuild() error = %q, want create index directory failure", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); err == nil || (!os.IsNotExist(err) && !strings.Contains(err.Error(), "not a directory")) {
+		t.Fatalf("PrepareRebuild() left staging database probe behind: %v", err)
+	}
+}
+
 func loadFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 
+	return loadFixtureConfigWithIndexPath(tb, filepath.Join(tb.TempDir(), "pituitary.db"))
+}
+
+func loadFixtureConfigWithIndexPath(tb testing.TB, indexPath string) *config.Config {
+	tb.Helper()
+
 	repoRoot := repoRoot(tb)
-	indexPath := filepath.Join(tb.TempDir(), "pituitary.db")
 	configPath := filepath.Join(tb.TempDir(), "pituitary.toml")
 	mustWriteFile(tb, configPath, `
 [workspace]

@@ -70,6 +70,13 @@ func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	if err != nil {
 		return nil, err
 	}
+	stagePath, err := prepareStagingPath(cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := probeStagingDatabaseContext(ctx, stagePath, embedder.Dimension()); err != nil {
+		return nil, err
+	}
 
 	result := summarizeRebuild(records, embedder.Dimension())
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
@@ -90,11 +97,10 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	dimension := embedder.Dimension()
 
 	indexPath := cfg.Workspace.ResolvedIndexPath
-	stagePath := indexPath + ".new"
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create index directory: %w", err)
+	stagePath, err := prepareStagingPath(indexPath)
+	if err != nil {
+		return nil, err
 	}
-	_ = os.Remove(stagePath)
 
 	db, err := openReadWriteContext(ctx, stagePath)
 	if err != nil {
@@ -143,6 +149,49 @@ func prepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 		return nil, err
 	}
 	return embedder, nil
+}
+
+func prepareStagingPath(indexPath string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		return "", fmt.Errorf("create index directory: %w", err)
+	}
+	info, err := os.Stat(indexPath)
+	switch {
+	case err == nil && info.IsDir():
+		return "", fmt.Errorf("index path %s is a directory", indexPath)
+	case err == nil:
+		// Existing files are fine; rebuild swaps the staging file into place.
+	case os.IsNotExist(err):
+		// Missing targets are expected for first-time rebuilds.
+	case err != nil:
+		return "", fmt.Errorf("stat index path %s: %w", indexPath, err)
+	}
+
+	stagePath := indexPath + ".new"
+	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("remove stale staging database: %w", err)
+	}
+	return stagePath, nil
+}
+
+func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimension int) error {
+	db, err := openReadWriteContext(ctx, stagePath)
+	if err != nil {
+		return fmt.Errorf("open staging database: %w", err)
+	}
+	if err := createSchemaContext(ctx, db, dimension); err != nil {
+		_ = db.Close()
+		_ = os.Remove(stagePath)
+		return fmt.Errorf("create schema: %w", err)
+	}
+	if err := db.Close(); err != nil {
+		_ = os.Remove(stagePath)
+		return fmt.Errorf("close staging database: %w", err)
+	}
+	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove staging database probe: %w", err)
+	}
+	return nil
 }
 
 func summarizeRebuild(records *source.LoadResult, dimension int) *RebuildResult {
