@@ -40,6 +40,7 @@ type Source struct {
 	Adapter      string
 	Kind         string
 	Path         string
+	Files        []string
 	Include      []string
 	Exclude      []string
 	ResolvedPath string
@@ -78,6 +79,7 @@ type rawSource struct {
 	adapter string
 	kind    string
 	paths   string
+	files   []string
 	include []string
 	exclude []string
 }
@@ -157,6 +159,7 @@ func Load(path string) (*Config, error) {
 			Adapter: source.adapter,
 			Kind:    source.kind,
 			Path:    source.paths,
+			Files:   append([]string(nil), source.files...),
 			Include: append([]string(nil), source.include...),
 			Exclude: append([]string(nil), source.exclude...),
 		})
@@ -336,7 +339,7 @@ func parseSourceField(source *rawSource, key, value string, lineNo int) error {
 
 func isSourceArrayField(key string) bool {
 	switch key {
-	case "include", "exclude":
+	case "files", "include", "exclude":
 		return true
 	default:
 		return false
@@ -345,6 +348,8 @@ func isSourceArrayField(key string) bool {
 
 func assignSourceArrayField(source *rawSource, key string, values []string) error {
 	switch key {
+	case "files":
+		source.files = append(source.files, values...)
 	case "include":
 		source.include = append(source.include, values...)
 	case "exclude":
@@ -515,6 +520,29 @@ func validate(cfg *Config) error {
 			errs.add("%s.path: value is required", label)
 			continue
 		}
+		files := make([]string, 0, len(source.Files))
+		seenFiles := make(map[string]struct{}, len(source.Files))
+		for i, value := range source.Files {
+			normalized, err := normalizeSourceFileSelector(value)
+			if err != nil {
+				errs.add("%s.files[%d]: %v", label, i, err)
+				continue
+			}
+			if source.Kind == SourceKindSpecBundle && pathpkg.Base(normalized) != "spec.toml" {
+				errs.add("%s.files[%d]: %q must point to a spec.toml file for kind %q", label, i, value, source.Kind)
+				continue
+			}
+			if source.Kind == SourceKindMarkdownDocs && pathpkg.Ext(normalized) != ".md" {
+				errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
+				continue
+			}
+			if _, exists := seenFiles[normalized]; exists {
+				continue
+			}
+			seenFiles[normalized] = struct{}{}
+			files = append(files, normalized)
+		}
+		source.Files = files
 		for _, pattern := range source.Include {
 			if strings.TrimSpace(pattern) == "" {
 				errs.add("%s.include: patterns must not be empty", label)
@@ -544,6 +572,16 @@ func validate(cfg *Config) error {
 		case err != nil:
 			errs.add("%s.path: %q does not exist", label, source.Path)
 		}
+		for i, relFile := range source.Files {
+			resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
+			info, err := os.Stat(resolvedFile)
+			switch {
+			case err == nil && info.IsDir():
+				errs.add("%s.files[%d]: %q is a directory", label, i, relFile)
+			case err != nil:
+				errs.add("%s.files[%d]: %q does not exist", label, i, relFile)
+			}
+		}
 	}
 
 	if err := validateRuntime(cfg.Runtime); err != nil {
@@ -551,6 +589,25 @@ func validate(cfg *Config) error {
 	}
 
 	return errs.err()
+}
+
+func normalizeSourceFileSelector(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("value must not be empty")
+	}
+	if filepath.IsAbs(value) {
+		return "", fmt.Errorf("%q must be relative to the source root", value)
+	}
+
+	normalized := pathpkg.Clean(filepath.ToSlash(value))
+	if normalized == "." {
+		return "", fmt.Errorf("%q must point to a file under the source root", value)
+	}
+	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+		return "", fmt.Errorf("%q escapes the source root", value)
+	}
+	return normalized, nil
 }
 
 func validateRuntime(runtime Runtime) error {

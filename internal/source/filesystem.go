@@ -357,6 +357,18 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 
 func sourcePathAllowed(source config.Source, relPath string) (bool, error) {
 	relPath = filepath.ToSlash(relPath)
+	if len(source.Files) > 0 {
+		matched := false
+		for _, file := range source.Files {
+			if file == relPath {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false, nil
+		}
+	}
 	if len(source.Include) > 0 {
 		matched := false
 		for _, pattern := range source.Include {

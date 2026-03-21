@@ -139,7 +139,7 @@ func TestLoadPreservesSourceSelectors(t *testing.T) {
 	t.Parallel()
 
 	repo := t.TempDir()
-	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	mustMkdirAll(t, filepath.Join(repo, "docs", "guides"))
 	configPath := filepath.Join(repo, "pituitary.toml")
 	writeFile(t, configPath, `
 [workspace]
@@ -151,15 +151,20 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+files = ["guides/api-rate-limits.md"]
 include = ["guides/*.md", "runbooks/*.md"]
 exclude = ["runbooks/draft-*.md"]
 `)
+	writeFile(t, filepath.Join(repo, "docs", "guides", "api-rate-limits.md"), "# API Rate Limits\n")
 
 	cfg, err := Load(configPath)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
+	if got, want := cfg.Sources[0].Files, []string{"guides/api-rate-limits.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("files = %#v, want %#v", got, want)
+	}
 	if got, want := cfg.Sources[0].Include, []string{"guides/*.md", "runbooks/*.md"}; !equalStringSlices(got, want) {
 		t.Fatalf("include = %#v, want %#v", got, want)
 	}
@@ -193,6 +198,63 @@ include = ["["]
 	}
 	if !strings.Contains(err.Error(), `source "docs".include: invalid pattern "["`) {
 		t.Fatalf("Load() error = %q, want selector validation details", err)
+	}
+}
+
+func TestLoadRejectsInvalidSourceFileSelector(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+files = ["../guide.md"]
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid file selector error")
+	}
+	if !strings.Contains(err.Error(), `source "docs".files[0]: "../guide.md" escapes the source root`) {
+		t.Fatalf("Load() error = %q, want invalid source-file selector detail", err)
+	}
+}
+
+func TestLoadRejectsSourceFileKindMismatch(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs", "rate-limit-v2"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+files = ["rate-limit-v2/body.md"]
+`)
+	writeFile(t, filepath.Join(repo, "specs", "rate-limit-v2", "body.md"), "Body\n")
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want selector kind mismatch error")
+	}
+	if !strings.Contains(err.Error(), `must point to a spec.toml file`) {
+		t.Fatalf("Load() error = %q, want selector kind mismatch detail", err)
 	}
 }
 
