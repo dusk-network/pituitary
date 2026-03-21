@@ -154,6 +154,48 @@ body = "body.md"
 	}
 }
 
+func TestRunIndexReportsConfigPathAndLineForParseErrors(t *testing.T) {
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	mustWriteFileCmd(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = [
+  "guides/*.md"
+[runtime.embedder]
+provider = "fixture"
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runIndex() exit code = %d, want 2", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("runIndex() wrote unexpected stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), configPath) {
+		t.Fatalf("runIndex() stderr %q does not contain config path", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "line ") {
+		t.Fatalf("runIndex() stderr %q does not contain line information", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unterminated array") {
+		t.Fatalf("runIndex() stderr %q does not contain parse detail", stderr.String())
+	}
+}
+
 func TestRunIndexRejectsUnsupportedEmbedderProvider(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `

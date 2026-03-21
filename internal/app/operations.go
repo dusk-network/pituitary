@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/config"
@@ -51,8 +53,10 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 	result, err := index.SearchSpecsContext(ctx, cfg, query)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeDependencyUnavailable, err.Error(), 3)
+			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeInternalError, err.Error(), 2)
 		}
@@ -71,10 +75,12 @@ func CheckOverlap(ctx context.Context, configPath string, request analysis.Overl
 	result, err := analysis.CheckOverlapContext(ctx, cfg, request)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeDependencyUnavailable, err.Error(), 3)
+			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -93,6 +99,8 @@ func CompareSpecs(ctx context.Context, configPath string, request analysis.Compa
 	result, err := analysis.CompareSpecsContext(ctx, cfg, request)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeNotFound, err.Error(), 2)
 		default:
@@ -113,6 +121,8 @@ func AnalyzeImpact(ctx context.Context, configPath string, request analysis.Anal
 	result, err := analysis.AnalyzeImpactContext(ctx, cfg, request)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, CodeNotFound, err.Error(), 2)
 		default:
@@ -133,6 +143,8 @@ func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocD
 	result, err := analysis.CheckDocDriftContext(ctx, cfg, request)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeNotFound, err.Error(), 2)
 		default:
@@ -153,10 +165,12 @@ func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewR
 	result, err := analysis.ReviewSpecContext(ctx, cfg, request)
 	if err != nil {
 		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeDependencyUnavailable, err.Error(), 3)
+			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -193,4 +207,39 @@ func failure[Req any, Res any](request Req, code, message string, exitCode int) 
 			ExitCode: exitCode,
 		},
 	}
+}
+
+func missingIndexMessage(err error) string {
+	path := index.MissingIndexPath(err)
+	if path == "" {
+		return "index does not exist; run `pituitary index --rebuild`"
+	}
+	return fmt.Sprintf("index %s does not exist; run `pituitary index --rebuild`", path)
+}
+
+func improveDependencyUnavailableMessage(cfg *config.Config, err error) string {
+	message := err.Error()
+	envVar := configuredAPIKeyEnv(cfg)
+	if envVar == "" {
+		return message
+	}
+
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, "api key") && !strings.Contains(lower, "apikey") {
+		return message
+	}
+	if strings.Contains(message, envVar) {
+		return message
+	}
+	return fmt.Sprintf("%s; set %s in the environment", message, envVar)
+}
+
+func configuredAPIKeyEnv(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	if envVar := strings.TrimSpace(cfg.Runtime.Embedder.APIKeyEnv); envVar != "" {
+		return envVar
+	}
+	return strings.TrimSpace(cfg.Runtime.Analysis.APIKeyEnv)
 }

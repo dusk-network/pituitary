@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +164,46 @@ func TestRunSearchSpecsRejectsLimitAboveMaximum(t *testing.T) {
 	}
 	if len(payload.Errors) != 1 || payload.Errors[0].Message != "limit must be less than or equal to 50" {
 		t.Fatalf("payload errors = %+v, want maximum-limit validation", payload.Errors)
+	}
+}
+
+func TestRunSearchSpecsReportsMissingIndexActionably(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runSearchSpecs([]string{"--query", "rate limiting", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result any        `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal missing-index payload: %v", err)
+	}
+	if payload.Result != nil {
+		t.Fatalf("payload result = %#v, want nil", payload.Result)
+	}
+	if len(payload.Errors) != 1 {
+		t.Fatalf("payload errors = %+v, want one config error", payload.Errors)
+	}
+	if payload.Errors[0].Code != "config_error" {
+		t.Fatalf("payload errors = %+v, want config_error", payload.Errors)
+	}
+	if !strings.Contains(payload.Errors[0].Message, "pituitary index --rebuild") {
+		t.Fatalf("payload error message = %q, want rebuild guidance", payload.Errors[0].Message)
+	}
+	if !strings.Contains(payload.Errors[0].Message, filepath.Join(repo, ".pituitary", "pituitary.db")) {
+		t.Fatalf("payload error message = %q, want resolved index path", payload.Errors[0].Message)
 	}
 }
 
