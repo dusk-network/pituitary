@@ -37,7 +37,7 @@ func runVersionContext(ctx context.Context, args []string, stdout, stderr io.Wri
 
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("version", "pituitary version [--format FORMAT]")
+	help := newStandaloneCommandHelp("version", "pituitary version [--format FORMAT]")
 
 	var format string
 	fs.StringVar(&format, "format", "text", "output format")

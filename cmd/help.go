@@ -9,11 +9,16 @@ import (
 )
 
 type commandHelp struct {
-	Name  string
-	Usage string
+	Name       string
+	Usage      string
+	UsesConfig bool
 }
 
 func newCommandHelp(name, usage string) commandHelp {
+	return commandHelp{Name: name, Usage: usage, UsesConfig: true}
+}
+
+func newStandaloneCommandHelp(name, usage string) commandHelp {
 	return commandHelp{Name: name, Usage: usage}
 }
 
@@ -31,8 +36,10 @@ func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer, help c
 func printCommandHelp(w io.Writer, fs *flag.FlagSet, help commandHelp) {
 	fmt.Fprintf(w, "pituitary %s: %s\n", help.Name, commands[help.Name])
 	fmt.Fprintf(w, "usage: %s\n", help.Usage)
-	fmt.Fprintln(w)
-	printSharedConfigResolution(w)
+	if help.UsesConfig {
+		fmt.Fprintln(w)
+		printSharedConfigResolution(w)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "flags:")
 	printFlagSetDefaults(w, fs)

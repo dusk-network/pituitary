@@ -9,8 +9,6 @@ import (
 )
 
 func TestRunVersionText(t *testing.T) {
-	t.Parallel()
-
 	oldVersion := Version
 	oldCommit := Commit
 	oldBuildDate := BuildDate
@@ -53,8 +51,6 @@ func TestRunVersionText(t *testing.T) {
 }
 
 func TestRunVersionJSON(t *testing.T) {
-	t.Parallel()
-
 	oldVersion := Version
 	oldCommit := Commit
 	oldBuildDate := BuildDate
@@ -102,5 +98,31 @@ func TestRunVersionJSON(t *testing.T) {
 	}
 	if payload.Result.Commit != "" || payload.Result.BuildDate != "" {
 		t.Fatalf("result = %+v, want empty optional build metadata", payload.Result)
+	}
+}
+
+func TestRunVersionHelpDoesNotAdvertiseConfigResolution(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"version", "--help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("Run(version, --help) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("Run(version, --help) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "usage: pituitary version [--format FORMAT]") {
+		t.Fatalf("Run(version, --help) output %q does not contain version usage", out)
+	}
+	if strings.Contains(out, "shared config resolution:") {
+		t.Fatalf("Run(version, --help) output %q unexpectedly advertises shared config resolution", out)
+	}
+	if strings.Contains(out, "command-local --config PATH") {
+		t.Fatalf("Run(version, --help) output %q unexpectedly advertises command-local config", out)
 	}
 }
