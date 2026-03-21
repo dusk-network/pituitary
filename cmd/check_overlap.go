@@ -58,10 +58,10 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 			Message: err.Error(),
 		}, 2)
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("check-overlap", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-overlap", request, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)

@@ -31,6 +31,15 @@ func TestLoadFromConfigNormalizesRepoFixtures(t *testing.T) {
 	if got, want := len(result.Docs), 2; got != want {
 		t.Fatalf("doc count = %d, want %d", got, want)
 	}
+	if got, want := len(result.Sources), 2; got != want {
+		t.Fatalf("source summary count = %d, want %d", got, want)
+	}
+	if result.Sources[0].Name != "specs" || result.Sources[0].SpecCount != 3 || result.Sources[0].ItemCount != 3 {
+		t.Fatalf("source summary[0] = %+v, want specs summary", result.Sources[0])
+	}
+	if result.Sources[1].Name != "docs" || result.Sources[1].DocCount != 2 || result.Sources[1].ItemCount != 2 {
+		t.Fatalf("source summary[1] = %+v, want docs summary", result.Sources[1])
+	}
 
 	specsByRef := make(map[string]model.SpecRecord, len(result.Specs))
 	for _, spec := range result.Specs {

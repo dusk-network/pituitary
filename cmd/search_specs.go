@@ -40,7 +40,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 		limit      int
 	)
 	fs.StringVar(&query, "query", "", "semantic query")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", "text", "output format (text, json, table)")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&domain, "domain", "", "filter by domain")
 	fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
@@ -87,10 +87,10 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 			Message: "--query is required",
 		}, 2)
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("search-specs", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "search-specs", request, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)

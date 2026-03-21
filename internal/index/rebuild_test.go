@@ -39,6 +39,9 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	if result.EmbedderDimension != 8 {
 		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
 	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("result.Sources = %+v, want 2 source summaries", result.Sources)
+	}
 	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
 		t.Fatalf("staging database still exists: %v", err)
 	}
@@ -112,11 +115,169 @@ func TestRebuildPreservesLastGoodDatabaseOnFailure(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	if result.ArtifactCount != 5 || result.SpecCount != 3 || result.DocCount != 2 {
+		t.Fatalf("artifact counts = %+v", result)
+	}
+	if result.ChunkCount != 17 {
+		t.Fatalf("chunk count = %d, want 17", result.ChunkCount)
+	}
+	if result.EdgeCount != 8 {
+		t.Fatalf("edge count = %d, want 8", result.EdgeCount)
+	}
+	if result.EmbedderDimension != 8 {
+		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
+	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("result.Sources = %+v, want 2 source summaries", result.Sources)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created database: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created staging database: %v", err)
+	}
+}
+
+func TestPrepareRebuildDoesNotLeaveCreatedIndexDirectoriesBehind(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	indexDir := filepath.Join(root, ".pituitary")
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(indexDir, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := os.Stat(indexDir); !os.IsNotExist(err) {
+		t.Fatalf("index directory exists before dry run: %v", err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	if _, err := os.Stat(indexDir); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() left index directory behind: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created database: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created staging database: %v", err)
+	}
+}
+
+func TestPrepareRebuildValidatesIndexPathFilesystemPreconditions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	lockedPath := filepath.Join(root, "locked")
+	mustWriteFile(t, lockedPath, "not a directory")
+
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(lockedPath, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	_, err = PrepareRebuild(cfg, records)
+	if err == nil {
+		t.Fatal("PrepareRebuild() error = nil, want filesystem preflight failure")
+	}
+	if !strings.Contains(err.Error(), "create index directory") {
+		t.Fatalf("PrepareRebuild() error = %q, want create index directory failure", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); err == nil || (!os.IsNotExist(err) && !strings.Contains(err.Error(), "not a directory")) {
+		t.Fatalf("PrepareRebuild() left staging database probe behind: %v", err)
+	}
+}
+
+func TestPrepareRebuildAcceptsSymlinkedStaleStagePathLikeRebuild(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	indexDir := filepath.Join(root, ".pituitary")
+	if err := os.MkdirAll(indexDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", indexDir, err)
+	}
+
+	cfg := loadFixtureConfigWithIndexPath(t, filepath.Join(indexDir, "pituitary.db"))
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	staleTarget := filepath.Join(root, "stale-stage-target")
+	if err := os.MkdirAll(staleTarget, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", staleTarget, err)
+	}
+	mustWriteFile(t, filepath.Join(staleTarget, "keep.txt"), "keep")
+
+	stagePath := cfg.Workspace.ResolvedIndexPath + ".new"
+	if err := os.Symlink(staleTarget, stagePath); err != nil {
+		t.Fatalf("symlink %s -> %s: %v", stagePath, staleTarget, err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v, want symlinked stale stage path to validate", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	info, err := os.Lstat(stagePath)
+	if err != nil {
+		t.Fatalf("lstat %s after PrepareRebuild(): %v", stagePath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("stage path mode = %v, want symlink after PrepareRebuild()", info.Mode())
+	}
+
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v, want parity with PrepareRebuild()", err)
+	}
+	if _, err := os.Lstat(stagePath); !os.IsNotExist(err) {
+		t.Fatalf("Rebuild() left stale stage path behind: %v", err)
+	}
+	if info, err := os.Stat(cfg.Workspace.ResolvedIndexPath); err != nil {
+		t.Fatalf("stat %s after Rebuild(): %v", cfg.Workspace.ResolvedIndexPath, err)
+	} else if info.IsDir() {
+		t.Fatalf("index path %s is a directory after Rebuild()", cfg.Workspace.ResolvedIndexPath)
+	}
+	if _, err := os.Stat(filepath.Join(staleTarget, "keep.txt")); err != nil {
+		t.Fatalf("stale target directory was modified: %v", err)
+	}
+}
+
 func loadFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 
+	return loadFixtureConfigWithIndexPath(tb, filepath.Join(tb.TempDir(), "pituitary.db"))
+}
+
+func loadFixtureConfigWithIndexPath(tb testing.TB, indexPath string) *config.Config {
+	tb.Helper()
+
 	repoRoot := repoRoot(tb)
-	indexPath := filepath.Join(tb.TempDir(), "pituitary.db")
 	configPath := filepath.Join(tb.TempDir(), "pituitary.toml")
 	mustWriteFile(tb, configPath, `
 [workspace]

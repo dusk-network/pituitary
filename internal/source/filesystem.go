@@ -19,17 +19,38 @@ import (
 
 // LoadResult contains canonical records emitted by configured source adapters.
 type LoadResult struct {
-	Specs []model.SpecRecord
-	Docs  []model.DocRecord
+	Specs   []model.SpecRecord
+	Docs    []model.DocRecord
+	Sources []LoadSourceSummary
+}
+
+// LoadSourceSummary describes the records contributed by one configured source.
+type LoadSourceSummary struct {
+	Name      string `json:"name"`
+	Adapter   string `json:"adapter"`
+	Kind      string `json:"kind"`
+	Path      string `json:"path"`
+	ItemCount int    `json:"item_count"`
+	SpecCount int    `json:"spec_count,omitempty"`
+	DocCount  int    `json:"doc_count,omitempty"`
 }
 
 // LoadFromConfig loads and normalizes all configured filesystem sources.
 func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
-	result := &LoadResult{}
+	result := &LoadResult{
+		Sources: make([]LoadSourceSummary, 0, len(cfg.Sources)),
+	}
 	seenSpecs := make(map[string]artifactOrigin)
 	seenDocs := make(map[string]artifactOrigin)
 
 	for _, source := range cfg.Sources {
+		summary := LoadSourceSummary{
+			Name:    source.Name,
+			Adapter: source.Adapter,
+			Kind:    source.Kind,
+			Path:    source.Path,
+		}
+
 		switch {
 		case source.Adapter != config.AdapterFilesystem:
 			return nil, fmt.Errorf("source %q: unsupported adapter %q", source.Name, source.Adapter)
@@ -41,6 +62,8 @@ func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
 			if err := appendUniqueSpecRecords(result, seenSpecs, source, specs); err != nil {
 				return nil, err
 			}
+			summary.SpecCount = len(specs)
+			summary.ItemCount = len(specs)
 		case source.Kind == config.SourceKindMarkdownDocs:
 			docs, err := loadMarkdownDocs(cfg.Workspace.RootPath, source)
 			if err != nil {
@@ -49,9 +72,13 @@ func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
 			if err := appendUniqueDocRecords(result, seenDocs, source, docs); err != nil {
 				return nil, err
 			}
+			summary.DocCount = len(docs)
+			summary.ItemCount = len(docs)
 		default:
 			return nil, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 		}
+
+		result.Sources = append(result.Sources, summary)
 	}
 
 	sort.Slice(result.Specs, func(i, j int) bool {

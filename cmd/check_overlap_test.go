@@ -222,3 +222,43 @@ This draft updates public API rate limiting.
 		t.Fatalf("overlaps = %+v, want SPEC-042 first", payload.Result.Overlaps)
 	}
 }
+
+func TestRunCheckOverlapReportsUnknownSpecRefActionably(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--spec-ref", "SPEC-999", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result any        `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap error payload: %v", err)
+	}
+	if payload.Result != nil {
+		t.Fatalf("payload result = %#v, want nil", payload.Result)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "not_found" {
+		t.Fatalf("payload errors = %+v, want one not_found error", payload.Errors)
+	}
+	if !strings.Contains(payload.Errors[0].Message, `unknown --spec-ref "SPEC-999"`) {
+		t.Fatalf("payload error message = %q, want actionable spec-ref detail", payload.Errors[0].Message)
+	}
+	if !strings.Contains(payload.Errors[0].Message, "pituitary index --rebuild") {
+		t.Fatalf("payload error message = %q, want rebuild guidance", payload.Errors[0].Message)
+	}
+}

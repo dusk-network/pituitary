@@ -50,10 +50,10 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		SpecRef:    strings.TrimSpace(specRef),
 		ChangeType: strings.TrimSpace(changeType),
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("analyze-impact", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	if request.SpecRef == "" {

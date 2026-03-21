@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,7 +34,7 @@ path = "specs"
 	if exitCode != 0 {
 		t.Fatalf("Run() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
-	if stderr.Len() != 0 {
+	if stderr.Len() != 0 && !strings.Contains(stderr.String(), "pituitary index: chunking") {
 		t.Fatalf("Run() wrote unexpected stderr: %q", stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
@@ -67,7 +68,7 @@ path = "specs"
 	if exitCode != 0 {
 		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
-	if stderr.Len() != 0 {
+	if stderr.Len() != 0 && !strings.Contains(stderr.String(), "pituitary index: chunking") {
 		t.Fatalf("runIndex() wrote unexpected stderr: %q", stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
@@ -101,7 +102,7 @@ path = "specs"
 	if exitCode != 0 {
 		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
-	if stderr.Len() != 0 {
+	if stderr.Len() != 0 && !strings.Contains(stderr.String(), "pituitary index: chunking") {
 		t.Fatalf("runIndex() wrote unexpected stderr: %q", stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
@@ -148,7 +149,7 @@ path = "specs"
 	if exitCode != 0 {
 		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
-	if stderr.Len() != 0 {
+	if stderr.Len() != 0 && !strings.Contains(stderr.String(), "pituitary index: chunking") {
 		t.Fatalf("runIndex() wrote unexpected stderr: %q", stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {

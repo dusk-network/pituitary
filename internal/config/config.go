@@ -117,13 +117,13 @@ func Load(path string) (*Config, error) {
 
 	file, err := os.Open(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("open %s: %w", configPath, err)
 	}
 	defer file.Close()
 
 	raw, err := parse(file)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("%s: %w", configPath, err)
 	}
 
 	cfg := &Config{
@@ -166,7 +166,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	if err := validate(cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", configPath, err)
 	}
 	return cfg, nil
 }
@@ -198,6 +198,14 @@ func parse(file *os.File) (rawConfig, error) {
 				activeSourceArrayKey = ""
 				activeSourceArrayLine = 0
 				continue
+			}
+			if !strings.HasPrefix(line, "\"") && !strings.HasPrefix(line, ",") {
+				return rawConfig{}, fmt.Errorf(
+					"line %d: sources.%s: unterminated array; expected ] to close the array opened on line %d",
+					lineNo,
+					activeSourceArrayKey,
+					activeSourceArrayLine,
+				)
 			}
 			if currentSource == nil {
 				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
@@ -294,7 +302,11 @@ func parse(file *os.File) (rawConfig, error) {
 		return rawConfig{}, fmt.Errorf("read config: %w", err)
 	}
 	if activeSourceArrayKey != "" {
-		return rawConfig{}, fmt.Errorf("line %d: sources.%s: unterminated array", activeSourceArrayLine, activeSourceArrayKey)
+		return rawConfig{}, fmt.Errorf(
+			"line %d: sources.%s: unterminated array; expected ] before end of file",
+			activeSourceArrayLine,
+			activeSourceArrayKey,
+		)
 	}
 	return cfg, nil
 }

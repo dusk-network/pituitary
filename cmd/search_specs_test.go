@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,44 @@ func TestRunSearchSpecsJSON(t *testing.T) {
 	}
 	if payload.Result.Matches[0].Ref == "" || payload.Result.Matches[0].SectionHeading == "" {
 		t.Fatalf("top match = %+v, want stable ref and section heading", payload.Result.Matches[0])
+	}
+}
+
+func TestRunSearchSpecsTable(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runSearchSpecs([]string{
+			"--query", "fixed window rate limiting",
+			"--status", "superseded",
+			"--format", "table",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"pituitary search-specs: search spec sections semantically",
+		"REF",
+		"TITLE",
+		"SECTION",
+		"SCORE",
+		"SPEC-008",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runSearchSpecs(--format table) output %q does not contain %q", out, want)
+		}
 	}
 }
 
@@ -163,6 +202,46 @@ func TestRunSearchSpecsRejectsLimitAboveMaximum(t *testing.T) {
 	}
 	if len(payload.Errors) != 1 || payload.Errors[0].Message != "limit must be less than or equal to 50" {
 		t.Fatalf("payload errors = %+v, want maximum-limit validation", payload.Errors)
+	}
+}
+
+func TestRunSearchSpecsReportsMissingIndexActionably(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runSearchSpecs([]string{"--query", "rate limiting", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result any        `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal missing-index payload: %v", err)
+	}
+	if payload.Result != nil {
+		t.Fatalf("payload result = %#v, want nil", payload.Result)
+	}
+	if len(payload.Errors) != 1 {
+		t.Fatalf("payload errors = %+v, want one config error", payload.Errors)
+	}
+	if payload.Errors[0].Code != "config_error" {
+		t.Fatalf("payload errors = %+v, want config_error", payload.Errors)
+	}
+	if !strings.Contains(payload.Errors[0].Message, "pituitary index --rebuild") {
+		t.Fatalf("payload error message = %q, want rebuild guidance", payload.Errors[0].Message)
+	}
+	if !strings.Contains(payload.Errors[0].Message, filepath.Join(repo, ".pituitary", "pituitary.db")) {
+		t.Fatalf("payload error message = %q, want resolved index path", payload.Errors[0].Message)
 	}
 }
 

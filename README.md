@@ -142,11 +142,12 @@ Selectors narrow what gets indexed; they do not rewrite refs. For example, a doc
 
 ## Commands
 
-Every command supports `--format json` for machine-readable output.
+Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries.
 
 | Command | What it does |
 |---|---|
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
+| `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |

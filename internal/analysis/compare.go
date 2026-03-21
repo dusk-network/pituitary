@@ -99,7 +99,7 @@ func CompareSpecsContext(ctx context.Context, cfg *config.Config, request Compar
 	}
 	for _, ref := range refs {
 		if _, ok := specs[ref]; !ok {
-			return nil, &NotFoundError{Message: fmt.Sprintf("spec %q not found in index", ref)}
+			return nil, newSpecRefNotFoundError(ref)
 		}
 	}
 	return buildCompareResult(candidate, orderedRefs, specs), nil

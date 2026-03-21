@@ -126,3 +126,21 @@ func TestRunVersionHelpDoesNotAdvertiseConfigResolution(t *testing.T) {
 		t.Fatalf("Run(version, --help) output %q unexpectedly advertises command-local config", out)
 	}
 }
+
+func TestRunVersionRejectsTableFormat(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runVersion([]string{"--format", "table"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("runVersion(--format table) exit code = %d, want 2", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("runVersion(--format table) wrote unexpected stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `pituitary version: format "table" is only supported for search-specs`) {
+		t.Fatalf("runVersion(--format table) stderr = %q, want explicit table-format error", stderr.String())
+	}
+}

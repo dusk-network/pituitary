@@ -56,10 +56,10 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 	}
 
 	request := analysis.CompareRequest{SpecRefs: []string(specRefs)}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("compare-specs", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	if len(request.SpecRefs) != 2 {

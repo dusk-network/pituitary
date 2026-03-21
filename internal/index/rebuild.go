@@ -23,42 +23,101 @@ const schemaVersion = 2
 
 // RebuildResult reports the staged rebuild outcome.
 type RebuildResult struct {
-	IndexPath          string `json:"index_path"`
-	ArtifactCount      int    `json:"artifact_count"`
-	SpecCount          int    `json:"spec_count"`
-	DocCount           int    `json:"doc_count"`
-	ChunkCount         int    `json:"chunk_count"`
-	EdgeCount          int    `json:"edge_count"`
-	EmbedderDimension  int    `json:"embedder_dimension"`
-	ContentFingerprint string `json:"content_fingerprint"`
+	DryRun             bool                       `json:"dry_run,omitempty"`
+	IndexPath          string                     `json:"index_path"`
+	ArtifactCount      int                        `json:"artifact_count"`
+	SpecCount          int                        `json:"spec_count"`
+	DocCount           int                        `json:"doc_count"`
+	ChunkCount         int                        `json:"chunk_count"`
+	EdgeCount          int                        `json:"edge_count"`
+	EmbedderDimension  int                        `json:"embedder_dimension"`
+	ContentFingerprint string                     `json:"content_fingerprint"`
+	Sources            []source.LoadSourceSummary `json:"sources,omitempty"`
 }
+
+// RebuildProgressEvent reports one text-mode rebuild progress update.
+type RebuildProgressEvent struct {
+	Phase        string `json:"phase"`
+	ArtifactKind string `json:"artifact_kind"`
+	ArtifactRef  string `json:"artifact_ref"`
+	Current      int    `json:"current"`
+	Total        int    `json:"total"`
+	ChunkCount   int    `json:"chunk_count,omitempty"`
+}
+
+// RebuildProgressReporter receives rebuild progress events.
+type RebuildProgressReporter func(RebuildProgressEvent)
 
 // Rebuild writes a fresh staging database and atomically swaps it into place.
 func Rebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
 	return RebuildContext(context.Background(), cfg, records)
 }
 
-// RebuildContext writes a fresh staging database and atomically swaps it into place.
-func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
+// RebuildWithProgressContext writes a fresh staging database, atomically swaps it into place,
+// and reports chunking/embedding progress through the provided callback.
+func RebuildWithProgressContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+	return rebuildContext(ctx, cfg, records, reporter)
+}
+
+// PrepareRebuild validates rebuild prerequisites and summarizes the pending index contents without writing a database.
+func PrepareRebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	return PrepareRebuildContext(context.Background(), cfg, records)
+}
+
+// PrepareRebuildContext validates rebuild prerequisites and summarizes the pending index contents without writing a database.
+func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	embedder, err := prepareRebuildContext(ctx, cfg, records)
+	if err != nil {
+		return nil, err
 	}
-	if records == nil {
-		return nil, fmt.Errorf("records are required")
+	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Dimension()); err != nil {
+		return nil, err
 	}
 
-	embedder, err := newEmbedder(cfg.Runtime.Embedder)
+	result := summarizeRebuild(records, embedder.Dimension())
+	result.IndexPath = cfg.Workspace.ResolvedIndexPath
+	result.DryRun = true
+	return result, nil
+}
+
+func prepareDryRunPreflightContext(ctx context.Context, indexPath string, dimension int) error {
+	createdDirs, err := ensureIndexDirectory(indexPath)
+	if err != nil {
+		return err
+	}
+	defer cleanupCreatedDirectories(createdDirs)
+
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return err
+	}
+	stagePath := indexPath + ".new"
+	if err := validateStaleStagePath(stagePath); err != nil {
+		return err
+	}
+	probePath, err := allocateDryRunProbePath(filepath.Dir(indexPath))
+	if err != nil {
+		return err
+	}
+	return probeStagingDatabaseContext(ctx, probePath, dimension)
+}
+
+// RebuildContext writes a fresh staging database and atomically swaps it into place.
+func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	return rebuildContext(ctx, cfg, records, nil)
+}
+
+func rebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+	embedder, err := prepareRebuildContext(ctx, cfg, records)
 	if err != nil {
 		return nil, err
 	}
 	dimension := embedder.Dimension()
 
 	indexPath := cfg.Workspace.ResolvedIndexPath
-	stagePath := indexPath + ".new"
-	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create index directory: %w", err)
+	stagePath, err := prepareStagingPath(indexPath)
+	if err != nil {
+		return nil, err
 	}
-	_ = os.Remove(stagePath)
 
 	db, err := openReadWriteContext(ctx, stagePath)
 	if err != nil {
@@ -72,7 +131,7 @@ func RebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		}
 	}()
 
-	result, err := buildStagingContext(ctx, db, dimension, embedder, records)
+	result, err := buildStagingContext(ctx, db, dimension, embedder, records, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -91,11 +150,205 @@ func RebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	return result, nil
 }
 
-func buildStaging(db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
-	return buildStagingContext(context.Background(), db, dimension, embedder, records)
+func prepareRebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (Embedder, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	if records == nil {
+		return nil, fmt.Errorf("records are required")
+	}
+
+	embedder, err := newEmbedder(cfg.Runtime.Embedder)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckSQLiteReadyContext(ctx); err != nil {
+		return nil, err
+	}
+	return embedder, nil
 }
 
-func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
+func prepareStagingPath(indexPath string) (string, error) {
+	if _, err := ensureIndexDirectory(indexPath); err != nil {
+		return "", err
+	}
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return "", err
+	}
+
+	stagePath := indexPath + ".new"
+	if err := removeStaleStagePath(stagePath); err != nil {
+		return "", err
+	}
+	return stagePath, nil
+}
+
+func ensureIndexDirectory(indexPath string) ([]string, error) {
+	createdDirs, err := ensureDirectoryPath(filepath.Dir(indexPath))
+	if err != nil {
+		return nil, fmt.Errorf("create index directory: %w", err)
+	}
+	return createdDirs, nil
+}
+
+func ensureDirectoryPath(dirPath string) ([]string, error) {
+	info, err := os.Stat(dirPath)
+	switch {
+	case err == nil:
+		if !info.IsDir() {
+			return nil, fmt.Errorf("mkdir %s: not a directory", dirPath)
+		}
+		return nil, nil
+	case !os.IsNotExist(err):
+		return nil, err
+	}
+
+	missing := make([]string, 0, 4)
+	for current := dirPath; ; current = filepath.Dir(current) {
+		info, err := os.Stat(current)
+		switch {
+		case err == nil:
+			if !info.IsDir() {
+				return nil, fmt.Errorf("mkdir %s: not a directory", current)
+			}
+			created := make([]string, 0, len(missing))
+			for i := len(missing) - 1; i >= 0; i-- {
+				if err := os.Mkdir(missing[i], 0o755); err != nil {
+					cleanupCreatedDirectories(created)
+					if os.IsExist(err) {
+						if info, statErr := os.Stat(missing[i]); statErr == nil && info.IsDir() {
+							continue
+						}
+					}
+					return nil, err
+				}
+				created = append(created, missing[i])
+			}
+			return created, nil
+		case os.IsNotExist(err):
+			missing = append(missing, current)
+			parent := filepath.Dir(current)
+			if parent == current {
+				return nil, fmt.Errorf("mkdir %s: path does not exist", current)
+			}
+		default:
+			return nil, err
+		}
+	}
+}
+
+func cleanupCreatedDirectories(paths []string) {
+	for i := len(paths) - 1; i >= 0; i-- {
+		_ = os.Remove(paths[i])
+	}
+}
+
+func validateIndexTargetPath(indexPath string) error {
+	info, err := os.Stat(indexPath)
+	switch {
+	case err == nil && info.IsDir():
+		return fmt.Errorf("index path %s is a directory", indexPath)
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
+		return nil
+	default:
+		return fmt.Errorf("stat index path %s: %w", indexPath, err)
+	}
+}
+
+func validateStaleStagePath(stagePath string) error {
+	info, err := os.Lstat(stagePath)
+	switch {
+	case os.IsNotExist(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("stat staging database %s: %w", stagePath, err)
+	case !info.IsDir():
+		return nil
+	}
+
+	entries, err := os.ReadDir(stagePath)
+	if err != nil {
+		return fmt.Errorf("remove stale staging database: %w", err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("remove stale staging database: remove %s: directory not empty", stagePath)
+	}
+	return nil
+}
+
+func removeStaleStagePath(stagePath string) error {
+	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale staging database: %w", err)
+	}
+	return nil
+}
+
+func allocateDryRunProbePath(dirPath string) (string, error) {
+	file, err := os.CreateTemp(dirPath, ".pituitary-dry-run-*.db")
+	if err != nil {
+		return "", fmt.Errorf("open staging database: %w", err)
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("close staging database probe: %w", err)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("remove staging database probe seed: %w", err)
+	}
+	return path, nil
+}
+
+func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimension int) error {
+	db, err := openReadWriteContext(ctx, stagePath)
+	if err != nil {
+		return fmt.Errorf("open staging database: %w", err)
+	}
+	if err := createSchemaContext(ctx, db, dimension); err != nil {
+		_ = db.Close()
+		_ = os.Remove(stagePath)
+		return fmt.Errorf("create schema: %w", err)
+	}
+	if err := db.Close(); err != nil {
+		_ = os.Remove(stagePath)
+		return fmt.Errorf("close staging database: %w", err)
+	}
+	if err := os.Remove(stagePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove staging database probe: %w", err)
+	}
+	return nil
+}
+
+func summarizeRebuild(records *source.LoadResult, dimension int) *RebuildResult {
+	result := &RebuildResult{
+		ArtifactCount:     len(records.Specs) + len(records.Docs),
+		SpecCount:         len(records.Specs),
+		DocCount:          len(records.Docs),
+		EmbedderDimension: dimension,
+		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
+	}
+
+	fingerprintParts := make([]string, 0, len(records.Specs)+len(records.Docs))
+	for _, spec := range records.Specs {
+		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
+		result.EdgeCount += len(spec.Relations) + len(spec.AppliesTo)
+		fingerprintParts = append(fingerprintParts, spec.Ref+":"+spec.ContentHash)
+	}
+	for _, doc := range records.Docs {
+		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
+		fingerprintParts = append(fingerprintParts, doc.Ref+":"+doc.ContentHash)
+	}
+	result.ContentFingerprint = fingerprint(fingerprintParts)
+	return result
+}
+
+func buildStaging(db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
+	return buildStagingContext(context.Background(), db, dimension, embedder, records, nil)
+}
+
+func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	if err := createSchemaContext(ctx, db, dimension); err != nil {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
@@ -110,8 +363,13 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		}
 	}()
 
-	result := &RebuildResult{EmbedderDimension: dimension}
+	result := &RebuildResult{
+		EmbedderDimension: dimension,
+		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
+	}
 	var fingerprintParts []string
+	totalArtifacts := len(records.Specs) + len(records.Docs)
+	currentArtifact := 0
 
 	if err := insertMetadataContext(ctx, tx, "schema_version", strconv.Itoa(schemaVersion)); err != nil {
 		return nil, err
@@ -142,6 +400,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		currentArtifact++
 		if err := insertSpecArtifactContext(ctx, tx, spec); err != nil {
 			return nil, err
 		}
@@ -149,10 +408,16 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		result.SpecCount++
 		fingerprintParts = append(fingerprintParts, spec.Ref+":"+spec.ContentHash)
 
-		if err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, spec.BodyText); err != nil {
+		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, spec.BodyText, RebuildProgressEvent{
+			ArtifactKind: model.ArtifactKindSpec,
+			ArtifactRef:  spec.Ref,
+			Current:      currentArtifact,
+			Total:        totalArtifacts,
+		}, reporter)
+		if err != nil {
 			return nil, err
 		}
-		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
+		result.ChunkCount += chunkCount
 
 		for _, relation := range spec.Relations {
 			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type)); err != nil {
@@ -172,6 +437,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		currentArtifact++
 		if err := insertDocArtifactContext(ctx, tx, doc); err != nil {
 			return nil, err
 		}
@@ -179,10 +445,16 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		result.DocCount++
 		fingerprintParts = append(fingerprintParts, doc.Ref+":"+doc.ContentHash)
 
-		if err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, doc.BodyText); err != nil {
+		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, doc.BodyText, RebuildProgressEvent{
+			ArtifactKind: model.ArtifactKindDoc,
+			ArtifactRef:  doc.Ref,
+			Current:      currentArtifact,
+			Total:        totalArtifacts,
+		}, reporter)
+		if err != nil {
 			return nil, err
 		}
-		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
+		result.ChunkCount += chunkCount
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -319,48 +591,61 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 }
 
 func insertArtifactChunks(chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string) error {
-	return insertArtifactChunksContext(context.Background(), chunkStmt, vectorStmt, embedder, artifactRef, title, body)
+	_, err := insertArtifactChunksContext(context.Background(), chunkStmt, vectorStmt, embedder, artifactRef, title, body, RebuildProgressEvent{}, nil)
+	return err
 }
 
-func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string) error {
+func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return 0, err
 	}
 	sections := chunk.Markdown(title, body)
+	event.Phase = "chunking"
+	event.ChunkCount = len(sections)
+	reportRebuildProgress(reporter, event)
 	if len(sections) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	texts := make([]string, 0, len(sections))
 	for _, section := range sections {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		texts = append(texts, textForEmbedding(title, section))
 	}
 
+	event.Phase = "embedding"
+	reportRebuildProgress(reporter, event)
 	vectors, err := embedder.EmbedTexts(ctx, texts)
 	if err != nil {
-		return fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
+		return 0, fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
 	}
 	if len(vectors) != len(sections) {
-		return fmt.Errorf("embed chunks for %s: returned %d vector(s) for %d section(s)", artifactRef, len(vectors), len(sections))
+		return 0, fmt.Errorf("embed chunks for %s: returned %d vector(s) for %d section(s)", artifactRef, len(vectors), len(sections))
 	}
 
 	for i, section := range sections {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		chunkID, err := insertChunkContext(ctx, chunkStmt, artifactRef, section.Heading, section.Body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, embedder.Dimension(), vectors[i]); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	return nil
+	return len(sections), nil
+}
+
+func reportRebuildProgress(reporter RebuildProgressReporter, event RebuildProgressEvent) {
+	if reporter == nil {
+		return
+	}
+	reporter(event)
 }
 
 func insertChunk(stmt *sql.Stmt, artifactRef, section, content string) (int64, error) {

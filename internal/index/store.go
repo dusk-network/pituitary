@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -46,6 +47,16 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 
 // OpenReadOnlyContext opens a fresh read-only SQLite handle for query paths.
 func OpenReadOnlyContext(ctx context.Context, path string) (*sql.DB, error) {
+	info, err := os.Stat(path)
+	switch {
+	case os.IsNotExist(err):
+		return nil, &MissingIndexError{Path: path}
+	case err != nil:
+		return nil, fmt.Errorf("stat index %s: %w", path, err)
+	case info.IsDir():
+		return nil, fmt.Errorf("index path %s is a directory", path)
+	}
+
 	if err := CheckSQLiteReadyContext(ctx); err != nil {
 		return nil, err
 	}

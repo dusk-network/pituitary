@@ -182,7 +182,7 @@ func loadCandidate(repo *analysisRepository, request OverlapRequest, specs map[s
 		}
 		spec, ok := indexed[ref]
 		if !ok {
-			return nil, &NotFoundError{Message: fmt.Sprintf("spec %q not found in index", ref)}
+			return nil, newSpecRefNotFoundError(ref)
 		}
 		return &spec, nil
 	}

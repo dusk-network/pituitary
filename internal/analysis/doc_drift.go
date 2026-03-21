@@ -95,7 +95,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	if len(scope.DocRefs) > 0 {
 		for _, ref := range scope.DocRefs {
 			if _, ok := selectedDocs[ref]; !ok {
-				return nil, &NotFoundError{Message: fmt.Sprintf("doc %q not found in index", ref)}
+				return nil, newDocRefNotFoundError(ref)
 			}
 		}
 	}
