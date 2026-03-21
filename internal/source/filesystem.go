@@ -115,7 +115,7 @@ func describeOrigin(itemLabel string, origin artifactOrigin) string {
 }
 
 func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
-	bundleDirs, err := discoverSelectedSpecBundles(source)
+	bundleDirs, err := discoverSpecBundles(source)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", source.Name, err)
 	}
@@ -131,7 +131,37 @@ func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRe
 	return records, nil
 }
 
-func discoverSpecBundles(root string) ([]string, error) {
+func discoverSpecBundles(source config.Source) ([]string, error) {
+	bundleDirs, err := discoverSpecBundleDirs(source.ResolvedPath)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := bundleDirs[:0]
+	for _, bundleDir := range bundleDirs {
+		relBundleSpec := filepath.ToSlash(filepath.Join(workspaceRelative(source.ResolvedPath, bundleDir), "spec.toml"))
+		allowed, err := sourcePathAllowed(source, relBundleSpec)
+		if err != nil {
+			return nil, fmt.Errorf("spec %q: %w", relBundleSpec, err)
+		}
+		if allowed {
+			filtered = append(filtered, bundleDir)
+		}
+	}
+
+	for i := range filtered {
+		for j := 0; j < i; j++ {
+			parent := filtered[j]
+			if isNestedBundle(parent, filtered[i]) {
+				return nil, fmt.Errorf("nested spec bundle %q inside %q", filepath.ToSlash(filtered[i]), filepath.ToSlash(parent))
+			}
+		}
+	}
+
+	return filtered, nil
+}
+
+func discoverSpecBundleDirs(root string) ([]string, error) {
 	var bundleDirs []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -153,37 +183,6 @@ func discoverSpecBundles(root string) ([]string, error) {
 
 	sort.Strings(bundleDirs)
 	return bundleDirs, nil
-}
-
-func discoverSelectedSpecBundles(source config.Source) ([]string, error) {
-	bundleDirs, err := discoverSpecBundles(source.ResolvedPath)
-	if err != nil {
-		return nil, err
-	}
-
-	selected := make([]string, 0, len(bundleDirs))
-	for _, bundleDir := range bundleDirs {
-		relBundleSpec := filepath.ToSlash(filepath.Join(workspaceRelative(source.ResolvedPath, bundleDir), "spec.toml"))
-		allowed, err := sourcePathAllowed(source, relBundleSpec)
-		if err != nil {
-			return nil, fmt.Errorf("spec %q: %w", relBundleSpec, err)
-		}
-		if !allowed {
-			continue
-		}
-		selected = append(selected, bundleDir)
-	}
-
-	for i := range selected {
-		for j := 0; j < i; j++ {
-			parent := selected[j]
-			if isNestedBundle(parent, selected[i]) {
-				return nil, fmt.Errorf("nested spec bundle %q inside %q", filepath.ToSlash(selected[i]), filepath.ToSlash(parent))
-			}
-		}
-	}
-
-	return selected, nil
 }
 
 func isNestedBundle(parent, child string) bool {

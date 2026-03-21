@@ -135,7 +135,6 @@ path = "specs"
 		t.Fatalf("runtime.analysis.provider = %q, want %q", got, want)
 	}
 }
-
 func TestLoadPreservesSourceSelectors(t *testing.T) {
 	t.Parallel()
 

@@ -60,7 +60,7 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 
 	switch source.Kind {
 	case config.SourceKindSpecBundle:
-		bundleDirs, err := discoverSelectedSpecBundles(source)
+		bundleDirs, err := discoverSpecBundles(source)
 		if err != nil {
 			return SourcePreview{}, fmt.Errorf("source %q: %w", source.Name, err)
 		}
