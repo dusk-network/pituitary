@@ -47,6 +47,12 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 }
 
 func renderIndexResult(w io.Writer, result *index.RebuildResult) {
+	if result.DryRun {
+		fmt.Fprintf(w, "dry run validated %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
+		fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
+		fmt.Fprintln(w, "database write: skipped")
+		return
+	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
 }

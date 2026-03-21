@@ -147,6 +147,7 @@ Every command supports `--format json` for machine-readable output.
 | Command | What it does |
 |---|---|
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
+| `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |

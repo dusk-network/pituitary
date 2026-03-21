@@ -9,7 +9,7 @@ import (
 )
 
 var commands = map[string]string{
-	"index":           "rebuild the local Pituitary index",
+	"index":           "rebuild or validate the local Pituitary index",
 	"status":          "show current index status",
 	"version":         "show Pituitary and Go runtime versions",
 	"preview-sources": "show which files each source will index",

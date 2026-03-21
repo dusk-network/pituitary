@@ -14,6 +14,7 @@ import (
 
 type indexRequest struct {
 	Rebuild bool `json:"rebuild"`
+	DryRun  bool `json:"dry_run,omitempty"`
 }
 
 func runIndex(args []string, stdout, stderr io.Writer) int {
@@ -23,14 +24,16 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("index", "pituitary [--config PATH] index --rebuild [--format FORMAT]")
+	help := newCommandHelp("index", "pituitary [--config PATH] index (--rebuild | --dry-run) [--format FORMAT]")
 
 	var (
 		rebuild    bool
+		dryRun     bool
 		format     string
 		configPath string
 	)
 	fs.BoolVar(&rebuild, "rebuild", false, "rebuild the local index")
+	fs.BoolVar(&dryRun, "dry-run", false, "validate config and sources without writing the index")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
@@ -49,19 +52,24 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		}, 2)
 	}
 	if !isSupportedFormat(format) {
-		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild}, cliIssue{
+		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, DryRun: dryRun}, cliIssue{
 			Code:    "validation_error",
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
-	if !rebuild {
-		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: false}, cliIssue{
+	request := indexRequest{Rebuild: rebuild, DryRun: dryRun}
+	if rebuild && dryRun {
+		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "validation_error",
-			Message: "--rebuild is required",
+			Message: "exactly one of --rebuild or --dry-run is allowed",
 		}, 2)
 	}
-
-	request := indexRequest{Rebuild: rebuild}
+	if !rebuild && !dryRun {
+		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+			Code:    "validation_error",
+			Message: "one of --rebuild or --dry-run is required",
+		}, 2)
+	}
 
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
 	if err != nil {
@@ -84,6 +92,22 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 			Code:    "source_error",
 			Message: "source load failed:\n" + err.Error(),
 		}, 2)
+	}
+	if dryRun {
+		result, err := index.PrepareRebuildContext(ctx, cfg, records)
+		if err != nil {
+			if index.IsDependencyUnavailable(err) {
+				return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+					Code:    "dependency_unavailable",
+					Message: "dependency unavailable:\n" + err.Error(),
+				}, 3)
+			}
+			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+				Code:    "internal_error",
+				Message: "dry run failed:\n" + err.Error(),
+			}, 2)
+		}
+		return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)
 	}
 	result, err := index.RebuildContext(ctx, cfg, records)
 	if err != nil {

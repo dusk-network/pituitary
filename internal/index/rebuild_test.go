@@ -112,6 +112,42 @@ func TestRebuildPreservesLastGoodDatabaseOnFailure(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v", err)
+	}
+	if !result.DryRun {
+		t.Fatalf("result = %+v, want dry_run=true", result)
+	}
+	if result.ArtifactCount != 5 || result.SpecCount != 3 || result.DocCount != 2 {
+		t.Fatalf("artifact counts = %+v", result)
+	}
+	if result.ChunkCount != 17 {
+		t.Fatalf("chunk count = %d, want 17", result.ChunkCount)
+	}
+	if result.EdgeCount != 8 {
+		t.Fatalf("edge count = %d, want 8", result.EdgeCount)
+	}
+	if result.EmbedderDimension != 8 {
+		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created database: %v", err)
+	}
+	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".new"); !os.IsNotExist(err) {
+		t.Fatalf("PrepareRebuild() created staging database: %v", err)
+	}
+}
+
 func loadFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 

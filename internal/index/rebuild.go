@@ -23,6 +23,7 @@ const schemaVersion = 2
 
 // RebuildResult reports the staged rebuild outcome.
 type RebuildResult struct {
+	DryRun             bool   `json:"dry_run,omitempty"`
 	IndexPath          string `json:"index_path"`
 	ArtifactCount      int    `json:"artifact_count"`
 	SpecCount          int    `json:"spec_count"`
@@ -38,16 +39,27 @@ func Rebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, er
 	return RebuildContext(context.Background(), cfg, records)
 }
 
-// RebuildContext writes a fresh staging database and atomically swaps it into place.
-func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("config is required")
-	}
-	if records == nil {
-		return nil, fmt.Errorf("records are required")
+// PrepareRebuild validates rebuild prerequisites and summarizes the pending index contents without writing a database.
+func PrepareRebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	return PrepareRebuildContext(context.Background(), cfg, records)
+}
+
+// PrepareRebuildContext validates rebuild prerequisites and summarizes the pending index contents without writing a database.
+func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	embedder, err := prepareRebuildContext(ctx, cfg, records)
+	if err != nil {
+		return nil, err
 	}
 
-	embedder, err := newEmbedder(cfg.Runtime.Embedder)
+	result := summarizeRebuild(records, embedder.Dimension())
+	result.IndexPath = cfg.Workspace.ResolvedIndexPath
+	result.DryRun = true
+	return result, nil
+}
+
+// RebuildContext writes a fresh staging database and atomically swaps it into place.
+func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	embedder, err := prepareRebuildContext(ctx, cfg, records)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +101,46 @@ func RebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	}
 	success = true
 	return result, nil
+}
+
+func prepareRebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (Embedder, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	if records == nil {
+		return nil, fmt.Errorf("records are required")
+	}
+
+	embedder, err := newEmbedder(cfg.Runtime.Embedder)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckSQLiteReadyContext(ctx); err != nil {
+		return nil, err
+	}
+	return embedder, nil
+}
+
+func summarizeRebuild(records *source.LoadResult, dimension int) *RebuildResult {
+	result := &RebuildResult{
+		ArtifactCount:     len(records.Specs) + len(records.Docs),
+		SpecCount:         len(records.Specs),
+		DocCount:          len(records.Docs),
+		EmbedderDimension: dimension,
+	}
+
+	fingerprintParts := make([]string, 0, len(records.Specs)+len(records.Docs))
+	for _, spec := range records.Specs {
+		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
+		result.EdgeCount += len(spec.Relations) + len(spec.AppliesTo)
+		fingerprintParts = append(fingerprintParts, spec.Ref+":"+spec.ContentHash)
+	}
+	for _, doc := range records.Docs {
+		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
+		fingerprintParts = append(fingerprintParts, doc.Ref+":"+doc.ContentHash)
+	}
+	result.ContentFingerprint = fingerprint(fingerprintParts)
+	return result
 }
 
 func buildStaging(db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
