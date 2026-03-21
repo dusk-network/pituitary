@@ -21,6 +21,10 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	switch typed := result.(type) {
 	case *index.RebuildResult:
 		renderIndexResult(w, typed)
+	case *statusResult:
+		renderStatusResult(w, typed)
+	case *versionResult:
+		renderVersionResult(w, typed)
 	case *source.PreviewResult:
 		renderPreviewSourcesResult(w, typed)
 	case *index.SearchSpecResult:
@@ -45,6 +49,30 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+}
+
+func renderStatusResult(w io.Writer, result *statusResult) {
+	fmt.Fprintf(w, "config: %s\n", result.ConfigPath)
+	fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
+	if result.IndexExists {
+		fmt.Fprintln(w, "index: present")
+	} else {
+		fmt.Fprintln(w, "index: missing")
+	}
+	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
+	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
+	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
+}
+
+func renderVersionResult(w io.Writer, result *versionResult) {
+	fmt.Fprintf(w, "version: %s\n", result.Version)
+	fmt.Fprintf(w, "go version: %s\n", result.GoVersion)
+	if result.Commit != "" {
+		fmt.Fprintf(w, "commit: %s\n", result.Commit)
+	}
+	if result.BuildDate != "" {
+		fmt.Fprintf(w, "build date: %s\n", result.BuildDate)
+	}
 }
 
 func renderPreviewSourcesResult(w io.Writer, result *source.PreviewResult) {

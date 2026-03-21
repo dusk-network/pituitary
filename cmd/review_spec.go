@@ -18,6 +18,7 @@ func runReviewSpec(args []string, stdout, stderr io.Writer) int {
 func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("review-spec", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	help := newCommandHelp("review-spec", "pituitary [--config PATH] review-spec (--spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]")
 
 	var (
 		specRef        string
@@ -26,15 +27,17 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
-	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON")
+	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
+	} else if handled {
+		return 0
 	}
 	if fs.NArg() != 0 {
 		return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
