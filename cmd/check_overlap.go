@@ -26,10 +26,12 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 		specRef        string
 		specRecordFile string
 		format         string
+		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
@@ -57,8 +59,15 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "check-overlap", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.CheckOverlap(ctx, "pituitary.toml", request)
+	operation := app.CheckOverlap(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

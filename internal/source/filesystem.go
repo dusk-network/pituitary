@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -114,7 +115,7 @@ func describeOrigin(itemLabel string, origin artifactOrigin) string {
 }
 
 func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
-	bundleDirs, err := discoverSpecBundles(source.ResolvedPath)
+	bundleDirs, err := discoverSpecBundles(source)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", source.Name, err)
 	}
@@ -130,7 +131,37 @@ func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRe
 	return records, nil
 }
 
-func discoverSpecBundles(root string) ([]string, error) {
+func discoverSpecBundles(source config.Source) ([]string, error) {
+	bundleDirs, err := discoverSpecBundleDirs(source.ResolvedPath)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := bundleDirs[:0]
+	for _, bundleDir := range bundleDirs {
+		relBundleSpec := filepath.ToSlash(filepath.Join(workspaceRelative(source.ResolvedPath, bundleDir), "spec.toml"))
+		allowed, err := sourcePathAllowed(source, relBundleSpec)
+		if err != nil {
+			return nil, fmt.Errorf("spec %q: %w", relBundleSpec, err)
+		}
+		if allowed {
+			filtered = append(filtered, bundleDir)
+		}
+	}
+
+	for i := range filtered {
+		for j := 0; j < i; j++ {
+			parent := filtered[j]
+			if isNestedBundle(parent, filtered[i]) {
+				return nil, fmt.Errorf("nested spec bundle %q inside %q", filepath.ToSlash(filtered[i]), filepath.ToSlash(parent))
+			}
+		}
+	}
+
+	return filtered, nil
+}
+
+func discoverSpecBundleDirs(root string) ([]string, error) {
 	var bundleDirs []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -151,15 +182,6 @@ func discoverSpecBundles(root string) ([]string, error) {
 	}
 
 	sort.Strings(bundleDirs)
-	for i := range bundleDirs {
-		for j := 0; j < i; j++ {
-			parent := bundleDirs[j]
-			if isNestedBundle(parent, bundleDirs[i]) {
-				return nil, fmt.Errorf("nested spec bundle %q inside %q", filepath.ToSlash(bundleDirs[i]), filepath.ToSlash(parent))
-			}
-		}
-	}
-
 	return bundleDirs, nil
 }
 
@@ -292,6 +314,17 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		if d.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
+		relPath, err := filepath.Rel(source.ResolvedPath, path)
+		if err != nil {
+			return fmt.Errorf("source %q doc %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+		allowed, err := sourcePathAllowed(source, relPath)
+		if err != nil {
+			return fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+		if !allowed {
+			return nil
+		}
 
 		bodyBytes, err := os.ReadFile(path)
 		if err != nil {
@@ -320,6 +353,36 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		return nil, err
 	}
 	return records, nil
+}
+
+func sourcePathAllowed(source config.Source, relPath string) (bool, error) {
+	relPath = filepath.ToSlash(relPath)
+	if len(source.Include) > 0 {
+		matched := false
+		for _, pattern := range source.Include {
+			ok, err := pathpkg.Match(pattern, relPath)
+			if err != nil {
+				return false, fmt.Errorf("include pattern %q is invalid: %w", pattern, err)
+			}
+			if ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false, nil
+		}
+	}
+	for _, pattern := range source.Exclude {
+		ok, err := pathpkg.Match(pattern, relPath)
+		if err != nil {
+			return false, fmt.Errorf("exclude pattern %q is invalid: %w", pattern, err)
+		}
+		if ok {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func docRefForPath(sourceRoot, path string) (string, error) {

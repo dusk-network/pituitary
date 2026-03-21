@@ -31,13 +31,15 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	fs.SetOutput(io.Discard)
 
 	var (
-		docRefs docRefList
-		scope   string
-		format  string
+		docRefs    docRefList
+		scope      string
+		format     string
+		configPath string
 	)
 	fs.Var(&docRefs, "doc-ref", "target doc ref; repeat to supply doc_refs")
 	fs.StringVar(&scope, "scope", "", "scope selector; only \"all\" is valid")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
@@ -59,8 +61,15 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "check-doc-drift", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.CheckDocDrift(ctx, "pituitary.toml", request)
+	operation := app.CheckDocDrift(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

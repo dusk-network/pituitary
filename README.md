@@ -42,16 +42,124 @@ The bootstrap now has seven working end-to-end commands. Every shipped command s
 Example:
 
 ```sh
-go run . help
-go run . index --rebuild
-go run . index --rebuild --format json
-go run . search-specs --query "rate limiting"
-go run . search-specs --query "rate limiting" --format json
-go run . check-overlap --spec-ref SPEC-042 --format json
-go run . compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042 --format json
-go run . analyze-impact --spec-ref SPEC-042 --format json
-go run . check-doc-drift --scope all --format json
-go run . review-spec --spec-ref SPEC-042 --format json
+# Clone and build
+git clone https://github.com/dusk-network/pituitary.git
+cd pituitary
+go build -o pituitary .
+
+# Build the index from the included example specs
+export ANTHROPIC_API_KEY="your-key"   # or configure another provider
+./pituitary index --rebuild
+
+# Try some queries
+./pituitary search-specs --query "rate limiting"
+./pituitary check-overlap --spec-ref SPEC-042
+./pituitary review-spec --spec-ref SPEC-042
+```
+
+The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
+
+## How It Works
+
+Pituitary manages specs written as **spec bundles**: a `spec.toml` metadata file paired with a `body.md` Markdown file.
+
+```
+specs/
+├── rate-limit-v2/
+│   ├── spec.toml      # id, status, dependencies, applies_to
+│   └── body.md        # the actual spec content
+├── burst-handling/
+│   ├── spec.toml
+│   └── body.md
+└── rate-limit-legacy/
+    ├── spec.toml
+    └── body.md
+```
+
+A `spec.toml` looks like this:
+
+```toml
+id = "SPEC-042"
+title = "Per-Tenant Rate Limiting for Public API Endpoints"
+status = "accepted"
+domain = "api"
+authors = ["emanuele"]
+tags = ["rate-limiting", "api", "multi-tenant", "security"]
+body = "body.md"
+
+supersedes = ["SPEC-008"]
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+]
+```
+
+When you run `pituitary index --rebuild`, Pituitary:
+
+1. Discovers all spec bundles and Markdown docs in your configured sources.
+2. Chunks the content by heading-aware sections.
+3. Generates embeddings for each chunk.
+4. Stores everything — metadata, embeddings, and dependency graph — in a single SQLite database.
+5. Writes to a staging DB first and atomically swaps it in, so a failed rebuild never corrupts your index.
+
+The workspace is configured with a `pituitary.toml` at your project root:
+
+```toml
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+```
+
+## Commands
+
+Every command supports `--format json` for machine-readable output.
+
+| Command | What it does |
+|---|---|
+| `index --rebuild` | Rebuild the SQLite index from all configured sources |
+| `search-specs --query "..."` | Semantic search across indexed spec sections |
+| `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
+| `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |
+| `analyze-impact --spec-ref SPEC-042` | Trace which specs, code refs, and docs are affected by a change |
+| `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
+| `review-spec --spec-ref SPEC-042` | Full review: overlap + comparison + impact + drift in one report |
+
+### Example: full spec review
+
+```sh
+$ ./pituitary review-spec --spec-ref SPEC-042
+
+# Returns a composed report covering:
+#   - Overlapping specs (SPEC-008 detected as significant overlap)
+#   - Comparison (SPEC-042 supersedes SPEC-008, adds per-tenant support)
+#   - Impact (SPEC-055 depends on SPEC-042, 1 doc affected)
+#   - Doc drift (docs/guides/api-rate-limits.md has stale rate values)
+```
+
+### JSON output
+
+All commands share a consistent JSON envelope:
+
+```json
+{
+  "request": { ... },
+  "result": { ... },
+  "warnings": [],
+  "errors": []
+}
 ```
 
 ## Optional MCP

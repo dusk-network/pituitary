@@ -25,11 +25,13 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	fs.SetOutput(io.Discard)
 
 	var (
-		rebuild bool
-		format  string
+		rebuild    bool
+		format     string
+		configPath string
 	)
 	fs.BoolVar(&rebuild, "rebuild", false, "rebuild the local index")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "index", nil, cliIssue{
@@ -58,7 +60,15 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 
 	request := indexRequest{Rebuild: rebuild}
 
-	cfg, err := config.Load("pituitary.toml")
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
+
+	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "config_error",

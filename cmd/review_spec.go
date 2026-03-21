@@ -23,10 +23,12 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 		specRef        string
 		specRecordFile string
 		format         string
+		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
@@ -54,8 +56,15 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "review-spec", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.ReviewSpec(ctx, "pituitary.toml", request)
+	operation := app.ReviewSpec(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "review-spec", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

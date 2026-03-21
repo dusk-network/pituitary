@@ -31,11 +31,13 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 	fs.SetOutput(io.Discard)
 
 	var (
-		specRefs compareSpecRefs
-		format   string
+		specRefs   compareSpecRefs
+		format     string
+		configPath string
 	)
 	fs.Var(&specRefs, "spec-ref", "indexed spec ref; pass exactly two to compare")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "compare-specs", nil, cliIssue{
@@ -63,8 +65,15 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 			Message: "exactly two --spec-ref flags are required",
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.CompareSpecs(ctx, "pituitary.toml", request)
+	operation := app.CompareSpecs(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "compare-specs", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

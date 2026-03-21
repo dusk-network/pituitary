@@ -7,6 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 func renderCommandResult(w io.Writer, command string, result any) error {
@@ -20,6 +21,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	switch typed := result.(type) {
 	case *index.RebuildResult:
 		renderIndexResult(w, typed)
+	case *source.PreviewResult:
+		renderPreviewSourcesResult(w, typed)
 	case *index.SearchSpecResult:
 		renderSearchSpecsResult(w, typed)
 	case *analysis.OverlapResult:
@@ -42,6 +45,33 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+}
+
+func renderPreviewSourcesResult(w io.Writer, result *source.PreviewResult) {
+	if len(result.Sources) == 0 {
+		fmt.Fprintln(w, "no sources")
+		return
+	}
+
+	for i, preview := range result.Sources {
+		fmt.Fprintf(w, "source: %s | %s | root: %s | items: %d\n", preview.Name, preview.Kind, preview.Path, preview.ItemCount)
+		if len(preview.Include) > 0 {
+			fmt.Fprintf(w, "include: %s\n", strings.Join(preview.Include, ", "))
+		}
+		if len(preview.Exclude) > 0 {
+			fmt.Fprintf(w, "exclude: %s\n", strings.Join(preview.Exclude, ", "))
+		}
+		if len(preview.Items) == 0 {
+			fmt.Fprintln(w, "no matching items")
+		} else {
+			for _, item := range preview.Items {
+				fmt.Fprintf(w, "- %s | %s\n", item.ArtifactKind, item.Path)
+			}
+		}
+		if i < len(result.Sources)-1 {
+			fmt.Fprintln(w)
+		}
+	}
 }
 
 func renderSearchSpecsResult(w io.Writer, result *index.SearchSpecResult) {

@@ -59,7 +59,10 @@ func TestBootstrapFixtureWorkspace(t *testing.T) {
 		t.Fatalf("spec fixture count = %d, want %d", got, want)
 	}
 
-	docPaths := mustCollectFiles(t, "docs", ".md")
+	docPaths := append(
+		mustCollectFiles(t, filepath.Join("docs", "guides"), ".md"),
+		mustCollectFiles(t, filepath.Join("docs", "runbooks"), ".md")...,
+	)
 	if got, want := len(docPaths), len(expectations.Docs); got != want {
 		t.Fatalf("doc fixture count = %d, want %d", got, want)
 	}

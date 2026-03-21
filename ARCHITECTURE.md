@@ -94,6 +94,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 ```
 
 This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots.
@@ -320,7 +321,7 @@ The adapter contract keeps that variability out of the analysis engine.
 - For `kind = "spec_bundle"`, recursively walk the configured source root and treat each directory containing a `spec.toml` file as one bundle.
 - A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
 - Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
-- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root.
+- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply optional `include` / `exclude` selectors against source-relative paths.
 - A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
 - A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
 
