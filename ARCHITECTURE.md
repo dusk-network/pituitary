@@ -94,6 +94,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 ```
 
 This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots.
@@ -169,7 +170,7 @@ This keeps the first ship explicit and easy to reason about. No auto-discovery, 
 
 ## Key Design Decision: Tools-Only, No Embedded Agent
 
-Pituitary is a **tools-only system**, not an autonomous agent. Each tool does one job: retrieve context from the index and graph, optionally call an LLM for qualitative analysis, and return structured output. Orchestration lives outside Pituitary, in the calling client or automation layer.
+Pituitary is a **tools-only system**, not an autonomous agent. Each tool does one job: retrieve context from the index and graph, apply deterministic analysis in the current bootstrap, and return structured output. Orchestration lives outside Pituitary, in the calling client or automation layer.
 
 This keeps the core simple, testable, and composable:
 
@@ -320,7 +321,7 @@ The adapter contract keeps that variability out of the analysis engine.
 - For `kind = "spec_bundle"`, recursively walk the configured source root and treat each directory containing a `spec.toml` file as one bundle.
 - A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
 - Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
-- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root.
+- For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply optional `include` / `exclude` selectors against source-relative paths.
 - A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
 - A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
 
@@ -369,47 +370,36 @@ Step 6: Atomic Swap
 
 **Embedding model recommendation:** At 20-100 specs, a local model such as `nomic-embed-text` is sufficient and keeps the system offline-friendly. Cloud embeddings remain easy to swap in behind an `Embedder` interface.
 
-**V1 AI runtime contract:**
+**Bootstrap runtime contract (current implementation):**
 
-- Embeddings and qualitative adjudication should each live behind explicit provider interfaces.
-- The embedder must report its vector dimension, and the rebuilt index must validate that a single rebuild uses one consistent dimension end to end.
-- Tests and CI should use a deterministic fixture provider rather than a live model dependency.
-- If no qualitative analysis provider is configured, deterministic commands such as config validation, ingestion, indexing, and `search_specs` should still work, while AI-backed tools should fail fast with actionable dependency-unavailable errors.
-- V1 should prefer local providers where practical, but must not hardcode one provider into the canonical model or storage contract.
+- The current bootstrap supports one embedder provider: `fixture`.
+- `runtime.analysis` is part of the config shape for forward compatibility, but it must currently be `disabled`.
+- Shipped analysis commands are deterministic today and do not call an external qualitative-analysis provider.
+- Tests and CI should use the deterministic fixture embedder and require no live model credentials.
+- Unsupported runtime providers should fail during config validation with clear, intentional errors.
+- A richer provider boundary remains a future design goal, but it is not part of the current runtime contract.
 
 V1 runtime configuration should be explicit in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`:
 
-| Field | Embedder | Qualitative analysis | Notes |
+| Field | Embedder | Analysis | Notes |
 |---|---|---|---|
-| `provider` | required | required | V1 supports `fixture` and `openai_compatible`; qualitative analysis also allows `disabled` |
-| `model` | required | required unless `provider = "disabled"` | Provider-specific model identifier |
-| `endpoint` | optional | optional | Required for local or self-hosted OpenAI-compatible endpoints |
-| `api_key_env` | optional | optional | Names an environment variable; secrets never live in repo config |
-| `timeout_ms` | required | required | Per-request deadline |
-| `max_retries` | required | required | Retries only for transient transport or provider failures |
-
-Provider responsibilities:
-
-- `Embedder`: report `dimension`, embed batches of text, and classify retryable vs terminal failures.
-- `QualitativeAnalyzer`: accept structured prompts plus a response-schema identifier, return machine-readable JSON, and classify retryable vs terminal failures.
-
-Credential and local-model rules:
-
-- Local deployments should use the same config shape by pointing `endpoint` at a local OpenAI-compatible server.
-- Remote deployments may omit `endpoint` when the provider supplies a default base URL.
-- If `api_key_env` is set but the environment variable is missing, the provider is considered unavailable rather than partially configured.
+| `provider` | optional, defaults to `fixture` | optional, defaults to `disabled` | Any other value is rejected in the bootstrap |
+| `model` | optional, defaults to `fixture-8d` | ignored when analysis is disabled | Kept in the config shape for forward compatibility |
+| `endpoint` | optional | optional | Parsed but unused in the bootstrap runtime |
+| `api_key_env` | optional | optional | Parsed but unused in the bootstrap runtime |
+| `timeout_ms` | optional, defaults to `1000` | optional, defaults to `1000` | Reserved for later provider-backed runtime work |
+| `max_retries` | optional, defaults to `0` | optional, defaults to `0` | Reserved for later provider-backed runtime work |
 
 Degraded behavior rules:
 
-- If the embedder is unavailable, commands that need fresh embeddings, including `index`, `search_specs`, and draft-spec overlap checks, must fail with `dependency_unavailable`.
-- If the qualitative provider is `disabled` or unavailable, deterministic stages may still run internally, but commands that require qualitative adjudication must fail with `dependency_unavailable` rather than returning half-complete analysis.
-- The `fixture` provider mode must be deterministic, require no network access, and be the default mode for CI and local tests.
+- The `fixture` embedder must be deterministic, require no network access, and be the default mode for CI and local tests.
+- Unsupported embedder or analysis providers must fail during config validation rather than degrading silently.
+- Future provider-backed analysis work should preserve the current storage and transport contracts rather than widening them implicitly.
 
 Retry and timeout rules:
 
-- `timeout_ms` applies per provider request, not to an entire multi-step CLI command.
-- Providers may retry only idempotent transient failures such as timeouts, `429`, or `5xx` responses.
-- Validation, authentication, and schema-mismatch failures are terminal and must not be retried.
+- `timeout_ms` and `max_retries` are parsed today so the config shape does not need a second contract change when richer providers are added.
+- The bootstrap runtime itself does not issue network requests, so those fields are currently inert.
 
 **Chunking strategy:** The current implementation uses a lightweight internal Markdown scanner that splits on ATX headings, preserves the nested heading path in each section title, and falls back to one title-scoped chunk when a document has no headings. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
 
@@ -511,12 +501,14 @@ If SQLite stops being sufficient, the vector and storage layers can be abstracte
 
 ### 5. Analysis Tools
 
-#### Design Principle: Deterministic First, LLM Second
+#### Design Principle: Deterministic First, Provider-Backed Adjudication Later
+
+The current bootstrap implementation uses deterministic analysis end to end. References to LLM adjudication below describe the intended extension point for later runtime work, not a shipped requirement today.
 
 All tools follow the same pattern:
 
 1. **Deterministic retrieval** narrows the candidate set using SQL, graph traversal, and vector search
-2. **LLM adjudication** performs the qualitative judgment only on the narrowed set
+2. **Deterministic analysis today** produces the shipped result; richer provider-backed adjudication may be added later on the narrowed set
 
 This keeps retrieval reproducible, testable, and cheap.
 
@@ -554,7 +546,7 @@ CLI exit codes should stay simple:
 
 - `0` success, including success-with-warnings
 - `2` validation or configuration error
-- `3` dependency unavailable, such as a missing analysis provider
+- `3` dependency unavailable, reserved for runtime dependencies such as future provider-backed analysis
 
 #### V1 JSON command contracts
 
@@ -868,13 +860,13 @@ pituitary/
 
 | Goal | First ship | Trigger | Key Data Path |
 |---|---|---|---|
-| 1. Overlap detection | yes | New or changed spec | Spec record -> embed -> candidate retrieval -> LLM adjudication |
-| 2. Tradeoff analysis | yes | Overlap detected | Spec refs -> full text retrieval -> LLM comparison |
-| 3. Impact analysis | yes | Spec accepted/modified/deprecated | Graph traversal + doc search -> LLM severity assessment |
+| 1. Overlap detection | yes | New or changed spec | Spec record -> embed -> candidate retrieval -> deterministic overlap analysis today |
+| 2. Tradeoff analysis | yes | Overlap detected | Spec refs -> full text retrieval -> deterministic comparison today |
+| 3. Impact analysis | yes | Spec accepted/modified/deprecated | Graph traversal + doc search -> deterministic impact analysis today |
 | 4. Code compliance | no | Changed code or diff | Source/diff -> relevant spec retrieval -> LLM compliance check |
-| 5. Doc sync | yes | Changed docs or changed spec | Doc chunks vs spec chunks -> LLM drift detection |
+| 5. Doc sync | yes | Changed docs or changed spec | Doc chunks vs spec chunks -> deterministic drift detection today |
 
-All tools keep the same discipline: retrieval first, LLM judgment second.
+All tools keep the same discipline: retrieval first, then deterministic analysis today or provider-backed adjudication later.
 
 ---
 
@@ -885,7 +877,7 @@ All tools keep the same discipline: retrieval first, LLM judgment second.
 - Freeze canonical ref, source-ref, and applies-to schemes
 - Freeze status and supersession semantics
 - Freeze JSON request, response, and error envelopes
-- Define embedding and analysis provider contracts with deterministic fixture mode
+- Freeze the bootstrap runtime contract while preserving the config shape for later provider-backed runtime work
 - Lock fixture expectations for overlap, impact, and doc drift
 
 ### Workstream 1: Workspace and Ingestion
@@ -944,16 +936,16 @@ The first shipping slice is done when all of the following are true:
 8. `pituitary review-spec --spec-ref SPEC-XXX --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
 9. All required commands work without GitHub, git metadata, or network-only integrations.
 10. All required commands fail with clear validation errors when a spec bundle is malformed.
-11. All shipped commands follow the documented JSON envelope, and AI-backed commands fail with clear dependency-unavailable errors when no analysis provider is configured.
+11. All shipped commands follow the documented JSON envelope, and unsupported runtime providers fail clearly during config validation.
 
 ---
 
 ## Cost and Performance Estimates (50-spec scale)
 
 - **Embedding storage:** low single-digit MBs
-- **Full index rebuild:** comfortably under 20s with local embeddings, usually faster with API embeddings
-- **Per-query latency:** typically 2-3s including one LLM call
+- **Full index rebuild:** comfortably under 20s with the fixture embedder on the bootstrap corpus
+- **Per-query latency:** typically subsecond to low-single-digit seconds on the bootstrap corpus, depending on command
 - **Binary size:** roughly 15-20MB
-- **Marginal analysis cost:** low cents per LLM-backed run, depending on provider and prompt size
+- **Marginal analysis cost:** none in the current bootstrap runtime
 
 The important v1 property is not raw speed. It is that the system stays simple, deterministic in retrieval, and decoupled from any one source or workflow stack.

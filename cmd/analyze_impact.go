@@ -23,10 +23,12 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		specRef    string
 		changeType string
 		format     string
+		configPath string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if err := fs.Parse(args); err != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{
@@ -57,8 +59,15 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 			Message: "--spec-ref is required",
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.AnalyzeImpact(ctx, "pituitary.toml", request)
+	operation := app.AnalyzeImpact(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

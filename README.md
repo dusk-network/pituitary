@@ -35,7 +35,6 @@ cd pituitary
 go build -o pituitary .
 
 # Build the index from the included example specs
-export ANTHROPIC_API_KEY="your-key"   # or configure another provider
 ./pituitary index --rebuild
 
 # Try some queries
@@ -44,7 +43,7 @@ export ANTHROPIC_API_KEY="your-key"   # or configure another provider
 ./pituitary review-spec --spec-ref SPEC-042
 ```
 
-The repo ships with a small example workspace under `specs/` and `docs/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
+The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
 
 ## How It Works
 
@@ -107,6 +106,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 ```
 
 ## Commands
@@ -179,32 +179,25 @@ Add to your MCP client config (e.g., Claude Code `settings.json`):
 
 ## AI Runtime Configuration
 
-Pituitary uses AI for two distinct purposes, configured independently:
+Pituitary's current bootstrap runtime is intentionally narrow and deterministic:
 
-- **Embedder** — generates vector embeddings for semantic search and similarity ranking (deterministic retrieval).
-- **Analysis** — provides qualitative judgments like overlap assessment, tradeoff comparison, and drift detection (LLM adjudication).
+- **Embedder** — `fixture` only. This deterministic embedder is the only supported runtime provider today.
+- **Analysis** — `disabled` only. The shipped analysis commands are deterministic and do not call an external qualitative-analysis provider yet.
 
-Configure both in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`:
+The runtime blocks are optional. If omitted, Pituitary defaults to:
 
 ```toml
 [runtime.embedder]
-provider = "openai"
-model = "text-embedding-3-small"
-endpoint = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
+provider = "fixture"
+model = "fixture-8d"
 
 [runtime.analysis]
-provider = "anthropic"
-model = "claude-sonnet-4-6"
-endpoint = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_API_KEY"
+provider = "disabled"
 ```
 
-Secrets are loaded from environment variables only — never stored in config files.
+Fields such as `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain in the config shape for future runtime work, but non-bootstrap providers are currently rejected during config validation.
 
-**Fixture mode:** For tests and CI, configure `provider = "fixture"` to use deterministic responses with no network calls and no API keys.
-
-**Graceful degradation:** If the analysis provider is unavailable, deterministic commands (like `search-specs`) still work. AI-backed commands fail with a clear `dependency_unavailable` error rather than silently degrading.
+This means the repo works out of the box with no model credentials. If you configure any provider other than `fixture` for `runtime.embedder` or `disabled` for `runtime.analysis`, Pituitary fails fast with a clear unsupported-provider error.
 
 ## Architecture
 
@@ -212,7 +205,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design, including sto
 
 Key design decisions:
 
-- **Deterministic first, LLM second.** Retrieval and ranking use sqlite-vec cosine similarity — reproducible and testable without an LLM. The LLM is only invoked for qualitative judgment.
+- **Deterministic bootstrap today.** Retrieval and the shipped analysis commands run without an external LLM. Richer provider-backed runtime integration is deferred until the runtime contract is implemented end to end.
 - **Tools-only, no embedded agent.** Pituitary exposes discrete tools, not an autonomous agent. Orchestration is the caller's responsibility (your editor, CI, or a wrapper script).
 - **Single file storage.** All state lives in one SQLite database (`pituitary.db`). Atomic rebuild via staging DB + swap ensures consistency.
 

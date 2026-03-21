@@ -31,14 +31,16 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	fs.SetOutput(io.Discard)
 
 	var (
-		query    string
-		format   string
-		domain   string
-		statuses searchSpecsFlagList
-		limit    int
+		query      string
+		format     string
+		domain     string
+		configPath string
+		statuses   searchSpecsFlagList
+		limit      int
 	)
 	fs.StringVar(&query, "query", "", "semantic query")
 	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&domain, "domain", "", "filter by domain")
 	fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
 	fs.IntVar(&limit, "limit", 10, "maximum matches to return")
@@ -88,8 +90,15 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 			Message: fmt.Sprintf("unsupported format %q", format),
 		}, 2)
 	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "search-specs", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
 
-	operation := app.SearchSpecs(ctx, "pituitary.toml", request)
+	operation := app.SearchSpecs(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssue{
 			Code:    operation.Issue.Code,

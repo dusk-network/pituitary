@@ -68,6 +68,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	err := validateStartup(Options{ConfigPath: configPath})
@@ -79,9 +80,7 @@ path = "docs"
 	}
 }
 
-func TestValidateStartupRejectsBrokenEmbedderConfig(t *testing.T) {
-	t.Setenv("PITUITARY_MCP_TEST_MISSING_KEY", "")
-
+func TestValidateStartupRejectsUnsupportedEmbedderProvider(t *testing.T) {
 	configPath := writeMCPServeWorkspace(t, `
 [workspace]
 root = "."
@@ -90,7 +89,6 @@ index_path = ".pituitary/pituitary.db"
 [runtime.embedder]
 provider = "openai_compatible"
 model = "text-embedding-3-small"
-api_key_env = "PITUITARY_MCP_TEST_MISSING_KEY"
 timeout_ms = 1000
 max_retries = 0
 
@@ -105,14 +103,15 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	err := validateStartup(Options{ConfigPath: configPath})
 	if err == nil {
 		t.Fatal("validateStartup() error = nil, want embedder failure")
 	}
-	if !strings.Contains(err.Error(), "api_key_env") {
-		t.Fatalf("validateStartup() error = %v, want api_key_env detail", err)
+	if !strings.Contains(err.Error(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
+		t.Fatalf("validateStartup() error = %v, want unsupported-provider detail", err)
 	}
 }
 
@@ -523,6 +522,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	cfg, err := config.Load(configPath)
