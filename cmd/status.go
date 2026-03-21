@@ -52,10 +52,10 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
 		}, 2)
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("status", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "status", statusRequest{}, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 

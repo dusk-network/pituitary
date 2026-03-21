@@ -56,10 +56,10 @@ func runVersionContext(ctx context.Context, args []string, stdout, stderr io.Wri
 			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
 		}, 2)
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("version", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "version", versionRequest{}, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 

@@ -54,10 +54,10 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
 		}, 2)
 	}
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("index", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, DryRun: dryRun, Verbose: verbose}, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	request := indexRequest{Rebuild: rebuild, DryRun: dryRun, Verbose: verbose}

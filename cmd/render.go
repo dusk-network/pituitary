@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/index"
@@ -44,6 +45,23 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	}
 
 	return nil
+}
+
+func renderCommandTable(w io.Writer, command string, result any) error {
+	description, ok := commands[command]
+	if !ok {
+		return fmt.Errorf("unknown command %q", command)
+	}
+
+	fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
+
+	switch typed := result.(type) {
+	case *index.SearchSpecResult:
+		renderSearchSpecsTable(w, typed)
+		return nil
+	default:
+		return fmt.Errorf("format %q is only supported for search-specs", "table")
+	}
 }
 
 func renderIndexResult(w io.Writer, result *index.RebuildResult) {
@@ -141,6 +159,45 @@ func renderSearchSpecsResult(w io.Writer, result *index.SearchSpecResult) {
 			fmt.Fprintln(w)
 		}
 	}
+}
+
+func renderSearchSpecsTable(w io.Writer, result *index.SearchSpecResult) {
+	if len(result.Matches) == 0 {
+		fmt.Fprintln(w, "no matches")
+		return
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "REF\tTITLE\tSECTION\tSCORE")
+	for _, match := range result.Matches {
+		fmt.Fprintf(
+			tw,
+			"%s\t%s\t%s\t%.3f\n",
+			renderTableValue(match.Ref, 12),
+			renderTableValue(match.Title, 28),
+			renderTableValue(match.SectionHeading, 36),
+			match.Score,
+		)
+	}
+	_ = tw.Flush()
+}
+
+func renderTableValue(value string, maxWidth int) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "-"
+	}
+	if maxWidth <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= maxWidth {
+		return value
+	}
+	if maxWidth <= 3 {
+		return string(runes[:maxWidth])
+	}
+	return string(runes[:maxWidth-3]) + "..."
 }
 
 func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {

@@ -58,10 +58,10 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	}
 
 	request := docDriftRequestFromFlags([]string(docRefs), strings.TrimSpace(scope))
-	if !isSupportedFormat(format) {
+	if err := validateCLIFormat("check-doc-drift", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", request, cliIssue{
 			Code:    "validation_error",
-			Message: fmt.Sprintf("unsupported format %q", format),
+			Message: err.Error(),
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)

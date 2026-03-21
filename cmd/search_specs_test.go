@@ -68,6 +68,44 @@ func TestRunSearchSpecsJSON(t *testing.T) {
 	}
 }
 
+func TestRunSearchSpecsTable(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runSearchSpecs([]string{
+			"--query", "fixed window rate limiting",
+			"--status", "superseded",
+			"--format", "table",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"pituitary search-specs: search spec sections semantically",
+		"REF",
+		"TITLE",
+		"SECTION",
+		"SCORE",
+		"SPEC-008",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runSearchSpecs(--format table) output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunSearchSpecsRejectsMissingQuery(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

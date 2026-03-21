@@ -20,7 +20,21 @@ type cliEnvelope struct {
 }
 
 func isSupportedFormat(format string) bool {
-	return format == "text" || format == "json"
+	return format == "text" || format == "json" || format == "table"
+}
+
+func supportsTableFormat(command string) bool {
+	return command == "search-specs"
+}
+
+func validateCLIFormat(command, format string) error {
+	if !isSupportedFormat(format) {
+		return fmt.Errorf("unsupported format %q", format)
+	}
+	if format == "table" && !supportsTableFormat(command) {
+		return fmt.Errorf("format %q is only supported for search-specs", format)
+	}
+	return nil
 }
 
 func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, result any, warnings []cliIssue) int {
@@ -31,6 +45,13 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 			Warnings: warnings,
 			Errors:   []cliIssue{},
 		})
+	}
+	if format == "table" {
+		if err := renderCommandTable(stdout, command, result); err != nil {
+			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
+			return 2
+		}
+		return 0
 	}
 	if err := renderCommandResult(stdout, command, result); err != nil {
 		fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)

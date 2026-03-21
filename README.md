@@ -142,7 +142,7 @@ Selectors narrow what gets indexed; they do not rewrite refs. For example, a doc
 
 ## Commands
 
-Every command supports `--format json` for machine-readable output.
+Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries.
 
 | Command | What it does |
 |---|---|
