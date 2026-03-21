@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,6 +40,8 @@ type Source struct {
 	Adapter      string
 	Kind         string
 	Path         string
+	Include      []string
+	Exclude      []string
 	ResolvedPath string
 }
 
@@ -75,6 +78,8 @@ type rawSource struct {
 	adapter string
 	kind    string
 	paths   string
+	include []string
+	exclude []string
 }
 
 type rawRuntimeProvider struct {
@@ -121,7 +126,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		ConfigPath: configPath,
-		ConfigDir:  filepath.Dir(configPath),
+		ConfigDir:  configBaseDir(configPath),
 		Workspace: Workspace{
 			Root:      raw.workspace.root,
 			IndexPath: raw.workspace.indexPath,
@@ -152,6 +157,8 @@ func Load(path string) (*Config, error) {
 			Adapter: source.adapter,
 			Kind:    source.kind,
 			Path:    source.paths,
+			Include: append([]string(nil), source.include...),
+			Exclude: append([]string(nil), source.exclude...),
 		})
 	}
 
@@ -161,10 +168,19 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+func configBaseDir(configPath string) string {
+	configDir := filepath.Dir(configPath)
+	if filepath.Base(configPath) == "pituitary.toml" && filepath.Base(configDir) == ".pituitary" {
+		return filepath.Dir(configDir)
+	}
+	return configDir
+}
+
 func parse(file *os.File) (rawConfig, error) {
 	var cfg rawConfig
 	var section string
 	var currentSource *rawSource
+	var activeSourceArrayKey string
 
 	scanner := bufio.NewScanner(file)
 	for lineNo := 1; scanner.Scan(); lineNo++ {
@@ -182,6 +198,7 @@ func parse(file *os.File) (rawConfig, error) {
 			cfg.sources = append(cfg.sources, rawSource{})
 			currentSource = &cfg.sources[len(cfg.sources)-1]
 			section = name
+			activeSourceArrayKey = ""
 			continue
 		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
 			name := strings.TrimSpace(line[1 : len(line)-1])
@@ -189,8 +206,27 @@ func parse(file *os.File) (rawConfig, error) {
 			case "workspace", "runtime.embedder", "runtime.analysis":
 				section = name
 				currentSource = nil
+				activeSourceArrayKey = ""
 			default:
 				return rawConfig{}, fmt.Errorf("line %d: unsupported section %q", lineNo, name)
+			}
+			continue
+		}
+
+		if activeSourceArrayKey != "" {
+			if line == "]" {
+				activeSourceArrayKey = ""
+				continue
+			}
+			if currentSource == nil {
+				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
+			}
+			values, err := parseQuotedValues(line)
+			if err != nil {
+				return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, activeSourceArrayKey, err)
+			}
+			if err := assignSourceArrayField(currentSource, activeSourceArrayKey, values); err != nil {
+				return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
 			}
 			continue
 		}
@@ -218,6 +254,29 @@ func parse(file *os.File) (rawConfig, error) {
 		case "sources":
 			if currentSource == nil {
 				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
+			}
+			if value == "[" {
+				if !isSourceArrayField(key) {
+					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
+				}
+				activeSourceArrayKey = key
+				if err := assignSourceArrayField(currentSource, key, nil); err != nil {
+					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
+				}
+				continue
+			}
+			if strings.HasPrefix(value, "[") {
+				if !isSourceArrayField(key) {
+					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
+				}
+				values, err := parseQuotedValues(value)
+				if err != nil {
+					return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, key, err)
+				}
+				if err := assignSourceArrayField(currentSource, key, values); err != nil {
+					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
+				}
+				continue
 			}
 			if err := parseSourceField(currentSource, key, value, lineNo); err != nil {
 				return rawConfig{}, err
@@ -271,6 +330,27 @@ func parseSourceField(source *rawSource, key, value string, lineNo int) error {
 	return nil
 }
 
+func isSourceArrayField(key string) bool {
+	switch key {
+	case "include", "exclude":
+		return true
+	default:
+		return false
+	}
+}
+
+func assignSourceArrayField(source *rawSource, key string, values []string) error {
+	switch key {
+	case "include":
+		source.include = append(source.include, values...)
+	case "exclude":
+		source.exclude = append(source.exclude, values...)
+	default:
+		return fmt.Errorf("unsupported sources array field %q", key)
+	}
+	return nil
+}
+
 func parseRuntimeField(runtime *rawRuntimeProvider, key, value string, lineNo int, section string) error {
 	switch key {
 	case "provider", "model", "endpoint", "api_key_env":
@@ -314,6 +394,62 @@ func parseQuotedString(value string) (string, error) {
 		return "", fmt.Errorf("parse quoted string: %w", err)
 	}
 	return parsed, nil
+}
+
+func parseQuotedValues(value string) ([]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, fmt.Errorf("expected quoted string")
+	}
+	if strings.HasPrefix(value, "[") {
+		if !strings.HasSuffix(value, "]") {
+			return nil, fmt.Errorf("unterminated array")
+		}
+		value = strings.TrimSpace(value[1 : len(value)-1])
+	}
+
+	var values []string
+	for {
+		value = strings.TrimSpace(value)
+		switch {
+		case value == "":
+			return values, nil
+		case strings.HasPrefix(value, ","):
+			value = value[1:]
+			continue
+		case strings.HasPrefix(value, "]"):
+			value = strings.TrimSpace(value[1:])
+			if value != "" {
+				return nil, fmt.Errorf("unexpected trailing content %q", value)
+			}
+			return values, nil
+		case !strings.HasPrefix(value, "\""):
+			return nil, fmt.Errorf("expected quoted string")
+		}
+
+		quoted := nextQuotedString(value)
+		parsed, err := strconv.Unquote(quoted)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, parsed)
+		value = value[len(quoted):]
+	}
+}
+
+func nextQuotedString(value string) string {
+	escaped := false
+	for i := 1; i < len(value); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case value[i] == '\\':
+			escaped = true
+		case value[i] == '"':
+			return value[:i+1]
+		}
+	}
+	return value
 }
 
 func validate(cfg *Config) error {
@@ -374,6 +510,24 @@ func validate(cfg *Config) error {
 		if source.Path == "" {
 			errs.add("%s.path: value is required", label)
 			continue
+		}
+		for _, pattern := range source.Include {
+			if strings.TrimSpace(pattern) == "" {
+				errs.add("%s.include: patterns must not be empty", label)
+				continue
+			}
+			if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
+				errs.add("%s.include: invalid pattern %q: %v", label, pattern, err)
+			}
+		}
+		for _, pattern := range source.Exclude {
+			if strings.TrimSpace(pattern) == "" {
+				errs.add("%s.exclude: patterns must not be empty", label)
+				continue
+			}
+			if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
+				errs.add("%s.exclude: invalid pattern %q: %v", label, pattern, err)
+			}
 		}
 		if cfg.Workspace.RootPath == "" {
 			continue

@@ -68,6 +68,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	err := validateStartup(Options{ConfigPath: configPath})
@@ -105,6 +106,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	err := validateStartup(Options{ConfigPath: configPath})
@@ -523,6 +525,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	cfg, err := config.Load(configPath)

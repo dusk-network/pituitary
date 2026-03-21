@@ -3,6 +3,7 @@ package source
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -394,6 +395,84 @@ path = "docs-b"
 	}
 }
 
+func TestLoadFromConfigFiltersMarkdownDocsBySelectors(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+exclude = ["runbooks/draft-*.md"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "api-rate-limits.md"), "# API Rate Limits\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "runbooks", "rate-limit-rollout.md"), "# Rollout\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "runbooks", "draft-rollout.md"), "# Draft\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "development", "testing-guide.md"), "# Testing Guide\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Docs), 2; got != want {
+		t.Fatalf("doc count = %d, want %d", got, want)
+	}
+
+	refs := []string{result.Docs[0].Ref, result.Docs[1].Ref}
+	sort.Strings(refs)
+	wantRefs := []string{"doc://guides/api-rate-limits", "doc://runbooks/rate-limit-rollout"}
+	if !equalStrings(refs, wantRefs) {
+		t.Fatalf("doc refs = %#v, want %#v", refs, wantRefs)
+	}
+}
+
+func TestPreviewFromConfigUsesSelectors(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := repoRoot(t)
+	cfg, err := config.Load(filepath.Join(repoRoot, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := PreviewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("PreviewFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Sources), 2; got != want {
+		t.Fatalf("source count = %d, want %d", got, want)
+	}
+
+	specs := result.Sources[0]
+	if specs.Name != "specs" || specs.ItemCount != 3 {
+		t.Fatalf("spec preview = %+v, want 3 spec items", specs)
+	}
+
+	docs := result.Sources[1]
+	if docs.Name != "docs" || docs.ItemCount != 2 {
+		t.Fatalf("docs preview = %+v, want 2 doc items", docs)
+	}
+
+	paths := []string{docs.Items[0].Path, docs.Items[1].Path}
+	sort.Strings(paths)
+	wantPaths := []string{"docs/guides/api-rate-limits.md", "docs/runbooks/rate-limit-rollout.md"}
+	if !equalStrings(paths, wantPaths) {
+		t.Fatalf("doc preview paths = %#v, want %#v", paths, wantPaths)
+	}
+}
+
 func TestLoadFromConfigReadsOversizedSpecArrayValues(t *testing.T) {
 	t.Parallel()
 
@@ -537,4 +616,16 @@ func hasRelation(relations []model.Relation, typ model.RelationType, ref string)
 		}
 	}
 	return false
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

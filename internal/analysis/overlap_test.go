@@ -131,6 +131,7 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
 `)
 
 	cfg, err := config.Load(configPath)

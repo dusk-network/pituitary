@@ -53,6 +53,116 @@ path = "docs"
 	}
 }
 
+func TestLoadResolvesLocalPituitaryConfigRelativeToRepoRoot(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, ".pituitary"))
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+
+	configPath := filepath.Join(repo, ".pituitary", "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := cfg.ConfigDir, filepath.Clean(repo); got != want {
+		t.Fatalf("config dir = %q, want %q", got, want)
+	}
+	if got, want := cfg.Workspace.RootPath, filepath.Clean(repo); got != want {
+		t.Fatalf("workspace root path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Workspace.ResolvedIndexPath, filepath.Join(repo, ".pituitary", "pituitary.db"); got != want {
+		t.Fatalf("resolved index path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[0].ResolvedPath, filepath.Join(repo, "specs"); got != want {
+		t.Fatalf("spec source path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[1].ResolvedPath, filepath.Join(repo, "docs"); got != want {
+		t.Fatalf("doc source path = %q, want %q", got, want)
+	}
+}
+
+func TestLoadPreservesSourceSelectors(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+exclude = ["runbooks/draft-*.md"]
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := cfg.Sources[0].Include, []string{"guides/*.md", "runbooks/*.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("include = %#v, want %#v", got, want)
+	}
+	if got, want := cfg.Sources[0].Exclude, []string{"runbooks/draft-*.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("exclude = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidSourceSelectorPattern(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["["]
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want selector validation error")
+	}
+	if !strings.Contains(err.Error(), `source "docs".include: invalid pattern "["`) {
+		t.Fatalf("Load() error = %q, want selector validation details", err)
+	}
+}
+
 func TestLoadRejectsUnknownAdapter(t *testing.T) {
 	t.Parallel()
 
@@ -169,4 +279,16 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func equalStringSlices(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

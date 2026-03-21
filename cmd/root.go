@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 var commands = map[string]string{
 	"index":           "rebuild the local Pituitary index",
+	"preview-sources": "show which files each source will index",
 	"search-specs":    "search spec sections semantically",
 	"check-overlap":   "find overlapping specs",
 	"compare-specs":   "compare design tradeoffs across specs",
@@ -31,35 +33,55 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 
-	name := args[0]
+	options, remainingArgs, err := parseGlobalCLIOptions(args)
+	if err != nil {
+		if err == flag.ErrHelp {
+			printHelp(stdout)
+			return 0
+		}
+		fmt.Fprintf(stderr, "pituitary: %s\n\n", err)
+		printHelp(stderr)
+		return 2
+	}
+	if len(remainingArgs) == 0 {
+		printHelp(stdout)
+		return 1
+	}
+
+	ctx = withCLIConfigPath(ctx, options.ConfigPath)
+
+	name := remainingArgs[0]
 	if name == "help" || name == "--help" || name == "-h" {
 		printHelp(stdout)
 		return 0
 	}
 
 	if name == "index" {
-		return runIndexContext(ctx, args[1:], stdout, stderr)
+		return runIndexContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "preview-sources" {
+		return runPreviewSourcesContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "search-specs" {
-		return runSearchSpecsContext(ctx, args[1:], stdout, stderr)
+		return runSearchSpecsContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "check-overlap" {
-		return runCheckOverlapContext(ctx, args[1:], stdout, stderr)
+		return runCheckOverlapContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "compare-specs" {
-		return runCompareSpecsContext(ctx, args[1:], stdout, stderr)
+		return runCompareSpecsContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "analyze-impact" {
-		return runAnalyzeImpactContext(ctx, args[1:], stdout, stderr)
+		return runAnalyzeImpactContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "check-doc-drift" {
-		return runCheckDocDriftContext(ctx, args[1:], stdout, stderr)
+		return runCheckDocDriftContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "review-spec" {
-		return runReviewSpecContext(ctx, args[1:], stdout, stderr)
+		return runReviewSpecContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "serve" {
-		return runServe(args[1:], stdout, stderr)
+		return runServeWithConfig(options.ConfigPath, remainingArgs[1:], stdout, stderr)
 	}
 
 	description, ok := commands[name]
@@ -76,6 +98,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "pituitary bootstrap CLI")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "global options:")
+	fmt.Fprintln(w, "  --config PATH     path to workspace config")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "available commands:")
 
