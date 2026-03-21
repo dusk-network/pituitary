@@ -171,6 +171,67 @@ body = "body.md"
 	}
 }
 
+func TestLoadAndPreviewAllowExcludedNestedBundle(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+exclude = ["parent/child/spec.toml"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "specs", "parent", "spec.toml"), `
+id = "SPEC-100"
+title = "Parent"
+status = "draft"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(repo, "specs", "parent", "body.md"), "Parent body\n")
+	mustWriteFile(t, filepath.Join(repo, "specs", "parent", "child", "spec.toml"), `
+id = "SPEC-101"
+title = "Child"
+status = "draft"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(repo, "specs", "parent", "child", "body.md"), "Child body\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Specs), 1; got != want {
+		t.Fatalf("spec count = %d, want %d", got, want)
+	}
+	if got, want := result.Specs[0].Ref, "SPEC-100"; got != want {
+		t.Fatalf("spec ref = %q, want %q", got, want)
+	}
+
+	preview, err := PreviewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("PreviewFromConfig() error = %v", err)
+	}
+	if got, want := preview.Sources[0].ItemCount, 1; got != want {
+		t.Fatalf("preview item count = %d, want %d", got, want)
+	}
+	if got, want := preview.Sources[0].Items[0].Path, "specs/parent/spec.toml"; got != want {
+		t.Fatalf("preview item path = %q, want %q", got, want)
+	}
+}
+
 func TestLoadFromConfigRejectsMalformedSpecArrays(t *testing.T) {
 	t.Parallel()
 

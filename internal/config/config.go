@@ -191,6 +191,9 @@ func parse(file *os.File) (rawConfig, error) {
 
 		switch {
 		case strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]"):
+			if activeSourceArrayKey != "" {
+				return rawConfig{}, fmt.Errorf("line %d: unterminated array for %q", lineNo, activeSourceArrayKey)
+			}
 			name := strings.TrimSpace(line[2 : len(line)-2])
 			if name != "sources" {
 				return rawConfig{}, fmt.Errorf("line %d: unsupported array section %q", lineNo, name)
@@ -201,6 +204,9 @@ func parse(file *os.File) (rawConfig, error) {
 			activeSourceArrayKey = ""
 			continue
 		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			if activeSourceArrayKey != "" {
+				return rawConfig{}, fmt.Errorf("line %d: unterminated array for %q", lineNo, activeSourceArrayKey)
+			}
 			name := strings.TrimSpace(line[1 : len(line)-1])
 			switch name {
 			case "workspace", "runtime.embedder", "runtime.analysis":
@@ -288,6 +294,9 @@ func parse(file *os.File) (rawConfig, error) {
 
 	if err := scanner.Err(); err != nil {
 		return rawConfig{}, fmt.Errorf("read config: %w", err)
+	}
+	if activeSourceArrayKey != "" {
+		return rawConfig{}, fmt.Errorf("unterminated array for %q", activeSourceArrayKey)
 	}
 	return cfg, nil
 }

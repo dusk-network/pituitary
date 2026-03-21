@@ -60,20 +60,12 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 
 	switch source.Kind {
 	case config.SourceKindSpecBundle:
-		bundleDirs, err := discoverSpecBundles(source.ResolvedPath)
+		bundleDirs, err := discoverSpecBundles(source)
 		if err != nil {
 			return SourcePreview{}, fmt.Errorf("source %q: %w", source.Name, err)
 		}
 		for _, bundleDir := range bundleDirs {
 			specPath := filepath.Join(bundleDir, "spec.toml")
-			relSpecPath := filepath.ToSlash(filepath.Join(workspaceRelative(source.ResolvedPath, bundleDir), "spec.toml"))
-			allowed, err := sourcePathAllowed(source, relSpecPath)
-			if err != nil {
-				return SourcePreview{}, fmt.Errorf("source %q spec %q: %w", source.Name, workspaceRelative(workspaceRoot, specPath), err)
-			}
-			if !allowed {
-				continue
-			}
 			preview.Items = append(preview.Items, PreviewItem{
 				ArtifactKind: "spec",
 				Path:         workspaceRelative(workspaceRoot, specPath),
