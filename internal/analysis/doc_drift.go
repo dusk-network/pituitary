@@ -94,9 +94,11 @@ type DocRemediationResult struct {
 
 // DocDriftResult is the structured doc-drift response.
 type DocDriftResult struct {
-	Scope       DocDriftScope         `json:"scope"`
-	DriftItems  []DriftItem           `json:"drift_items"`
-	Remediation *DocRemediationResult `json:"remediation"`
+	Scope          DocDriftScope         `json:"scope"`
+	DriftItems     []DriftItem           `json:"drift_items"`
+	SpecInferences []SpecInference       `json:"spec_inferences,omitempty"`
+	Remediation    *DocRemediationResult `json:"remediation"`
+	Warnings       []Warning             `json:"warnings,omitempty"`
 }
 
 type normalizedClaims struct {
@@ -156,6 +158,8 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument) *DocDriftResult {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
 	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
+	relevantSpecRefs := make([]string, 0, len(specs))
+	warningSpecs := make([]specDocument, 0, len(specs))
 	for _, ref := range sortedDocRefs(selectedDocs) {
 		doc := selectedDocs[ref]
 		relevant := relevantAcceptedSpecs(doc, specs)
@@ -167,14 +171,23 @@ func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocumen
 		if remediation != nil {
 			remediationItems = append(remediationItems, *remediation)
 		}
+		for _, specRef := range item.SpecRefs {
+			if spec, ok := specs[specRef]; ok {
+				relevantSpecRefs = append(relevantSpecRefs, specRef)
+				warningSpecs = append(warningSpecs, spec)
+			}
+		}
 	}
+	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
 
 	return &DocDriftResult{
-		Scope:      scope,
-		DriftItems: driftItems,
+		Scope:          scope,
+		DriftItems:     driftItems,
+		SpecInferences: buildSpecInferences(specs, relevantSpecRefs),
 		Remediation: &DocRemediationResult{
 			Items: remediationItems,
 		},
+		Warnings: buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
 	}
 }
 

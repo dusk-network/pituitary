@@ -98,3 +98,37 @@ func TestRunAnalyzeImpactWithPathJSON(t *testing.T) {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
+
+func TestRunAnalyzeImpactWarnsOnWeakInferredMetadata(t *testing.T) {
+	repo := writePathFirstWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runAnalyzeImpact([]string{"--path", "rfcs/service-sla.md", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Warnings []cliIssue `json:"warnings"`
+		Errors   []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal impact payload: %v", err)
+	}
+	if len(payload.Warnings) == 0 || payload.Warnings[0].Code != "low_confidence_inference" {
+		t.Fatalf("warnings = %+v, want low_confidence_inference warning", payload.Warnings)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}

@@ -234,4 +234,16 @@ Interactive authentication sessions must use tenant-scoped policy checks and sli
 	if got, want := result.Matches[0].Ref, "RFC-AUTH-001"; got != want {
 		t.Fatalf("top match ref = %q, want %q", got, want)
 	}
+	if result.Matches[0].Inference == nil {
+		t.Fatalf("top match inference = nil, want structured inference confidence")
+	}
+	if got, want := result.Matches[0].Inference.Kind, config.SourceKindMarkdownContract; got != want {
+		t.Fatalf("top match inference kind = %q, want %q", got, want)
+	}
+	if got, want := result.Matches[0].Inference.Level, "medium"; got != want {
+		t.Fatalf("top match inference level = %q, want %q", got, want)
+	}
+	if len(result.Matches[0].Inference.Reasons) == 0 || result.Matches[0].Inference.Reasons[0] != "applies_to missing" {
+		t.Fatalf("top match inference reasons = %+v, want applies_to warning", result.Matches[0].Inference.Reasons)
+	}
 }

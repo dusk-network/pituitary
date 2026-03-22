@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/dusk-network/pituitary/internal/analysis"
 )
 
 type cliIssue struct {
@@ -45,6 +47,9 @@ func validateCLIFormat(command, format string) error {
 }
 
 func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, result any, warnings []cliIssue) int {
+	if len(warnings) == 0 {
+		warnings = cliWarningsForResult(result)
+	}
 	if format == "json" {
 		return writeCLIJSON(stdout, cliEnvelope{
 			Request:  request,
@@ -54,6 +59,7 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 		})
 	}
 	if format == "table" {
+		writeCLIWarnings(stderr, command, warnings)
 		if err := renderCommandTable(stdout, command, result); err != nil {
 			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
 			return 2
@@ -61,12 +67,14 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 		return 0
 	}
 	if format == "markdown" {
+		writeCLIWarnings(stderr, command, warnings)
 		if err := renderCommandMarkdown(stdout, command, result); err != nil {
 			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
 			return 2
 		}
 		return 0
 	}
+	writeCLIWarnings(stderr, command, warnings)
 	if err := renderCommandResult(stdout, command, result); err != nil {
 		fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
 		return 2
@@ -97,4 +105,37 @@ func writeCLIJSON(w io.Writer, payload cliEnvelope) int {
 		return 2
 	}
 	return 0
+}
+
+func cliWarningsForResult(result any) []cliIssue {
+	switch typed := result.(type) {
+	case *analysis.AnalyzeImpactResult:
+		return warningsToCLIIssues(typed.Warnings)
+	case *analysis.DocDriftResult:
+		return warningsToCLIIssues(typed.Warnings)
+	case *analysis.ReviewResult:
+		return warningsToCLIIssues(typed.Warnings)
+	default:
+		return nil
+	}
+}
+
+func warningsToCLIIssues(warnings []analysis.Warning) []cliIssue {
+	if len(warnings) == 0 {
+		return nil
+	}
+	issues := make([]cliIssue, 0, len(warnings))
+	for _, warning := range warnings {
+		issues = append(issues, cliIssue{
+			Code:    warning.Code,
+			Message: warning.Message,
+		})
+	}
+	return issues
+}
+
+func writeCLIWarnings(stderr io.Writer, command string, warnings []cliIssue) {
+	for _, warning := range warnings {
+		fmt.Fprintf(stderr, "pituitary %s: warning: %s\n", command, warning.Message)
+	}
 }

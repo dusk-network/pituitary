@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -24,22 +25,24 @@ type OverlapRequest struct {
 
 // OverlapCandidate identifies the spec being evaluated.
 type OverlapCandidate struct {
-	Ref    string `json:"ref"`
-	Title  string `json:"title"`
-	Status string `json:"status,omitempty"`
-	Domain string `json:"domain,omitempty"`
+	Ref       string                     `json:"ref"`
+	Title     string                     `json:"title"`
+	Status    string                     `json:"status,omitempty"`
+	Domain    string                     `json:"domain,omitempty"`
+	Inference *model.InferenceConfidence `json:"inference,omitempty"`
 }
 
 // OverlapItem describes one overlapping indexed spec.
 type OverlapItem struct {
-	Ref             string   `json:"ref"`
-	Title           string   `json:"title"`
-	Status          string   `json:"status,omitempty"`
-	Domain          string   `json:"domain,omitempty"`
-	Score           float64  `json:"score"`
-	OverlapDegree   string   `json:"overlap_degree"`
-	Relationship    string   `json:"relationship"`
-	SharedAppliesTo []string `json:"shared_applies_to,omitempty"`
+	Ref             string                     `json:"ref"`
+	Title           string                     `json:"title"`
+	Status          string                     `json:"status,omitempty"`
+	Domain          string                     `json:"domain,omitempty"`
+	Score           float64                    `json:"score"`
+	OverlapDegree   string                     `json:"overlap_degree"`
+	Relationship    string                     `json:"relationship"`
+	SharedAppliesTo []string                   `json:"shared_applies_to,omitempty"`
+	Inference       *model.InferenceConfidence `json:"inference,omitempty"`
 }
 
 // OverlapResult is the structured overlap output.
@@ -66,6 +69,7 @@ type indexedArtifactRow struct {
 	Status    string
 	Domain    string
 	SourceRef string
+	Metadata  map[string]string
 }
 
 // CheckOverlap compares an indexed or draft spec against indexed specs.
@@ -130,6 +134,7 @@ func buildOverlapResult(candidate *specDocument, targets map[string]specDocument
 			OverlapDegree:   overlapDegree(score),
 			Relationship:    overlapRelationship(candidate.Record, target.Record, score),
 			SharedAppliesTo: sharedAppliesTo,
+			Inference:       target.Record.Inference,
 		})
 	}
 
@@ -144,10 +149,11 @@ func buildOverlapResult(candidate *specDocument, targets map[string]specDocument
 
 	return &OverlapResult{
 		Candidate: OverlapCandidate{
-			Ref:    candidate.Record.Ref,
-			Title:  candidate.Record.Title,
-			Status: candidate.Record.Status,
-			Domain: candidate.Record.Domain,
+			Ref:       candidate.Record.Ref,
+			Title:     candidate.Record.Title,
+			Status:    candidate.Record.Status,
+			Domain:    candidate.Record.Domain,
+			Inference: candidate.Record.Inference,
 		},
 		Overlaps:       overlaps,
 		Recommendation: overlapRecommendation(candidate.Record, overlaps),
@@ -232,6 +238,12 @@ func normalizeDraftSpec(record model.SpecRecord) model.SpecRecord {
 	if record.Metadata == nil {
 		record.Metadata = map[string]string{}
 	}
+	if record.Inference == nil {
+		inference, err := model.DecodeInferenceConfidence(record.Metadata)
+		if err == nil {
+			record.Inference = inference
+		}
+	}
 	return record
 }
 
@@ -288,8 +300,15 @@ func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, refs []string) (ma
 				Domain:     row.Domain,
 				SourceRef:  row.SourceRef,
 				BodyFormat: model.BodyFormatMarkdown,
+				Metadata:   row.Metadata,
 			},
 		}
+		spec := specs[row.Ref]
+		spec.Record.Inference, err = model.DecodeInferenceConfidence(row.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("decode spec inference for %s: %w", row.Ref, err)
+		}
+		specs[row.Ref] = spec
 	}
 
 	if err := loadSpecEdgesContext(ctx, db, specs); err != nil {
@@ -311,6 +330,7 @@ func loadIndexedArtifactRowsContext(ctx context.Context, db *sql.DB, refs []stri
 	args := make([]any, 0, len(refs))
 	builder.WriteString(`
 SELECT ref, title, COALESCE(status, ''), COALESCE(domain, ''), source_ref
+     , metadata_json
 FROM artifacts
 WHERE kind = ?`)
 	args = append(args, model.ArtifactKindSpec)
@@ -335,8 +355,14 @@ WHERE kind = ?`)
 	var result []indexedArtifactRow
 	for rows.Next() {
 		var row indexedArtifactRow
-		if err := rows.Scan(&row.Ref, &row.Title, &row.Status, &row.Domain, &row.SourceRef); err != nil {
+		var rawMetadata string
+		if err := rows.Scan(&row.Ref, &row.Title, &row.Status, &row.Domain, &row.SourceRef, &rawMetadata); err != nil {
 			return nil, fmt.Errorf("scan indexed spec: %w", err)
+		}
+		if strings.TrimSpace(rawMetadata) != "" {
+			if err := json.Unmarshal([]byte(rawMetadata), &row.Metadata); err != nil {
+				return nil, fmt.Errorf("parse indexed metadata for %s: %w", row.Ref, err)
+			}
 		}
 		result = append(result, row)
 	}

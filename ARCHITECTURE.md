@@ -106,6 +106,8 @@ include = ["**/*.md"]
 
 This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots, even as the repo grows into inferred-contract sources.
 
+Inferred `markdown_contract` records must preserve confidence metadata alongside the normalized artifact so result surfaces can distinguish strong explicit extraction from weaker path/default fallbacks. Search should expose those confidence signals inline, while higher-stakes outputs such as impact and doc-drift should elevate weak inference as warnings instead of silently treating it as equally strong.
+
 ---
 
 ## System Overview

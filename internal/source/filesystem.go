@@ -489,6 +489,11 @@ func docRefForPath(sourceRoot, path string) (string, error) {
 }
 
 func docTitle(path string, body []byte) string {
+	title, _ := docTitleWithSource(path, body)
+	return title
+}
+
+func docTitleWithSource(path string, body []byte) (string, string) {
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxScannerTokenSize(len(body)))
 	for scanner.Scan() {
@@ -496,11 +501,11 @@ func docTitle(path string, body []byte) string {
 		if strings.HasPrefix(line, "# ") {
 			title := strings.TrimSpace(strings.TrimPrefix(line, "# "))
 			if title != "" {
-				return title
+				return title, "heading"
 			}
 		}
 	}
-	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), "filename"
 }
 
 type markdownContractFields struct {
@@ -518,6 +523,7 @@ func inferMarkdownContract(workspaceRoot string, source config.Source, path stri
 	if err != nil {
 		return model.SpecRecord{}, err
 	}
+	title, titleSource := docTitleWithSource(path, body)
 
 	refSource := "explicit"
 	ref := strings.TrimSpace(fields.Ref)
@@ -542,11 +548,16 @@ func inferMarkdownContract(workspaceRoot string, source config.Source, path stri
 		"status_source": statusSource,
 		"path_ref":      fallbackRef,
 	}
+	confidence := inferMarkdownContractConfidence(fields, titleSource, refSource, statusSource)
+	metadata, err = model.EncodeInferenceConfidence(metadata, confidence)
+	if err != nil {
+		return model.SpecRecord{}, err
+	}
 
 	return model.SpecRecord{
 		Ref:         ref,
 		Kind:        model.ArtifactKindSpec,
-		Title:       docTitle(path, body),
+		Title:       title,
 		Status:      status,
 		Domain:      domain,
 		Relations:   buildRelations(fields.DependsOn, fields.Supersedes),
@@ -556,7 +567,101 @@ func inferMarkdownContract(workspaceRoot string, source config.Source, path stri
 		BodyText:    string(body),
 		ContentHash: contentHash(body),
 		Metadata:    metadata,
+		Inference:   confidence,
 	}, nil
+}
+
+func inferMarkdownContractConfidence(fields markdownContractFields, titleSource, refSource, statusSource string) *model.InferenceConfidence {
+	fieldScores := []model.InferenceFieldConfidence{
+		{
+			Name:   "title",
+			Source: titleSource,
+			Score:  scoreForInferenceSource(titleSource, 0.9, 0.45),
+		},
+		{
+			Name:   "ref",
+			Source: refSource,
+			Score:  scoreForInferenceSource(refSource, 0.95, 0.55),
+		},
+		{
+			Name:   "status",
+			Source: statusSource,
+			Score:  scoreForInferenceSource(statusSource, 0.9, 0.35),
+		},
+		{
+			Name:   "domain",
+			Source: sourceForScalarField(strings.TrimSpace(fields.Domain)),
+			Score:  scoreForPresence(strings.TrimSpace(fields.Domain) != "", 0.85, 0.25),
+		},
+		{
+			Name:   "applies_to",
+			Source: sourceForListField(fields.AppliesTo),
+			Score:  scoreForPresence(len(fields.AppliesTo) > 0, 0.9, 0.2),
+		},
+	}
+	total := 0.0
+	for i := range fieldScores {
+		fieldScores[i].Level = model.ConfidenceLevelFromScore(fieldScores[i].Score)
+		total += fieldScores[i].Score
+	}
+	score := total / float64(len(fieldScores))
+
+	return &model.InferenceConfidence{
+		Kind:    config.SourceKindMarkdownContract,
+		Level:   model.ConfidenceLevelFromScore(score),
+		Score:   score,
+		Reasons: inferenceReasons(fieldScores),
+		Fields:  fieldScores,
+	}
+}
+
+func scoreForInferenceSource(source string, explicitScore, fallbackScore float64) float64 {
+	switch strings.TrimSpace(source) {
+	case "explicit", "heading":
+		return explicitScore
+	default:
+		return fallbackScore
+	}
+}
+
+func scoreForPresence(present bool, presentScore, missingScore float64) float64 {
+	if present {
+		return presentScore
+	}
+	return missingScore
+}
+
+func sourceForListField(values []string) string {
+	if len(values) > 0 {
+		return "explicit"
+	}
+	return "missing"
+}
+
+func sourceForScalarField(value string) string {
+	if strings.TrimSpace(value) != "" {
+		return "explicit"
+	}
+	return "missing"
+}
+
+func inferenceReasons(fields []model.InferenceFieldConfidence) []string {
+	reasons := make([]string, 0, len(fields))
+	for _, field := range fields {
+		switch {
+		case field.Name == "ref" && field.Source == "path":
+			reasons = append(reasons, "ref inferred from path")
+		case field.Name == "title" && field.Source == "filename":
+			reasons = append(reasons, "title inferred from filename")
+		case field.Name == "status" && field.Source == "default":
+			reasons = append(reasons, "status missing; defaulted to draft")
+		case field.Name == "domain" && field.Source == "missing":
+			reasons = append(reasons, "domain missing")
+		case field.Name == "applies_to" && field.Source == "missing":
+			reasons = append(reasons, "applies_to missing")
+		}
+	}
+	return reasons
 }
 
 func inferMarkdownContractFields(body []byte) markdownContractFields {

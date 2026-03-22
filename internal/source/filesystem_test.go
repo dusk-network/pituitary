@@ -662,6 +662,9 @@ All interactive sessions must use tenant-scoped policy evaluation.
 	if got, want := spec.Metadata["ref_source"], "explicit"; got != want {
 		t.Fatalf("metadata.ref_source = %q, want %q", got, want)
 	}
+	if spec.Inference == nil || spec.Inference.Level != "high" {
+		t.Fatalf("inference = %+v, want high confidence", spec.Inference)
+	}
 
 	preview, err := PreviewFromConfig(cfg)
 	if err != nil {
@@ -728,6 +731,12 @@ Use tenant-scoped limits and preserve burst budgets.
 	}
 	if got, want := spec.Metadata["status_source"], "default"; got != want {
 		t.Fatalf("metadata.status_source = %q, want %q", got, want)
+	}
+	if spec.Inference == nil || spec.Inference.Level != "low" {
+		t.Fatalf("inference = %+v, want low confidence", spec.Inference)
+	}
+	if len(spec.Inference.Reasons) == 0 {
+		t.Fatalf("inference reasons = %+v, want explicit fallback reasons", spec.Inference)
 	}
 }
 

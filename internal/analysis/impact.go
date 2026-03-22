@@ -18,11 +18,12 @@ type AnalyzeImpactRequest struct {
 
 // ImpactedSpec reports one affected spec.
 type ImpactedSpec struct {
-	Ref          string `json:"ref"`
-	Title        string `json:"title"`
-	Status       string `json:"status,omitempty"`
-	Relationship string `json:"relationship"`
-	Historical   bool   `json:"historical"`
+	Ref          string                     `json:"ref"`
+	Title        string                     `json:"title"`
+	Status       string                     `json:"status,omitempty"`
+	Relationship string                     `json:"relationship"`
+	Historical   bool                       `json:"historical"`
+	Inference    *model.InferenceConfidence `json:"inference,omitempty"`
 }
 
 // ImpactedRef reports one affected code or config reference.
@@ -41,11 +42,13 @@ type ImpactedDoc struct {
 
 // AnalyzeImpactResult is the structured impact-analysis response.
 type AnalyzeImpactResult struct {
-	SpecRef       string         `json:"spec_ref"`
-	ChangeType    string         `json:"change_type"`
-	AffectedSpecs []ImpactedSpec `json:"affected_specs"`
-	AffectedRefs  []ImpactedRef  `json:"affected_refs"`
-	AffectedDocs  []ImpactedDoc  `json:"affected_docs"`
+	SpecRef       string                     `json:"spec_ref"`
+	SpecInference *model.InferenceConfidence `json:"spec_inference,omitempty"`
+	ChangeType    string                     `json:"change_type"`
+	AffectedSpecs []ImpactedSpec             `json:"affected_specs"`
+	AffectedRefs  []ImpactedRef              `json:"affected_refs"`
+	AffectedDocs  []ImpactedDoc              `json:"affected_docs"`
+	Warnings      []Warning                  `json:"warnings,omitempty"`
 }
 
 // AnalyzeImpact determines dependent specs, governed refs, and related docs.
@@ -106,12 +109,19 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 }
 
 func buildAnalyzeImpactResult(candidate *specDocument, changeType string, specs map[string]specDocument, docs map[string]docDocument) *AnalyzeImpactResult {
+	relevantSpecs := make([]specDocument, 0, len(specs)+1)
+	relevantSpecs = append(relevantSpecs, *candidate)
+	for _, spec := range specs {
+		relevantSpecs = append(relevantSpecs, spec)
+	}
 	return &AnalyzeImpactResult{
 		SpecRef:       candidate.Record.Ref,
+		SpecInference: candidate.Record.Inference,
 		ChangeType:    changeType,
 		AffectedSpecs: impactedSpecs(candidate.Record, specs),
 		AffectedRefs:  impactedRefs(candidate.Record, specs),
 		AffectedDocs:  impactedDocs(*candidate, docs),
+		Warnings:      buildSpecInferenceWarnings("impact analysis", relevantSpecs...),
 	}
 }
 
@@ -130,6 +140,7 @@ func impactedSpecs(candidate model.SpecRecord, specs map[string]specDocument) []
 				Status:       spec.Record.Status,
 				Relationship: string(model.RelationDependsOn),
 				Historical:   false,
+				Inference:    spec.Record.Inference,
 			})
 		case relationExists(candidate.Relations, model.RelationSupersedes, spec.Record.Ref):
 			result = append(result, ImpactedSpec{
@@ -138,6 +149,7 @@ func impactedSpecs(candidate model.SpecRecord, specs map[string]specDocument) []
 				Status:       spec.Record.Status,
 				Relationship: string(model.RelationSupersedes),
 				Historical:   true,
+				Inference:    spec.Record.Inference,
 			})
 		}
 	}

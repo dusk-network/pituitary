@@ -126,6 +126,8 @@ Selectors are always evaluated relative to the configured source `path`:
 
 `markdown_contract` treats Markdown files as inferred specs. Pituitary reads the first H1 as the title, picks up common metadata lines such as `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` when present, and otherwise falls back to a stable workspace-derived ref like `contract://rfcs/auth/session-policy` with status `draft`.
 
+Inferred contracts carry confidence metadata in results. Search surfaces that confidence inline, and higher-stakes outputs like impact analysis, doc drift, and review reports emit warnings when key inferred fields are weak.
+
 Example for a mixed-layout repo without changing source roots:
 
 ```toml

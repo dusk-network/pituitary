@@ -155,3 +155,37 @@ func TestRunCheckDocDriftTextIncludesRemediation(t *testing.T) {
 		t.Fatalf("runCheckDocDrift() output %q does not contain suggested edit guidance", out)
 	}
 }
+
+func TestRunCheckDocDriftWarnsOnWeakAcceptedContracts(t *testing.T) {
+	repo := writeWeakAcceptedContractWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--scope", "all", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Warnings []cliIssue `json:"warnings"`
+		Errors   []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal drift payload: %v", err)
+	}
+	if len(payload.Warnings) == 0 || payload.Warnings[0].Code != "low_confidence_inference" {
+		t.Fatalf("warnings = %+v, want low_confidence_inference warning", payload.Warnings)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}

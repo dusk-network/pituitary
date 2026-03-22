@@ -132,7 +132,8 @@ func TestRunReviewSpecWithMarkdownContractPathJSON(t *testing.T) {
 				} `json:"overlaps"`
 			} `json:"overlap"`
 		} `json:"result"`
-		Errors []cliIssue `json:"errors"`
+		Warnings []cliIssue `json:"warnings"`
+		Errors   []cliIssue `json:"errors"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal review payload: %v", err)
@@ -142,6 +143,9 @@ func TestRunReviewSpecWithMarkdownContractPathJSON(t *testing.T) {
 	}
 	if len(payload.Result.Overlap.Overlaps) == 0 || payload.Result.Overlap.Overlaps[0].Ref != "SPEC-042" {
 		t.Fatalf("overlap = %+v, want SPEC-042 first", payload.Result.Overlap)
+	}
+	if len(payload.Warnings) == 0 || payload.Warnings[0].Code != "low_confidence_inference" {
+		t.Fatalf("warnings = %+v, want low_confidence_inference warning", payload.Warnings)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
