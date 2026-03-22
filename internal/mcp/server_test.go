@@ -1,10 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -157,6 +160,82 @@ path = "docs"
 	}
 }
 
+func TestServeStdioSubprocessSmoke(t *testing.T) {
+	configPath := writeMCPWorkspace(t)
+	binaryPath := buildPituitaryBinary(t)
+	client, stderrLogs := newStdioSmokeClient(t, binaryPath, configPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var initRequest mcpgo.InitializeRequest
+	initRequest.Params.ProtocolVersion = mcpgo.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcpgo.Implementation{
+		Name:    "pituitary-mcp-smoke",
+		Version: "1.0.0",
+	}
+
+	initResult, err := client.Initialize(ctx, initRequest)
+	if err != nil {
+		t.Fatalf("client.Initialize() error = %v\nstderr:\n%s", err, stderrLogs.detail())
+	}
+	if initResult.ServerInfo.Name != serverName {
+		t.Fatalf("server name = %q, want %q\nstderr:\n%s", initResult.ServerInfo.Name, serverName, stderrLogs.detail())
+	}
+	if initResult.ServerInfo.Version != serverVersion {
+		t.Fatalf("server version = %q, want %q\nstderr:\n%s", initResult.ServerInfo.Version, serverVersion, stderrLogs.detail())
+	}
+
+	toolsResult, err := client.ListTools(ctx, mcpgo.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("client.ListTools() error = %v\nstderr:\n%s", err, stderrLogs.detail())
+	}
+
+	names := make([]string, 0, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		names = append(names, tool.Name)
+	}
+	sort.Strings(names)
+
+	wantTools := shippedToolNames()
+	if len(names) != len(wantTools) {
+		t.Fatalf("tool names = %v, want %v\nstderr:\n%s", names, wantTools, stderrLogs.detail())
+	}
+	for i := range wantTools {
+		if names[i] != wantTools[i] {
+			t.Fatalf("tool names = %v, want %v\nstderr:\n%s", names, wantTools, stderrLogs.detail())
+		}
+	}
+
+	callResult, err := client.CallTool(ctx, mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "search_specs",
+			Arguments: map[string]any{
+				"query": "rate limiting",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("client.CallTool(search_specs) error = %v\nstderr:\n%s", err, stderrLogs.detail())
+	}
+	if callResult.IsError {
+		t.Fatalf("client.CallTool(search_specs) returned tool error: %+v\nstderr:\n%s", callResult, stderrLogs.detail())
+	}
+
+	var payload struct {
+		Matches []struct {
+			Ref string `json:"ref"`
+		} `json:"matches"`
+	}
+	decodeStructuredContent(t, callResult.StructuredContent, &payload)
+	if len(payload.Matches) == 0 {
+		t.Fatalf("search_specs returned no matches\nstderr:\n%s", stderrLogs.detail())
+	}
+	if payload.Matches[0].Ref == "" {
+		t.Fatalf("top match = %+v, want stable ref\nstderr:\n%s", payload.Matches[0], stderrLogs.detail())
+	}
+}
+
 func TestToolsExposeOnlyShippedOperations(t *testing.T) {
 	t.Parallel()
 
@@ -179,14 +258,7 @@ func TestToolsExposeOnlyShippedOperations(t *testing.T) {
 	}
 	sort.Strings(names)
 
-	want := []string{
-		"analyze_impact",
-		"check_doc_drift",
-		"check_overlap",
-		"compare_specs",
-		"review_spec",
-		"search_specs",
-	}
+	want := shippedToolNames()
 	if len(names) != len(want) {
 		t.Fatalf("tool names = %v, want %v", names, want)
 	}
@@ -391,6 +463,26 @@ type callToolOutcome struct {
 	err    error
 }
 
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) detail() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buf.Len() == 0 {
+		return "<empty>"
+	}
+	return strings.TrimSpace(b.buf.String())
+}
+
 func newWrappedInProcessClient(t *testing.T, options Options, toolName string, started chan struct{}) *mcpclient.Client {
 	t.Helper()
 
@@ -427,6 +519,35 @@ func newWrappedInProcessClient(t *testing.T, options Options, toolName string, s
 	}
 
 	return client
+}
+
+func newStdioSmokeClient(t *testing.T, binaryPath, configPath string) (*mcpclient.Client, *lockedBuffer) {
+	t.Helper()
+
+	client, err := mcpclient.NewStdioMCPClient(binaryPath, nil, "--config", configPath, "serve", "--transport", "stdio")
+	if err != nil {
+		t.Fatalf("NewStdioMCPClient() error = %v", err)
+	}
+
+	stderrLogs := &lockedBuffer{}
+	stderrDone := make(chan struct{})
+	if stderr, ok := mcpclient.GetStderr(client); ok {
+		go func() {
+			_, _ = io.Copy(stderrLogs, stderr)
+			close(stderrDone)
+		}()
+	} else {
+		close(stderrDone)
+	}
+
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Errorf("client.Close() error = %v", err)
+		}
+		<-stderrDone
+	})
+
+	return client, stderrLogs
 }
 
 func wrapToolForCancellation(t *testing.T, tools []mcpserver.ServerTool, toolName string, started chan struct{}) []mcpserver.ServerTool {
@@ -489,6 +610,17 @@ func toolResultText(result *mcpgo.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+func shippedToolNames() []string {
+	return []string{
+		"analyze_impact",
+		"check_doc_drift",
+		"check_overlap",
+		"compare_specs",
+		"review_spec",
+		"search_specs",
+	}
 }
 
 func writeMCPWorkspace(t *testing.T) string {
@@ -599,4 +731,26 @@ func mustWriteMCPFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func buildPituitaryBinary(t *testing.T) string {
+	t.Helper()
+
+	repoRoot := mcpRepoRoot(t)
+	cacheDir := filepath.Join(t.TempDir(), "go-build")
+	binaryPath := filepath.Join(t.TempDir(), "pituitary")
+
+	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(),
+		"CGO_ENABLED=1",
+		"GOCACHE="+cacheDir,
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build ./ error = %v\n%s", err, output)
+	}
+
+	return binaryPath
 }
