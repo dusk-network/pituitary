@@ -13,6 +13,7 @@ func TestRunCommandHelpAcrossSurface(t *testing.T) {
 		"index":            {"usage: pituitary [--config PATH] index (--rebuild | --dry-run) [--format FORMAT]", "shared config resolution:", "PITUITARY_CONFIG", "--rebuild", "--dry-run", "--verbose"},
 		"status":           {"usage: pituitary [--config PATH] status", "shared config resolution:", "--format VALUE"},
 		"preview-sources":  {"usage: pituitary [--config PATH] preview-sources", "shared config resolution:", "--format VALUE"},
+		"explain-file":     {"usage: pituitary [--config PATH] explain-file PATH [--format FORMAT]", "shared config resolution:", "--format VALUE"},
 		"search-specs":     {"usage: pituitary [--config PATH] search-specs --query TEXT", "shared config resolution:", "--query VALUE", "--limit N"},
 		"check-overlap":    {"usage: pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-ref VALUE", "--spec-record-file VALUE"},
 		"compare-specs":    {"usage: pituitary [--config PATH] compare-specs (--spec-ref REF --spec-ref REF | --path PATH --path PATH) [--format FORMAT]", "shared config resolution:", "--spec-ref VALUE", "--path VALUE"},

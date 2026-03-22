@@ -31,7 +31,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "canonicalize" || name == "discover" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "discover" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
@@ -58,6 +58,8 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 					args = []string{name}
 				} else if name == "preview-sources" {
 					args = []string{name}
+				} else if name == "explain-file" {
+					args = []string{name, "docs/guides/api-rate-limits.md"}
 				} else if name == "search-specs" {
 					indexStdout := bytes.Buffer{}
 					indexStderr := bytes.Buffer{}
