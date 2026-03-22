@@ -537,6 +537,7 @@ func newStdioSmokeClient(t *testing.T, binaryPath, configPath string) (*mcpclien
 			close(stderrDone)
 		}()
 	} else {
+		t.Log("subprocess stderr unavailable; diagnostic output will be missing")
 		close(stderrDone)
 	}
 
@@ -737,19 +738,17 @@ func buildPituitaryBinary(t *testing.T) string {
 	t.Helper()
 
 	repoRoot := mcpRepoRoot(t)
-	cacheDir := filepath.Join(t.TempDir(), "go-build")
 	binaryPath := filepath.Join(t.TempDir(), "pituitary")
 
 	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(),
 		"CGO_ENABLED=1",
-		"GOCACHE="+cacheDir,
 	)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go build ./ error = %v\n%s", err, output)
+		t.Fatalf("go build . error = %v\n%s", err, output)
 	}
 
 	return binaryPath

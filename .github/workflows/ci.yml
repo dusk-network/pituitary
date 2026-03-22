@@ -45,6 +45,7 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # fmt-check is platform-independent; run it only in the linux go job.
       - name: Run SQLite readiness smoke test
         run: make smoke-sqlite-vec
 
