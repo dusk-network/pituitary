@@ -10,6 +10,7 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 ## Coding Standards
 
 - Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before deep implementation work. Use the active GitHub issues for backlog and priority context.
+- If you touch core write paths or repo governance, also read [docs/development/repo-governance.md](docs/development/repo-governance.md).
 - Treat repository docs as the primary source of truth; keep GitHub issues aligned with them rather than the reverse.
 - Prefer small, reversible changes and deterministic tooling over hand-maintained generated state.
 - Keep outputs machine-readable where the architecture expects JSON-first behavior.
