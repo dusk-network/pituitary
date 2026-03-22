@@ -1,6 +1,6 @@
 # Repository Governance
 
-This repo benefits from lightweight governance, not CCD-style kernel enforcement.
+This repo benefits from lightweight governance, not heavyweight process enforcement.
 
 Pituitary's core risk is not continuity state across multiple agents or long-lived control loops. Its risk is narrower: user trust in a few write paths and in the correctness of the derived index that all analysis reads from.
 
@@ -79,24 +79,24 @@ These invariants deserve blocking coverage in `go test ./...`:
 
 1. Discovery write contract
    - `discover --write` must produce a config that `preview-sources` and `index --rebuild` accept
-   - coverage: [cmd/discover_test.go](/Users/emanuele/devel/pituitary/cmd/discover_test.go)
+   - coverage: [cmd/discover_test.go](../../cmd/discover_test.go)
 
 2. Canonicalization write contract
    - `canonicalize --write` must produce a loadable spec bundle and preserve the stable inferred ref
-   - coverage: [internal/source/canonicalize_test.go](/Users/emanuele/devel/pituitary/internal/source/canonicalize_test.go), [cmd/canonicalize_test.go](/Users/emanuele/devel/pituitary/cmd/canonicalize_test.go)
+   - coverage: [internal/source/canonicalize_test.go](../../internal/source/canonicalize_test.go), [cmd/canonicalize_test.go](../../cmd/canonicalize_test.go)
 
 3. Rebuild/dry-run contract
    - dry-run must be side-effect free while validating the same relevant filesystem preconditions as rebuild
    - rebuild must remain staged and atomic
-   - coverage: [cmd/index_test.go](/Users/emanuele/devel/pituitary/cmd/index_test.go), [internal/index/rebuild_test.go](/Users/emanuele/devel/pituitary/internal/index/rebuild_test.go)
+   - coverage: [cmd/index_test.go](../../cmd/index_test.go), [internal/index/rebuild_test.go](../../internal/index/rebuild_test.go)
 
 4. Workspace-relative path contract
    - path-first commands must resolve relative paths against the workspace root, not the caller's current directory
-   - coverage: [cmd/analyze_impact_test.go](/Users/emanuele/devel/pituitary/cmd/analyze_impact_test.go) and other `cmd/*_test.go` path-first cases
+   - coverage: [cmd/analyze_impact_test.go](../../cmd/analyze_impact_test.go) and other `cmd/*_test.go` path-first cases
 
 5. Dogfood sanity contract
    - the internal dogfood workspace must preview, load, and dry-run successfully against the curated doc set
-   - coverage: [dogfood_test.go](/Users/emanuele/devel/pituitary/dogfood_test.go)
+   - coverage: [dogfood_test.go](../../dogfood_test.go)
 
 The current `make ci` path is sufficient for blocking enforcement because it already runs:
 
