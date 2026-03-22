@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -207,11 +206,7 @@ func normalizeSpecSelectorPath(workspaceRoot, rawPath string) (string, error) {
 
 	absPath := rawPath
 	if !filepath.IsAbs(absPath) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("resolve working directory: %w", err)
-		}
-		absPath = filepath.Join(cwd, absPath)
+		absPath = filepath.Join(workspaceRoot, absPath)
 	}
 	absPath, err := filepath.Abs(absPath)
 	if err != nil {
