@@ -121,6 +121,7 @@ type complianceTarget struct {
 	RefCandidates []string
 	Content       string
 	Embedding     []float64
+	RemovedOnly   bool
 }
 
 type complianceAssessment struct {
@@ -312,14 +313,15 @@ func loadDiffComplianceTargetsContext(ctx context.Context, diffText string, embe
 	targets := make([]complianceTarget, 0, len(parsed))
 	texts := make([]string, 0, len(parsed))
 	for _, item := range parsed {
-		content := parsedDiffTargetContent(item)
-		if stringsTrimSpace(content) == "" {
+		content, removedOnly := parsedDiffTargetContent(item)
+		if stringsTrimSpace(content) == "" && !removedOnly {
 			continue
 		}
 		targets = append(targets, complianceTarget{
 			Path:          item.Path,
 			RefCandidates: governedRefsForPath(item.Path),
 			Content:       content,
+			RemovedOnly:   removedOnly,
 		})
 		texts = append(texts, textForEmbedding(item.Path, item.Path, content))
 	}
@@ -466,16 +468,16 @@ func parseDiffPathToken(token string) string {
 	return normalizeCompliancePath(token)
 }
 
-func parsedDiffTargetContent(target parsedDiffTarget) string {
+func parsedDiffTargetContent(target parsedDiffTarget) (string, bool) {
 	switch {
 	case len(target.Added) > 0:
-		return strings.Join(target.Added, "\n")
+		return strings.Join(target.Added, "\n"), false
 	case len(target.Context) > 0:
-		return strings.Join(target.Context, "\n")
+		return strings.Join(target.Context, "\n"), false
 	case len(target.Removed) > 0:
-		return strings.Join(target.Removed, "\n")
+		return "", true
 	default:
-		return ""
+		return "", false
 	}
 }
 
@@ -608,6 +610,22 @@ func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, 
 }
 
 func assessComplianceSpec(spec specDocument, target complianceTarget) complianceAssessment {
+	if target.RemovedOnly {
+		heading, score := strongestComplianceSection(spec, target)
+		return complianceAssessment{
+			Kind: "unspecified",
+			Finding: ComplianceFinding{
+				Path:           target.Path,
+				SpecRef:        spec.Record.Ref,
+				Title:          spec.Record.Title,
+				SectionHeading: heading,
+				Code:           "removed_content",
+				Message:        fmt.Sprintf("%s removes code governed by %s; deleted lines are not treated as active evidence, so compliance cannot be confirmed from the diff alone", target.Path, spec.Record.Ref),
+			},
+			Score: score,
+		}
+	}
+
 	var (
 		bestSupport  *complianceAssessment
 		bestConflict *complianceAssessment

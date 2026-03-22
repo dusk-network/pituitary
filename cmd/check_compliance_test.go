@@ -275,6 +275,89 @@ index 0000000..1111111 100644
 	}
 }
 
+func TestRunCheckComplianceDeletionDiffDoesNotFlagRemovedContent(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	oldStdin := cliStdin
+	cliStdin = strings.NewReader(strings.TrimSpace(`
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+deleted file mode 100644
+index 1111111..0000000
+--- a/src/api/middleware/ratelimiter.go
++++ /dev/null
+@@ -1,6 +0,0 @@
+-package middleware
+-
+-// Apply limits per API key.
+-// Enforce a default limit of 100 requests per minute.
+-// Use a fixed-window limiter.
+-func buildLimiter() {}
+`))
+	t.Cleanup(func() {
+		cliStdin = oldStdin
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--diff-file", "-",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance(--diff-file -) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance(--diff-file -) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Paths       []string `json:"paths"`
+			Compliant   []any    `json:"compliant"`
+			Conflicts   []any    `json:"conflicts"`
+			Unspecified []struct {
+				Path    string `json:"path"`
+				SpecRef string `json:"spec_ref"`
+				Code    string `json:"code"`
+			} `json:"unspecified"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal deletion diff payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Paths) != 1 || payload.Result.Paths[0] != "src/api/middleware/ratelimiter.go" {
+		t.Fatalf("result.paths = %v, want ratelimiter path", payload.Result.Paths)
+	}
+	if len(payload.Result.Conflicts) != 0 {
+		t.Fatalf("result.conflicts = %+v, want no conflicts for deleted content", payload.Result.Conflicts)
+	}
+	if len(payload.Result.Compliant) != 0 {
+		t.Fatalf("result.compliant = %+v, want no compliant findings for deleted content", payload.Result.Compliant)
+	}
+	if len(payload.Result.Unspecified) == 0 {
+		t.Fatal("result.unspecified is empty, want removed_content findings")
+	}
+	for _, item := range payload.Result.Unspecified {
+		if item.Path != "src/api/middleware/ratelimiter.go" {
+			t.Fatalf("unspecified finding = %+v, want ratelimiter path", item)
+		}
+		if item.SpecRef == "" {
+			t.Fatalf("unspecified finding = %+v, want explicit governing spec ref", item)
+		}
+		if item.Code != "removed_content" {
+			t.Fatalf("unspecified finding = %+v, want removed_content", item)
+		}
+	}
+}
+
 func rebuildSearchWorkspaceIndex(t *testing.T) {
 	t.Helper()
 	if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
