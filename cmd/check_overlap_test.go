@@ -66,6 +66,50 @@ func TestRunCheckOverlapWithSpecRefJSON(t *testing.T) {
 	}
 }
 
+func TestRunCheckOverlapWithPathJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--path", "specs/rate-limit-v2", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef string `json:"spec_ref"`
+		} `json:"request"`
+		Result struct {
+			Candidate struct {
+				Ref string `json:"ref"`
+			} `json:"candidate"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap payload: %v", err)
+	}
+	if payload.Request.SpecRef != "SPEC-042" {
+		t.Fatalf("request spec_ref = %q, want SPEC-042", payload.Request.SpecRef)
+	}
+	if payload.Result.Candidate.Ref != "SPEC-042" {
+		t.Fatalf("candidate ref = %q, want SPEC-042", payload.Result.Candidate.Ref)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunCheckOverlapWithSpecRecordFileJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
@@ -260,5 +304,42 @@ func TestRunCheckOverlapReportsUnknownSpecRefActionably(t *testing.T) {
 	}
 	if !strings.Contains(payload.Errors[0].Message, "pituitary index --rebuild") {
 		t.Fatalf("payload error message = %q, want rebuild guidance", payload.Errors[0].Message)
+	}
+}
+
+func TestRunCheckOverlapReportsUnknownPathActionably(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--path", "specs/missing/spec.toml", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result any        `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap error payload: %v", err)
+	}
+	if payload.Result != nil {
+		t.Fatalf("payload result = %#v, want nil", payload.Result)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "not_found" {
+		t.Fatalf("payload errors = %+v, want one not_found error", payload.Errors)
+	}
+	if !strings.Contains(payload.Errors[0].Message, `unknown --path "specs/missing/spec.toml"`) {
+		t.Fatalf("payload error message = %q, want actionable path detail", payload.Errors[0].Message)
 	}
 }

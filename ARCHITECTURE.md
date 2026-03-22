@@ -763,9 +763,9 @@ CLI examples:
 ```text
 pituitary index --rebuild
 pituitary search-specs --query "rate limiting" --format json
-pituitary check-overlap --spec-ref SPEC-042
+pituitary check-overlap --path specs/rate-limit-v2
 pituitary check-doc-drift --scope all --format json
-pituitary review-spec --spec-ref SPEC-042 --format json
+pituitary review-spec --path specs/rate-limit-v2 --format json
 ```
 
 When MCP is present, its tool names should mirror the shipped analysis tools:
@@ -946,11 +946,11 @@ The first shipping slice is done when all of the following are true:
 1. `pituitary index --rebuild` reads `pituitary.toml`, builds a fresh SQLite index, and swaps it atomically.
 2. A fixture workspace with at least three specs and two docs can be indexed without manual intervention.
 3. `pituitary search-specs --query "..." --format json` returns ranked spec sections with stable artifact refs.
-4. `pituitary check-overlap --spec-ref SPEC-XXX --format json` detects a known overlapping fixture pair.
-5. `pituitary compare-specs --spec-ref SPEC-A --spec-ref SPEC-B --format json` returns a structured comparison for indexed specs.
-6. `pituitary analyze-impact --spec-ref SPEC-XXX --format json` returns dependent specs and affected docs from the graph and retrieval layers.
+4. `pituitary check-overlap --path specs/<bundle> --format json` detects a known overlapping fixture pair without requiring a ref lookup first.
+5. `pituitary compare-specs --path path/to/spec-a --path path/to/spec-b --format json` returns a structured comparison for indexed specs.
+6. `pituitary analyze-impact --path path/to/spec --format json` returns dependent specs and affected docs from the graph and retrieval layers.
 7. `pituitary check-doc-drift --scope all --format json` flags at least one known contradictory fixture doc.
-8. `pituitary review-spec --spec-ref SPEC-XXX --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
+8. `pituitary review-spec --path path/to/spec --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
 9. All required commands work without GitHub, git metadata, or network-only integrations.
 10. All required commands fail with clear validation errors when a spec bundle is malformed.
 11. All shipped commands follow the documented JSON envelope, and unsupported runtime providers fail clearly during config validation.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
@@ -23,15 +24,17 @@ func runCheckOverlap(args []string, stdout, stderr io.Writer) int {
 func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-overlap", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-overlap", "pituitary [--config PATH] check-overlap (--spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("check-overlap", "pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]")
 
 	var (
 		specRef        string
+		specPath       string
 		specRecordFile string
 		format         string
 		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
+	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
 	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
@@ -51,23 +54,45 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 		}, 2)
 	}
 
-	request, err := overlapRequestFromFlags(strings.TrimSpace(specRef), strings.TrimSpace(specRecordFile))
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
 	if err := validateCLIFormat("check-overlap", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", request, cliIssue{
+		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", request, cliIssue{
+		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
 			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
+	trimmedSpecRef := strings.TrimSpace(specRef)
+	trimmedSpecPath := strings.TrimSpace(specPath)
+	trimmedSpecRecordFile := strings.TrimSpace(specRecordFile)
+	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedSpecRecordFile) > 1 {
+		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
+			Code:    "validation_error",
+			Message: "exactly one of --path, --spec-ref, or --spec-record-file is allowed",
+		}, 2)
+	}
+	if trimmedSpecPath != "" {
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		trimmedSpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
+		if err != nil {
+			return writeSpecPathResolutionError(stdout, stderr, format, "check-overlap", nil, err)
+		}
+	}
+	request, err := overlapRequestFromFlagsContext(trimmedSpecRef, trimmedSpecRecordFile)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
+			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
 	}
@@ -83,7 +108,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 	return writeCLISuccess(stdout, stderr, format, "check-overlap", operation.Request, operation.Result, nil)
 }
 
-func overlapRequestFromFlags(specRef, specRecordFile string) (analysis.OverlapRequest, error) {
+func overlapRequestFromFlagsContext(specRef, specRecordFile string) (analysis.OverlapRequest, error) {
 	request := analysis.OverlapRequest{SpecRef: specRef}
 	switch {
 	case specRef != "" && specRecordFile != "":

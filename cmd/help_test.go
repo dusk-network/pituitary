@@ -14,12 +14,12 @@ func TestRunCommandHelpAcrossSurface(t *testing.T) {
 		"status":           {"usage: pituitary [--config PATH] status", "shared config resolution:", "--format VALUE"},
 		"preview-sources":  {"usage: pituitary [--config PATH] preview-sources", "shared config resolution:", "--format VALUE"},
 		"search-specs":     {"usage: pituitary [--config PATH] search-specs --query TEXT", "shared config resolution:", "--query VALUE", "--limit N"},
-		"check-overlap":    {"usage: pituitary [--config PATH] check-overlap", "shared config resolution:", "--spec-ref VALUE", "--spec-record-file VALUE"},
-		"compare-specs":    {"usage: pituitary [--config PATH] compare-specs", "shared config resolution:", "--spec-ref VALUE"},
-		"analyze-impact":   {"usage: pituitary [--config PATH] analyze-impact --spec-ref REF", "shared config resolution:", "--change-type VALUE"},
+		"check-overlap":    {"usage: pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-ref VALUE", "--spec-record-file VALUE"},
+		"compare-specs":    {"usage: pituitary [--config PATH] compare-specs (--spec-ref REF --spec-ref REF | --path PATH --path PATH) [--format FORMAT]", "shared config resolution:", "--spec-ref VALUE", "--path VALUE"},
+		"analyze-impact":   {"usage: pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF) [--change-type TYPE] [--format FORMAT]", "shared config resolution:", "--path VALUE", "--change-type VALUE"},
 		"check-compliance": {"usage: pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--diff-file VALUE"},
 		"check-doc-drift":  {"usage: pituitary [--config PATH] check-doc-drift", "shared config resolution:", "--doc-ref VALUE", "--scope VALUE"},
-		"review-spec":      {"usage: pituitary [--config PATH] review-spec", "shared config resolution:", "--spec-record-file VALUE"},
+		"review-spec":      {"usage: pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-record-file VALUE"},
 		"serve":            {"usage: pituitary [--config PATH] serve", "shared config resolution:", "--transport VALUE"},
 	}
 

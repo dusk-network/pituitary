@@ -39,8 +39,8 @@ go build -o pituitary .
 
 # Try some queries
 ./pituitary search-specs --query "rate limiting"
-./pituitary check-overlap --spec-ref SPEC-042
-./pituitary review-spec --spec-ref SPEC-042
+./pituitary check-overlap --path specs/rate-limit-v2
+./pituitary review-spec --path specs/rate-limit-v2
 ```
 
 The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
@@ -160,18 +160,20 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
-| `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
-| `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |
-| `analyze-impact --spec-ref SPEC-042` | Trace which specs, code refs, and docs are affected by a change |
+| `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
+| `compare-specs --path specs/rate-limit-legacy/spec.toml --path specs/rate-limit-v2/spec.toml` | Side-by-side tradeoff analysis of two specs |
+| `analyze-impact --path specs/rate-limit-v2/body.md` | Trace which specs, code refs, and docs are affected by a change |
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
-| `review-spec --spec-ref SPEC-042` | Full review: overlap + comparison + impact + drift + remediation in one report |
+| `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
 
 ### Example: full spec review
 
+Path-first commands accept workspace-relative paths, absolute paths, bundle directories, `spec.toml` files, `body.md` files, and inferred `markdown_contract` files. Internally they still normalize to canonical indexed refs.
+
 ```sh
-$ ./pituitary review-spec --spec-ref SPEC-042
+$ ./pituitary review-spec --path specs/rate-limit-v2
 
 # Returns a composed report covering:
 #   - Overlapping specs (SPEC-008 detected as significant overlap)
