@@ -61,6 +61,7 @@ Contributor docs:
 - [docs/development/architecture-guide.md](docs/development/architecture-guide.md)
 - [docs/development/testing-guide.md](docs/development/testing-guide.md)
 - [docs/development/adding-a-command.md](docs/development/adding-a-command.md)
+- [docs/development/releasing.md](docs/development/releasing.md)
 
 ## Project Structure
 
@@ -116,6 +117,12 @@ Tests use a **deterministic fixture provider** — no live API keys or network a
 - Run the smallest check that proves your change works.
 
 If a command needs live AI to function, ensure it fails gracefully with `dependency_unavailable` when the provider is absent.
+
+## Release Process
+
+Maintainers cut releases by pushing an annotated `v*` tag from `main`. The tag-driven workflow packages prebuilt archives with GoReleaser and publishes them to GitHub Releases.
+
+See [docs/development/releasing.md](docs/development/releasing.md) for the exact steps and the currently automated platform targets.
 
 ## Submitting a PR
 

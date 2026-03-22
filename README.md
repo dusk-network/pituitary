@@ -13,6 +13,8 @@ Pituitary keeps your specifications, code, and documentation from drifting out o
 
 It ships as a single Go binary — no Docker, no external services. Just `pituitary` and one SQLite file.
 
+Prebuilt release archives are published on [GitHub Releases](https://github.com/dusk-network/pituitary/releases) for `linux/amd64`, `darwin/arm64`, and `windows/amd64` if you want to evaluate the CLI without building from source.
+
 ## Why
 
 Specs are easy to write and hard to maintain. As a corpus grows, common problems emerge:
