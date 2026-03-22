@@ -173,6 +173,40 @@ exclude = ["runbooks/draft-*.md"]
 	}
 }
 
+func TestLoadAcceptsMarkdownContractSourceKind(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "contracts"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+	kind = "markdown_contract"
+	path = "contracts"
+	files = ["auth/session-policy.md"]
+`)
+	mustMkdirAll(t, filepath.Join(repo, "contracts", "auth"))
+	writeFile(t, filepath.Join(repo, "contracts", "auth", "session-policy.md"), "# Session Policy\n")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := cfg.Sources[0].Kind, SourceKindMarkdownContract; got != want {
+		t.Fatalf("source kind = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[0].Files, []string{"auth/session-policy.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("files = %#v, want %#v", got, want)
+	}
+}
+
 func TestLoadRejectsInvalidSourceSelectorPattern(t *testing.T) {
 	t.Parallel()
 
@@ -226,6 +260,34 @@ files = ["../guide.md"]
 	}
 	if !strings.Contains(err.Error(), `source "docs".files[0]: "../guide.md" escapes the source root`) {
 		t.Fatalf("Load() error = %q, want invalid source-file selector detail", err)
+	}
+}
+
+func TestLoadRejectsNonMarkdownFilesForMarkdownContract(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "contracts"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "contracts"
+files = ["auth/spec.toml"]
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want markdown_contract selector validation error")
+	}
+	if !strings.Contains(err.Error(), `must point to a markdown file for kind "markdown_contract"`) {
+		t.Fatalf("Load() error = %q, want markdown selector details", err)
 	}
 }
 

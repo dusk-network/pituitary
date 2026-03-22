@@ -3,8 +3,10 @@ package index
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
 )
@@ -171,5 +173,77 @@ func TestSearchSpecsContextHonorsCanceledContext(t *testing.T) {
 	_, err = SearchSpecsContext(ctx, cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("SearchSpecsContext() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSearchSpecsIndexesMarkdownContracts(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	mustWriteFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "contracts"
+`)
+	mustWriteFile(t, filepath.Join(repo, "contracts", "auth", "session-policy.md"), `
+Ref: RFC-AUTH-001
+Status: accepted
+Domain: identity
+
+# Session Policy
+
+Interactive authentication sessions must use tenant-scoped policy checks and sliding-window enforcement.
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	result, err := SearchSpecs(cfg, SearchSpecQuery{
+		Query:    "tenant-scoped authentication sessions",
+		Statuses: []string{model.StatusAccepted},
+		Limit:    5,
+	})
+	if err != nil {
+		t.Fatalf("SearchSpecs() error = %v", err)
+	}
+	if len(result.Matches) == 0 {
+		t.Fatal("SearchSpecs() returned no matches")
+	}
+	if got, want := result.Matches[0].Ref, "RFC-AUTH-001"; got != want {
+		t.Fatalf("top match ref = %q, want %q", got, want)
+	}
+	if result.Matches[0].Inference == nil {
+		t.Fatalf("top match inference = nil, want structured inference confidence")
+	}
+	if got, want := result.Matches[0].Inference.Kind, config.SourceKindMarkdownContract; got != want {
+		t.Fatalf("top match inference kind = %q, want %q", got, want)
+	}
+	if got, want := result.Matches[0].Inference.Level, "medium"; got != want {
+		t.Fatalf("top match inference level = %q, want %q", got, want)
+	}
+	if len(result.Matches[0].Inference.Reasons) == 0 || result.Matches[0].Inference.Reasons[0] != "applies_to missing" {
+		t.Fatalf("top match inference reasons = %+v, want applies_to warning", result.Matches[0].Inference.Reasons)
 	}
 }

@@ -39,8 +39,8 @@ go build -o pituitary .
 
 # Try some queries
 ./pituitary search-specs --query "rate limiting"
-./pituitary check-overlap --spec-ref SPEC-042
-./pituitary review-spec --spec-ref SPEC-042
+./pituitary check-overlap --path specs/rate-limit-v2
+./pituitary review-spec --path specs/rate-limit-v2
 ```
 
 The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
@@ -107,6 +107,13 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
+include = ["**/*.md"]
 ```
 
 Selectors are always evaluated relative to the configured source `path`:
@@ -115,7 +122,11 @@ Selectors are always evaluated relative to the configured source `path`:
 - `include` and `exclude` are glob filters over those same source-relative paths.
 - If `files` is present, a path must be listed there before `include` / `exclude` are applied.
 - For `spec_bundle`, `files` entries must point to `spec.toml`.
-- For `markdown_docs`, `files` entries must point to `.md` files.
+- For `markdown_docs` and `markdown_contract`, `files` entries must point to `.md` files.
+
+`markdown_contract` treats Markdown files as inferred specs. Pituitary reads the first H1 as the title, picks up common metadata lines such as `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` when present, and otherwise falls back to a stable workspace-derived ref like `contract://rfcs/auth/session-policy` with status `draft`.
+
+Inferred contracts carry confidence metadata in results. Search surfaces that confidence inline, and higher-stakes outputs like impact analysis, doc drift, and review reports emit warnings when key inferred fields are weak.
 
 Example for a mixed-layout repo without changing source roots:
 
@@ -140,29 +151,44 @@ files = ["rate-limit-v2/spec.toml", "burst-handling/spec.toml"]
 
 Selectors narrow what gets indexed; they do not rewrite refs. For example, a docs source rooted at `.` still produces refs like `doc://docs/guides/api-rate-limits` even when `files` narrows the selection to one file.
 
+For an existing repo without a hand-written config yet, the default onboarding flow is:
+
+```sh
+./pituitary discover --path .
+./pituitary discover --path . --write
+./pituitary preview-sources
+./pituitary index --rebuild
+```
+
 ## Commands
 
 Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports.
 
 | Command | What it does |
 |---|---|
+| `discover --path .` | Scan a repo, propose conservative sources, and show the generated local config |
+| `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
-| `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
-| `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |
-| `analyze-impact --spec-ref SPEC-042` | Trace which specs, code refs, and docs are affected by a change |
+| `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
+| `compare-specs --path specs/rate-limit-legacy/spec.toml --path specs/rate-limit-v2/spec.toml` | Side-by-side tradeoff analysis of two specs |
+| `analyze-impact --path specs/rate-limit-v2/body.md` | Trace which specs, code refs, and docs are affected by a change |
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
-| `review-spec --spec-ref SPEC-042` | Full review: overlap + comparison + impact + drift + remediation in one report |
+| `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
+
+`canonicalize` is optional high-rigor mode. It does not replace inferred-contract indexing; it helps you promote one Markdown contract into an explicit bundle when you want stronger structure without converting the whole repo at once.
 
 ### Example: full spec review
 
+Path-first commands accept workspace-relative paths, absolute paths, bundle directories, `spec.toml` files, `body.md` files, and inferred `markdown_contract` files. Internally they still normalize to canonical indexed refs.
+
 ```sh
-$ ./pituitary review-spec --spec-ref SPEC-042
+$ ./pituitary review-spec --path specs/rate-limit-v2
 
 # Returns a composed report covering:
 #   - Overlapping specs (SPEC-008 detected as significant overlap)

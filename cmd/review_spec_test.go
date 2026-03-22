@@ -101,6 +101,57 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	}
 }
 
+func TestRunReviewSpecWithMarkdownContractPathJSON(t *testing.T) {
+	repo := writePathFirstWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--path", "rfcs/service-sla.md", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef string `json:"spec_ref"`
+		} `json:"request"`
+		Result struct {
+			SpecRef string `json:"spec_ref"`
+			Overlap struct {
+				Overlaps []struct {
+					Ref string `json:"ref"`
+				} `json:"overlaps"`
+			} `json:"overlap"`
+		} `json:"result"`
+		Warnings []cliIssue `json:"warnings"`
+		Errors   []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal review payload: %v", err)
+	}
+	if payload.Request.SpecRef != "contract://rfcs/service-sla" || payload.Result.SpecRef != "contract://rfcs/service-sla" {
+		t.Fatalf("payload spec refs = request=%q result=%q, want contract://rfcs/service-sla", payload.Request.SpecRef, payload.Result.SpecRef)
+	}
+	if len(payload.Result.Overlap.Overlaps) == 0 || payload.Result.Overlap.Overlaps[0].Ref != "SPEC-042" {
+		t.Fatalf("overlap = %+v, want SPEC-042 first", payload.Result.Overlap)
+	}
+	if len(payload.Warnings) == 0 || payload.Warnings[0].Code != "low_confidence_inference" {
+		t.Fatalf("warnings = %+v, want low_confidence_inference warning", payload.Warnings)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunReviewSpecMarkdown(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

@@ -16,12 +16,14 @@ type ReviewRequest struct {
 
 // ReviewResult is the composed review-spec response.
 type ReviewResult struct {
-	SpecRef        string                `json:"spec_ref"`
-	Overlap        *OverlapResult        `json:"overlap"`
-	Comparison     *CompareResult        `json:"comparison"`
-	Impact         *AnalyzeImpactResult  `json:"impact"`
-	DocDrift       *DocDriftResult       `json:"doc_drift"`
-	DocRemediation *DocRemediationResult `json:"doc_remediation"`
+	SpecRef        string                     `json:"spec_ref"`
+	SpecInference  *model.InferenceConfidence `json:"spec_inference,omitempty"`
+	Overlap        *OverlapResult             `json:"overlap"`
+	Comparison     *CompareResult             `json:"comparison"`
+	Impact         *AnalyzeImpactResult       `json:"impact"`
+	DocDrift       *DocDriftResult            `json:"doc_drift"`
+	DocRemediation *DocRemediationResult      `json:"doc_remediation"`
+	Warnings       []Warning                  `json:"warnings,omitempty"`
 }
 
 // ReviewSpec composes overlap, comparison, impact, and targeted doc-drift.
@@ -115,10 +117,37 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 
 	return &ReviewResult{
 		SpecRef:        overlap.Candidate.Ref,
+		SpecInference:  candidate.Record.Inference,
 		Overlap:        overlap,
 		Comparison:     comparison,
 		Impact:         impact,
 		DocDrift:       docDrift,
 		DocRemediation: docRemediation,
+		Warnings:       reviewWarnings(*candidate, impact, docDrift),
 	}, nil
+}
+
+func reviewWarnings(candidate specDocument, impact *AnalyzeImpactResult, docDrift *DocDriftResult) []Warning {
+	warnings := buildSpecInferenceWarnings("review", candidate)
+	if impact != nil {
+		warnings = append(warnings, impact.Warnings...)
+	}
+	if docDrift != nil {
+		warnings = append(warnings, docDrift.Warnings...)
+	}
+	return uniqueWarnings(warnings)
+}
+
+func uniqueWarnings(warnings []Warning) []Warning {
+	seen := make(map[string]struct{}, len(warnings))
+	result := make([]Warning, 0, len(warnings))
+	for _, warning := range warnings {
+		key := warning.Ref + "\x00" + warning.Code + "\x00" + warning.Message
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, warning)
+	}
+	return result
 }

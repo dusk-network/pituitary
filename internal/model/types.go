@@ -29,20 +29,21 @@ type Relation struct {
 
 // SpecRecord is the canonical v1 representation of a spec bundle.
 type SpecRecord struct {
-	Ref         string            `json:"ref"`
-	Kind        string            `json:"kind"`
-	Title       string            `json:"title"`
-	Status      string            `json:"status"`
-	Domain      string            `json:"domain"`
-	Authors     []string          `json:"authors,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
-	Relations   []Relation        `json:"relations,omitempty"`
-	AppliesTo   []string          `json:"applies_to,omitempty"`
-	SourceRef   string            `json:"source_ref"`
-	BodyFormat  string            `json:"body_format"`
-	BodyText    string            `json:"body_text"`
-	ContentHash string            `json:"content_hash,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Ref         string               `json:"ref"`
+	Kind        string               `json:"kind"`
+	Title       string               `json:"title"`
+	Status      string               `json:"status"`
+	Domain      string               `json:"domain"`
+	Authors     []string             `json:"authors,omitempty"`
+	Tags        []string             `json:"tags,omitempty"`
+	Relations   []Relation           `json:"relations,omitempty"`
+	AppliesTo   []string             `json:"applies_to,omitempty"`
+	SourceRef   string               `json:"source_ref"`
+	BodyFormat  string               `json:"body_format"`
+	BodyText    string               `json:"body_text"`
+	ContentHash string               `json:"content_hash,omitempty"`
+	Metadata    map[string]string    `json:"metadata,omitempty"`
+	Inference   *InferenceConfidence `json:"inference,omitempty"`
 }
 
 // DocRecord is the canonical v1 representation of one markdown document.

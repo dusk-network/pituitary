@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	AdapterFilesystem      = "filesystem"
-	SourceKindSpecBundle   = "spec_bundle"
-	SourceKindMarkdownDocs = "markdown_docs"
+	AdapterFilesystem          = "filesystem"
+	SourceKindSpecBundle       = "spec_bundle"
+	SourceKindMarkdownDocs     = "markdown_docs"
+	SourceKindMarkdownContract = "markdown_contract"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -473,6 +474,12 @@ func nextQuotedString(value string) string {
 	return value
 }
 
+// Validate resolves derived paths and verifies that a config can be used by the
+// current bootstrap runtime.
+func Validate(cfg *Config) error {
+	return validate(cfg)
+}
+
 func validate(cfg *Config) error {
 	var errs validationErrors
 
@@ -524,7 +531,7 @@ func validate(cfg *Config) error {
 
 		if source.Kind == "" {
 			errs.add("%s.kind: value is required", label)
-		} else if source.Kind != SourceKindSpecBundle && source.Kind != SourceKindMarkdownDocs {
+		} else if source.Kind != SourceKindSpecBundle && source.Kind != SourceKindMarkdownDocs && source.Kind != SourceKindMarkdownContract {
 			errs.add("%s.kind: unsupported kind %q", label, source.Kind)
 		}
 
@@ -544,7 +551,7 @@ func validate(cfg *Config) error {
 				errs.add("%s.files[%d]: %q must point to a spec.toml file for kind %q", label, i, value, source.Kind)
 				continue
 			}
-			if source.Kind == SourceKindMarkdownDocs && pathpkg.Ext(normalized) != ".md" {
+			if (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
 				errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
 				continue
 			}

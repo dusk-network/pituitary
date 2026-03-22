@@ -285,6 +285,113 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
+	`)
+	return root
+}
+
+func writePathFirstWorkspace(t *testing.T) string {
+	t.Helper()
+
+	root := writeSearchWorkspace(t)
+	mustWriteFileCmd(t, filepath.Join(root, "rfcs", "service-sla.md"), `
+# Service Rate Limiting Contract
+
+Domain: api
+Applies To:
+- code://src/api/middleware/ratelimiter.go
+- config://src/api/config/limits.yaml
+
+## Overview
+
+This contract captures a tenant-aware rate-limiting policy for the public API.
+
+## Requirements
+
+- Apply limits per tenant rather than per API key.
+- Enforce a default limit of 200 requests per minute.
+- Allow tenant-specific overrides through configuration.
+`)
+	mustWriteIndexFixture(t, root, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
+`)
+	return root
+}
+
+func writeWeakAcceptedContractWorkspace(t *testing.T) string {
+	t.Helper()
+
+	root := writeSearchWorkspace(t)
+	mustWriteFileCmd(t, filepath.Join(root, "rfcs", "tenant-rate-limits.md"), `
+Status: accepted
+
+# Tenant Rate Limits Contract
+
+## Overview
+
+This contract captures a tenant-aware rate-limiting policy for the public API.
+
+## Requirements
+
+- Apply limits per tenant rather than per API key.
+- Enforce a default limit of 200 requests per minute.
+- Allow tenant-specific overrides through configuration.
+`)
+	mustWriteIndexFixture(t, root, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
 `)
 	return root
 }

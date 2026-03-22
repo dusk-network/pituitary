@@ -31,8 +31,25 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "canonicalize" || name == "discover" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
+				if name == "discover" || name == "canonicalize" {
+					repoRoot = writeDiscoveryWorkspace(t)
+				}
+				if name == "canonicalize" {
+					args = []string{name, "--path", "rfcs/service-sla.md"}
+					expectBootstrapStatus = false
+					exitCode := withWorkingDir(t, repoRoot, run)
+					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					return
+				}
+				if name == "discover" {
+					args = []string{name, "--path", "."}
+					expectBootstrapStatus = false
+					exitCode := withWorkingDir(t, repoRoot, run)
+					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					return
+				}
 				if name == "index" {
 					args = []string{name, "--rebuild"}
 				} else if name == "status" {

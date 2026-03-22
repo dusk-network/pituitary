@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 type compareSpecRefs []string
@@ -29,14 +30,16 @@ func runCompareSpecs(args []string, stdout, stderr io.Writer) int {
 func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("compare-specs", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("compare-specs", "pituitary [--config PATH] compare-specs --spec-ref REF --spec-ref REF [--format FORMAT]")
+	help := newCommandHelp("compare-specs", "pituitary [--config PATH] compare-specs (--spec-ref REF --spec-ref REF | --path PATH --path PATH) [--format FORMAT]")
 
 	var (
 		specRefs   compareSpecRefs
+		specPaths  compareSpecRefs
 		format     string
 		configPath string
 	)
 	fs.Var(&specRefs, "spec-ref", "indexed spec ref; pass exactly two to compare")
+	fs.Var(&specPaths, "path", "workspace-relative or absolute path to an indexed spec; pass exactly two to compare")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
@@ -55,17 +58,11 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 		}, 2)
 	}
 
-	request := analysis.CompareRequest{SpecRefs: []string(specRefs)}
+	request := analysis.CompareRequest{}
 	if err := validateCLIFormat("compare-specs", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
-		}, 2)
-	}
-	if len(request.SpecRefs) != 2 {
-		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
-			Code:    "validation_error",
-			Message: "exactly two --spec-ref flags are required",
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
@@ -73,6 +70,35 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
 			Code:    "config_error",
 			Message: err.Error(),
+		}, 2)
+	}
+	switch {
+	case len(specRefs) > 0 && len(specPaths) > 0:
+		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+			Code:    "validation_error",
+			Message: "use either two --spec-ref flags or two --path flags",
+		}, 2)
+	case len(specRefs) == 2:
+		request.SpecRefs = []string(specRefs)
+	case len(specPaths) == 2:
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request.SpecRefs, err = resolveIndexedSpecRefsWithConfigContext(ctx, cfg, []string(specPaths))
+		if err != nil {
+			return writeSpecPathResolutionError(stdout, stderr, format, "compare-specs", request, err)
+		}
+	default:
+		request.SpecRefs = []string(specRefs)
+	}
+	if len(request.SpecRefs) != 2 {
+		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+			Code:    "validation_error",
+			Message: "exactly two --spec-ref flags or two --path flags are required",
 		}, 2)
 	}
 

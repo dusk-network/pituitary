@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -40,15 +41,16 @@ type SearchSpecQuery struct {
 
 // SearchSpecMatch is one ranked section match.
 type SearchSpecMatch struct {
-	Ref            string  `json:"ref"`
-	Title          string  `json:"title"`
-	SectionHeading string  `json:"section_heading"`
-	Excerpt        string  `json:"excerpt"`
-	SourceRef      string  `json:"source_ref"`
-	Kind           string  `json:"kind,omitempty"`
-	Status         string  `json:"status,omitempty"`
-	Domain         string  `json:"domain,omitempty"`
-	Score          float64 `json:"score"`
+	Ref            string                     `json:"ref"`
+	Title          string                     `json:"title"`
+	SectionHeading string                     `json:"section_heading"`
+	Excerpt        string                     `json:"excerpt"`
+	SourceRef      string                     `json:"source_ref"`
+	Kind           string                     `json:"kind,omitempty"`
+	Status         string                     `json:"status,omitempty"`
+	Domain         string                     `json:"domain,omitempty"`
+	Score          float64                    `json:"score"`
+	Inference      *model.InferenceConfidence `json:"inference,omitempty"`
 }
 
 // SearchSpecResult is the ranked retrieval output.
@@ -67,6 +69,7 @@ type chunkCandidate struct {
 	Status         string
 	Domain         string
 	Score          float64
+	Inference      *model.InferenceConfidence
 }
 
 // ToQuery normalizes the transport request into an executable search query.
@@ -168,6 +171,7 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 			Status:         candidate.Status,
 			Domain:         candidate.Domain,
 			Score:          candidate.Score,
+			Inference:      candidate.Inference,
 		})
 	}
 
@@ -268,8 +272,9 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 	candidates := make([]chunkCandidate, 0, query.Limit)
 	for rows.Next() {
 		var (
-			candidate chunkCandidate
-			distance  float64
+			candidate   chunkCandidate
+			rawMetadata string
+			distance    float64
 		)
 		if err := rows.Scan(
 			&candidate.ChunkID,
@@ -281,9 +286,20 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 			&candidate.Kind,
 			&candidate.Status,
 			&candidate.Domain,
+			&rawMetadata,
 			&distance,
 		); err != nil {
 			return nil, fmt.Errorf("scan search candidate: %w", err)
+		}
+		if strings.TrimSpace(rawMetadata) != "" {
+			metadata := map[string]string{}
+			if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
+				return nil, fmt.Errorf("parse search metadata for %s: %w", candidate.Ref, err)
+			}
+			candidate.Inference, err = model.DecodeInferenceConfidence(metadata)
+			if err != nil {
+				return nil, fmt.Errorf("decode search inference for %s: %w", candidate.Ref, err)
+			}
 		}
 
 		candidate.Content = strings.TrimSpace(candidate.Content)
@@ -320,6 +336,7 @@ SELECT
   a.kind,
   COALESCE(a.status, ''),
   COALESCE(a.domain, ''),
+  a.metadata_json,
   vh.distance
 FROM vector_hits vh
 JOIN chunks c ON c.id = vh.chunk_id

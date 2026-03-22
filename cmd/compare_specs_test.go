@@ -66,6 +66,52 @@ func TestRunCompareSpecsJSON(t *testing.T) {
 	}
 }
 
+func TestRunCompareSpecsWithPathsJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCompareSpecs([]string{
+			"--path", "specs/rate-limit-legacy/spec.toml",
+			"--path", "specs/rate-limit-v2/spec.toml",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCompareSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCompareSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRefs []string `json:"spec_refs"`
+		} `json:"request"`
+		Result struct {
+			SpecRefs []string `json:"spec_refs"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compare payload: %v", err)
+	}
+	if got, want := payload.Request.SpecRefs, []string{"SPEC-008", "SPEC-042"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("request spec_refs = %v, want %v", got, want)
+	}
+	if got, want := payload.Result.SpecRefs, []string{"SPEC-008", "SPEC-042"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("result spec_refs = %v, want %v", got, want)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunCompareSpecsRejectsMoreThanTwoRefs(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
@@ -112,7 +158,7 @@ func TestRunCompareSpecsRejectsMoreThanTwoRefs(t *testing.T) {
 	if payload.Errors[0].Code != "validation_error" {
 		t.Fatalf("error code = %q, want validation_error", payload.Errors[0].Code)
 	}
-	if !strings.Contains(payload.Errors[0].Message, "exactly two --spec-ref flags are required") {
+	if !strings.Contains(payload.Errors[0].Message, "exactly two --spec-ref flags or two --path flags are required") {
 		t.Fatalf("error message = %q, want exact-two validation", payload.Errors[0].Message)
 	}
 }

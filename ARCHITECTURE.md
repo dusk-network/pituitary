@@ -95,9 +95,20 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
+include = ["**/*.md"]
 ```
 
-This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots.
+This keeps the first ship explicit and easy to reason about. The indexed config remains explicit even as the repo grows into inferred-contract sources: `pituitary discover` may propose a local `.pituitary/pituitary.toml`, but it must stay conservative, inspectable before write, and never introduce hidden indexing behavior behind the user's back.
+
+Inferred `markdown_contract` records must preserve confidence metadata alongside the normalized artifact so result surfaces can distinguish strong explicit extraction from weaker path/default fallbacks. Search should expose those confidence signals inline, while higher-stakes outputs such as impact and doc-drift should elevate weak inference as warnings instead of silently treating it as equally strong.
+
+When teams want more rigor, Pituitary may optionally generate an explicit spec bundle from one inferred contract. That canonicalization flow must preserve the stable inferred ref, preserve source provenance, preview the generated `spec.toml` and `body.md` before write, and remain incremental rather than forcing whole-repo migration.
 
 ---
 
@@ -311,10 +322,11 @@ The core should not care whether a record came from:
 
 The adapter contract keeps that variability out of the analysis engine.
 
-**V1 scope:**
+**Current scope:**
 
 - `filesystem` adapter for spec bundles
 - `filesystem` adapter for docs directories
+- `filesystem` adapter for inferred Markdown contracts
 
 **V1 filesystem enumeration rules:**
 
@@ -323,13 +335,16 @@ The adapter contract keeps that variability out of the analysis engine.
 - A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
 - Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
 - For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply selectors against source-relative paths.
+- For `kind = "markdown_contract"`, recursively index `*.md` files under the configured source root, infer spec metadata from common Markdown fields, and normalize the file into a `SpecRecord`.
 - `files` is an optional exact allowlist of source-relative files.
 - `include` and `exclude` are optional glob filters over those same source-relative paths.
 - If `files` is present, it narrows the candidate set before `include` / `exclude` are applied.
 - For `kind = "spec_bundle"`, `files` entries must point to `spec.toml`.
-- For `kind = "markdown_docs"`, `files` entries must point to `.md` files.
+- For `kind = "markdown_docs"` and `kind = "markdown_contract"`, `files` entries must point to `.md` files.
 - A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
 - A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
+- An inferred contract title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
+- An inferred contract should use explicit `Ref:` / `ID:` metadata when present; otherwise it should fall back to a stable workspace-relative `contract://...` ref and default `status = "draft"` when no valid status is declared.
 
 **Later, as extensions:**
 
@@ -752,9 +767,9 @@ CLI examples:
 ```text
 pituitary index --rebuild
 pituitary search-specs --query "rate limiting" --format json
-pituitary check-overlap --spec-ref SPEC-042
+pituitary check-overlap --path specs/rate-limit-v2
 pituitary check-doc-drift --scope all --format json
-pituitary review-spec --spec-ref SPEC-042 --format json
+pituitary review-spec --path specs/rate-limit-v2 --format json
 ```
 
 When MCP is present, its tool names should mirror the shipped analysis tools:
@@ -935,11 +950,11 @@ The first shipping slice is done when all of the following are true:
 1. `pituitary index --rebuild` reads `pituitary.toml`, builds a fresh SQLite index, and swaps it atomically.
 2. A fixture workspace with at least three specs and two docs can be indexed without manual intervention.
 3. `pituitary search-specs --query "..." --format json` returns ranked spec sections with stable artifact refs.
-4. `pituitary check-overlap --spec-ref SPEC-XXX --format json` detects a known overlapping fixture pair.
-5. `pituitary compare-specs --spec-ref SPEC-A --spec-ref SPEC-B --format json` returns a structured comparison for indexed specs.
-6. `pituitary analyze-impact --spec-ref SPEC-XXX --format json` returns dependent specs and affected docs from the graph and retrieval layers.
+4. `pituitary check-overlap --path specs/<bundle> --format json` detects a known overlapping fixture pair without requiring a ref lookup first.
+5. `pituitary compare-specs --path path/to/spec-a --path path/to/spec-b --format json` returns a structured comparison for indexed specs.
+6. `pituitary analyze-impact --path path/to/spec --format json` returns dependent specs and affected docs from the graph and retrieval layers.
 7. `pituitary check-doc-drift --scope all --format json` flags at least one known contradictory fixture doc.
-8. `pituitary review-spec --spec-ref SPEC-XXX --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
+8. `pituitary review-spec --path path/to/spec --format json` composes overlap, comparison, impact, and doc-drift findings in one response.
 9. All required commands work without GitHub, git metadata, or network-only integrations.
 10. All required commands fail with clear validation errors when a spec bundle is malformed.
 11. All shipped commands follow the documented JSON envelope, and unsupported runtime providers fail clearly during config validation.

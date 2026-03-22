@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
@@ -18,15 +19,17 @@ func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
 func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("analyze-impact", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact --spec-ref REF [--change-type TYPE] [--format FORMAT]")
+	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF) [--change-type TYPE] [--format FORMAT]")
 
 	var (
 		specRef    string
+		specPath   string
 		changeType string
 		format     string
 		configPath string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
+	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
 	fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
 	fs.StringVar(&format, "format", "text", "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
@@ -47,7 +50,6 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 	}
 
 	request := analysis.AnalyzeImpactRequest{
-		SpecRef:    strings.TrimSpace(specRef),
 		ChangeType: strings.TrimSpace(changeType),
 	}
 	if err := validateCLIFormat("analyze-impact", format); err != nil {
@@ -56,10 +58,12 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 			Message: err.Error(),
 		}, 2)
 	}
-	if request.SpecRef == "" {
+	trimmedSpecRef := strings.TrimSpace(specRef)
+	trimmedSpecPath := strings.TrimSpace(specPath)
+	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath) > 1 {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
 			Code:    "validation_error",
-			Message: "--spec-ref is required",
+			Message: "exactly one of --path or --spec-ref is allowed",
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
@@ -67,6 +71,26 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
 			Code:    "config_error",
 			Message: err.Error(),
+		}, 2)
+	}
+	if trimmedSpecPath != "" {
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		trimmedSpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
+		if err != nil {
+			return writeSpecPathResolutionError(stdout, stderr, format, "analyze-impact", request, err)
+		}
+	}
+	request.SpecRef = trimmedSpecRef
+	if request.SpecRef == "" {
+		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+			Code:    "validation_error",
+			Message: "one of --path or --spec-ref is required",
 		}, 2)
 	}
 

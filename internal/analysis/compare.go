@@ -45,8 +45,9 @@ type Comparison struct {
 
 // CompareResult is the structured compare-specs response.
 type CompareResult struct {
-	SpecRefs   []string   `json:"spec_refs"`
-	Comparison Comparison `json:"comparison"`
+	SpecRefs       []string        `json:"spec_refs"`
+	SpecInferences []SpecInference `json:"spec_inferences,omitempty"`
+	Comparison     Comparison      `json:"comparison"`
 }
 
 // CompareSpecs compares exactly two indexed specs or one draft spec against one indexed spec.
@@ -122,7 +123,8 @@ func buildCompareResult(candidate *specDocument, orderedRefs []string, specs map
 	}
 
 	return &CompareResult{
-		SpecRefs: orderedRefs,
+		SpecRefs:       orderedRefs,
+		SpecInferences: buildSpecInferences(comparisonSpecs, orderedRefs),
 		Comparison: Comparison{
 			SharedScope:    sharedScope(comparisonSpecs, orderedRefs),
 			Differences:    differences,
