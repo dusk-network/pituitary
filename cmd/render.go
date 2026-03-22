@@ -20,6 +20,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
 
 	switch typed := result.(type) {
+	case *source.CanonicalizeResult:
+		renderCanonicalizeResult(w, typed)
 	case *source.DiscoverResult:
 		renderDiscoverResult(w, typed)
 	case *index.RebuildResult:
@@ -119,6 +121,30 @@ func renderDiscoverResult(w io.Writer, result *source.DiscoverResult) {
 
 	fmt.Fprintln(w, "generated config:")
 	fmt.Fprint(w, result.Config)
+}
+
+func renderCanonicalizeResult(w io.Writer, result *source.CanonicalizeResult) {
+	fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	fmt.Fprintf(w, "source: %s\n", result.SourcePath)
+	fmt.Fprintf(w, "bundle dir: %s\n", result.BundleDir)
+	if result.WroteBundle {
+		fmt.Fprintln(w, "bundle write: wrote generated bundle")
+	} else {
+		fmt.Fprintln(w, "bundle write: skipped")
+	}
+	fmt.Fprintf(w, "spec ref: %s\n", result.Spec.Ref)
+	fmt.Fprintf(w, "title: %s\n", result.Spec.Title)
+	if result.Spec.Inference != nil {
+		fmt.Fprintf(w, "inference: %s (%.2f)\n", result.Spec.Inference.Level, result.Spec.Inference.Score)
+	}
+	fmt.Fprintf(w, "provenance: %s\n", result.Provenance.SourceRef)
+	for _, file := range result.Files {
+		fmt.Fprintf(w, "generated file: %s\n", file.Path)
+		fmt.Fprint(w, file.Content)
+		if !strings.HasSuffix(file.Content, "\n") {
+			fmt.Fprintln(w)
+		}
+	}
 }
 
 func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary) {

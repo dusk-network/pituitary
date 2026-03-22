@@ -108,6 +108,8 @@ This keeps the first ship explicit and easy to reason about. The indexed config 
 
 Inferred `markdown_contract` records must preserve confidence metadata alongside the normalized artifact so result surfaces can distinguish strong explicit extraction from weaker path/default fallbacks. Search should expose those confidence signals inline, while higher-stakes outputs such as impact and doc-drift should elevate weak inference as warnings instead of silently treating it as equally strong.
 
+When teams want more rigor, Pituitary may optionally generate an explicit spec bundle from one inferred contract. That canonicalization flow must preserve the stable inferred ref, preserve source provenance, preview the generated `spec.toml` and `body.md` before write, and remain incremental rather than forcing whole-repo migration.
+
 ---
 
 ## System Overview

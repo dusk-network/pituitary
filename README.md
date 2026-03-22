@@ -167,6 +167,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | Command | What it does |
 |---|---|
 | `discover --path .` | Scan a repo, propose conservative sources, and show the generated local config |
+| `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
@@ -179,6 +180,8 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
 | `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
+
+`canonicalize` is optional high-rigor mode. It does not replace inferred-contract indexing; it helps you promote one Markdown contract into an explicit bundle when you want stronger structure without converting the whole repo at once.
 
 ### Example: full spec review
 
