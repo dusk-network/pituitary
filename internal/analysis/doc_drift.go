@@ -15,6 +15,7 @@ import (
 )
 
 var requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
+var artifactReferencePattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._-]*\.(?:db|json|md|toml|yaml|yml)`)
 
 type docDocument struct {
 	Record   model.DocRecord
@@ -37,6 +38,7 @@ type DocDriftScope struct {
 // DriftFinding reports one contradiction between a doc and a spec.
 type DriftFinding struct {
 	SpecRef  string `json:"spec_ref"`
+	Artifact string `json:"artifact,omitempty"`
 	Code     string `json:"code"`
 	Message  string `json:"message"`
 	Expected string `json:"expected,omitempty"`
@@ -107,6 +109,18 @@ type normalizedClaims struct {
 	DefaultLimit    int
 	HasDefaultLimit bool
 	Overrides       *bool
+}
+
+type artifactMention struct {
+	Artifact string
+	Active   bool
+	Aligned  bool
+}
+
+type artifactConstraint struct {
+	Artifact string
+	Kind     string
+	Expected string
 }
 
 // CheckDocDrift detects contradictory docs within a target scope.
@@ -371,6 +385,7 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 	}
 
 	docClaims := claimsFromText(joinDocumentText(doc.Sections))
+	docArtifacts := artifactMentionsFromSections(doc.Sections)
 	var (
 		specRefs []string
 		findings []DriftFinding
@@ -378,9 +393,15 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 	)
 	for _, spec := range relevant {
 		byRef[spec.Record.Ref] = spec
+		specFindings := contradictingFindings(docClaims, claimsFromText(joinDocumentText(spec.Sections)), spec.Record.Ref)
+		specFindings = append(specFindings, artifactDriftFindings(docArtifacts, spec)...)
+		if len(specFindings) == 0 {
+			continue
+		}
 		specRefs = append(specRefs, spec.Record.Ref)
-		findings = append(findings, contradictingFindings(docClaims, claimsFromText(joinDocumentText(spec.Sections)), spec.Record.Ref)...)
+		findings = append(findings, specFindings...)
 	}
+	findings = uniqueDriftFindings(findings)
 	if len(findings) == 0 {
 		return nil, nil
 	}
@@ -426,12 +447,16 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		spec  specDocument
 		score float64
 	}
+	docArtifacts := artifactMentionSet(doc.Sections)
 	var scored []scoredSpec
 	for _, spec := range specs {
 		if spec.Record.Status != model.StatusAccepted {
 			continue
 		}
 		score := documentSimilarity(doc.Sections, spec.Sections)
+		if hasArtifactConstraintOverlap(docArtifacts, spec) {
+			score += 0.4
+		}
 		if score < 0.35 {
 			continue
 		}
@@ -544,6 +569,228 @@ func contradictingFindings(docClaims, specClaims normalizedClaims, specRef strin
 	return findings
 }
 
+func artifactDriftFindings(docArtifacts map[string][]artifactMention, spec specDocument) []DriftFinding {
+	constraints := artifactConstraintsFromSections(spec.Sections)
+	if len(constraints) == 0 || len(docArtifacts) == 0 {
+		return nil
+	}
+
+	findings := make([]DriftFinding, 0, len(constraints))
+	for _, constraint := range constraints {
+		mentions := docArtifacts[constraint.Artifact]
+		if len(mentions) == 0 {
+			continue
+		}
+		for _, mention := range mentions {
+			if mention.Aligned {
+				continue
+			}
+
+			code := "artifact_contract_mismatch"
+			message := fmt.Sprintf("document still presents `%s` as part of the active runtime contract", constraint.Artifact)
+			observed := "documented as active runtime state"
+			if constraint.Kind == "runtime_input" && mention.Active {
+				code = "artifact_runtime_input_mismatch"
+				message = fmt.Sprintf("document still treats `%s` as canonical runtime input", constraint.Artifact)
+				observed = "documented as an active runtime input"
+			}
+
+			findings = append(findings, DriftFinding{
+				SpecRef:  spec.Record.Ref,
+				Artifact: constraint.Artifact,
+				Code:     code,
+				Message:  message,
+				Expected: constraint.Expected,
+				Observed: observed,
+			})
+			break
+		}
+	}
+	return findings
+}
+
+func artifactMentionSet(sections []embeddedSection) map[string]struct{} {
+	mentions := artifactMentionsFromSections(sections)
+	result := make(map[string]struct{}, len(mentions))
+	for artifact := range mentions {
+		result[artifact] = struct{}{}
+	}
+	return result
+}
+
+func artifactMentionsFromSections(sections []embeddedSection) map[string][]artifactMention {
+	mentions := map[string][]artifactMention{}
+	for _, section := range sections {
+		for _, line := range sectionContentLines(section.Content) {
+			artifacts := artifactRefsFromText(line)
+			if len(artifacts) == 0 {
+				continue
+			}
+			lower := strings.ToLower(line)
+			active := containsAny(lower,
+				" read ", " reads ", " load ", " loads ",
+				" write ", " writes ", " uses ", " use ",
+				" cache", " cached", " storing ", " stored ",
+				" refresh", " refreshes ", " startup", " start ",
+			)
+			aligned := containsAny(lower,
+				"optional", "derived", "historical", "history", "archive",
+				"legacy", "not part of", "not required", "must not",
+				"implementation detail", "safe to discard",
+			)
+			for _, artifact := range artifacts {
+				mentions[artifact] = append(mentions[artifact], artifactMention{
+					Artifact: artifact,
+					Active:   active,
+					Aligned:  aligned,
+				})
+			}
+		}
+	}
+	return mentions
+}
+
+func hasArtifactConstraintOverlap(docArtifacts map[string]struct{}, spec specDocument) bool {
+	if len(docArtifacts) == 0 {
+		return false
+	}
+	for _, constraint := range artifactConstraintsFromSections(spec.Sections) {
+		if _, ok := docArtifacts[constraint.Artifact]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactConstraintsFromSections(sections []embeddedSection) []artifactConstraint {
+	constraints := map[string]artifactConstraint{}
+	for _, section := range sections {
+		for _, line := range sectionContentLines(section.Content) {
+			artifacts := artifactRefsFromText(line)
+			if len(artifacts) == 0 {
+				continue
+			}
+			for _, artifact := range artifacts {
+				kind, expected, ok := classifyArtifactConstraint(line, artifact)
+				if !ok {
+					continue
+				}
+				next := artifactConstraint{
+					Artifact: artifact,
+					Kind:     kind,
+					Expected: expected,
+				}
+				current, exists := constraints[artifact]
+				if !exists || artifactConstraintPriority(next.Kind) > artifactConstraintPriority(current.Kind) {
+					constraints[artifact] = next
+				}
+			}
+		}
+	}
+
+	artifacts := make([]string, 0, len(constraints))
+	for artifact := range constraints {
+		artifacts = append(artifacts, artifact)
+	}
+	sort.Strings(artifacts)
+
+	result := make([]artifactConstraint, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		result = append(result, constraints[artifact])
+	}
+	return result
+}
+
+func classifyArtifactConstraint(line, artifact string) (string, string, bool) {
+	lower := strings.ToLower(line)
+	artifact = strings.ToLower(artifact)
+	local := lower
+	runtimeLocal := lower
+	if idx := strings.Index(lower, artifact); idx >= 0 {
+		start := idx
+		if start > 96 {
+			start -= 96
+		} else {
+			start = 0
+		}
+		end := idx + len(artifact) + 128
+		if end > len(lower) {
+			end = len(lower)
+		}
+		local = lower[start:end]
+
+		runtimeStart := idx
+		if runtimeStart > 48 {
+			runtimeStart -= 48
+		} else {
+			runtimeStart = 0
+		}
+		runtimeEnd := idx + len(artifact) + 32
+		if runtimeEnd > len(lower) {
+			runtimeEnd = len(lower)
+		}
+		runtimeLocal = lower[runtimeStart:runtimeEnd]
+	}
+
+	switch {
+	case containsAny(runtimeLocal,
+		"must not read", "must not load", "must not parse",
+		"must not reparse", "must not treat",
+	):
+		return "runtime_input", "not a canonical runtime input", true
+	case containsAny(local,
+		artifact+"` is not a required artifact",
+		artifact+" is not a required artifact",
+		artifact+"` is not part of the accepted runtime contract",
+		artifact+" is not part of the accepted runtime contract",
+		artifact+"` is not part of the persisted runtime contract",
+		artifact+" is not part of the persisted runtime contract",
+	):
+		return "contract", "not part of the accepted runtime contract", true
+	case containsAny(lower,
+		"legacy derived files",
+	) && containsAny(lower,
+		"not part of the accepted runtime contract",
+		"not part of the persisted runtime contract",
+	):
+		return "contract", "not part of the accepted runtime contract", true
+	default:
+		return "", "", false
+	}
+}
+
+func artifactConstraintPriority(kind string) int {
+	switch kind {
+	case "runtime_input":
+		return 2
+	case "contract":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func uniqueDriftFindings(findings []DriftFinding) []DriftFinding {
+	seen := map[string]struct{}{}
+	result := make([]DriftFinding, 0, len(findings))
+	for _, finding := range findings {
+		key := strings.Join([]string{
+			finding.SpecRef,
+			finding.Artifact,
+			finding.Code,
+			finding.Message,
+			finding.Expected,
+			finding.Observed,
+		}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, finding)
+	}
+	return result
+}
+
 func remediationSummaryForFinding(finding DriftFinding) string {
 	switch finding.Code {
 	case "window_mismatch":
@@ -554,6 +801,16 @@ func remediationSummaryForFinding(finding DriftFinding) string {
 		return "update the documented default rate limit to the accepted value"
 	case "override_support_mismatch":
 		return "replace the stale override-support statement with the accepted configuration behavior"
+	case "artifact_runtime_input_mismatch":
+		if finding.Artifact != "" {
+			return fmt.Sprintf("rewrite the `%s` guidance so the doc stops treating it as canonical runtime input", finding.Artifact)
+		}
+		return "rewrite the stale artifact guidance so the doc stops treating it as canonical runtime input"
+	case "artifact_contract_mismatch":
+		if finding.Artifact != "" {
+			return fmt.Sprintf("remove or qualify the stale `%s` reference so it is no longer presented as active runtime state", finding.Artifact)
+		}
+		return "remove or qualify the stale artifact reference so it is no longer presented as active runtime state"
 	default:
 		return finding.Message
 	}
@@ -601,6 +858,24 @@ func suggestedEditForFinding(finding DriftFinding) DocSuggestedEdit {
 			Replace: humanizedDriftValue(finding.Code, finding.Observed),
 			With:    humanizedDriftValue(finding.Code, finding.Expected),
 			Note:    "Document the accepted override behavior instead of the stale configuration guidance.",
+		}
+	case "artifact_runtime_input_mismatch":
+		note := "Rewrite the section so the artifact is treated as derived output rather than canonical runtime input."
+		if finding.Artifact != "" {
+			note = fmt.Sprintf("Rewrite the `%s` references so the section treats it as derived output rather than canonical runtime input.", finding.Artifact)
+		}
+		return DocSuggestedEdit{
+			Action: "update_section",
+			Note:   note,
+		}
+	case "artifact_contract_mismatch":
+		note := "Rewrite the section so the artifact is described as derived, optional, or historical rather than active runtime state."
+		if finding.Artifact != "" {
+			note = fmt.Sprintf("Rewrite the `%s` references so the section does not present it as active runtime state.", finding.Artifact)
+		}
+		return DocSuggestedEdit{
+			Action: "update_section",
+			Note:   note,
 		}
 	default:
 		return DocSuggestedEdit{
@@ -671,9 +946,58 @@ func evidenceKeywordsForFinding(finding DriftFinding) []string {
 		return []string{"requests per minute", finding.Expected, finding.Observed}
 	case "override_support_mismatch":
 		return []string{"override", "overrides", "configuration"}
+	case "artifact_runtime_input_mismatch", "artifact_contract_mismatch":
+		if finding.Artifact != "" {
+			return []string{finding.Artifact}
+		}
+		return []string{finding.Expected, finding.Observed}
 	default:
 		return []string{finding.Expected, finding.Observed}
 	}
+}
+
+func artifactRefsFromText(text string) []string {
+	raw := artifactReferencePattern.FindAllString(text, -1)
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	artifacts := make([]string, 0, len(raw))
+	for _, match := range raw {
+		artifact := strings.ToLower(strings.TrimSpace(match))
+		if artifact == "" {
+			continue
+		}
+		if _, ok := seen[artifact]; ok {
+			continue
+		}
+		seen[artifact] = struct{}{}
+		artifacts = append(artifacts, artifact)
+	}
+	sort.Strings(artifacts)
+	return artifacts
+}
+
+func sectionContentLines(content string) []string {
+	lines := strings.Split(content, "\n")
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := stringsTrimSpace(strings.TrimPrefix(line, "- "))
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func containsAny(text string, values ...string) bool {
+	for _, value := range values {
+		if value != "" && strings.Contains(text, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func sectionExcerptForKeywords(section embeddedSection, keywords []string) (string, bool) {
