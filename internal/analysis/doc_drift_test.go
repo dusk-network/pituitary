@@ -148,6 +148,19 @@ func TestCheckDocDriftFlagsStaleNamedArtifacts(t *testing.T) {
 	}
 }
 
+func TestClassifyArtifactConstraintScopesRuntimeInputToLocalArtifact(t *testing.T) {
+	t.Parallel()
+
+	line := "Prefer `state.db` for canonical runtime state, and the kernel must not read `work_queue.json` as canonical runtime input."
+
+	if kind, _, ok := classifyArtifactConstraint(line, "state.db"); ok || kind != "" {
+		t.Fatalf("classifyArtifactConstraint(state.db) = %q, %t, want no constraint", kind, ok)
+	}
+	if kind, expected, ok := classifyArtifactConstraint(line, "work_queue.json"); !ok || kind != "runtime_input" || expected != "not a canonical runtime input" {
+		t.Fatalf("classifyArtifactConstraint(work_queue.json) = kind=%q expected=%q ok=%t, want runtime_input/not a canonical runtime input/true", kind, expected, ok)
+	}
+}
+
 func writeArtifactContractWorkspace(tb testing.TB) *config.Config {
 	tb.Helper()
 

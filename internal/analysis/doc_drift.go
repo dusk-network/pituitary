@@ -705,6 +705,7 @@ func classifyArtifactConstraint(line, artifact string) (string, string, bool) {
 	lower := strings.ToLower(line)
 	artifact = strings.ToLower(artifact)
 	local := lower
+	runtimeLocal := lower
 	if idx := strings.Index(lower, artifact); idx >= 0 {
 		start := idx
 		if start > 96 {
@@ -717,10 +718,22 @@ func classifyArtifactConstraint(line, artifact string) (string, string, bool) {
 			end = len(lower)
 		}
 		local = lower[start:end]
+
+		runtimeStart := idx
+		if runtimeStart > 48 {
+			runtimeStart -= 48
+		} else {
+			runtimeStart = 0
+		}
+		runtimeEnd := idx + len(artifact) + 32
+		if runtimeEnd > len(lower) {
+			runtimeEnd = len(lower)
+		}
+		runtimeLocal = lower[runtimeStart:runtimeEnd]
 	}
 
 	switch {
-	case containsAny(lower,
+	case containsAny(runtimeLocal,
 		"must not read", "must not load", "must not parse",
 		"must not reparse", "must not treat",
 	):
