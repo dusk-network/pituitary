@@ -38,6 +38,50 @@ func TestRenderPreviewSourcesResultIncludesFiles(t *testing.T) {
 	}
 }
 
+func TestRenderExplainFileResultIncludesInference(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderExplainFileResult(&stdout, &source.ExplainFileResult{
+		AbsolutePath:  "/tmp/repo/rfcs/service-sla.md",
+		WorkspacePath: "rfcs/service-sla.md",
+		Summary: source.ExplainFileSummary{
+			Status:    "indexed",
+			IndexedBy: []string{"contracts"},
+		},
+		Sources: []source.SourceFileExplanation{
+			{
+				Name:            "contracts",
+				Kind:            "markdown_contract",
+				Path:            "rfcs",
+				RelativePath:    "service-sla.md",
+				UnderSourceRoot: true,
+				Selected:        true,
+				ArtifactKind:    "spec",
+				Reason:          "indexed_markdown_contract",
+				InferredSpec: &source.ExplainedInferredSpec{
+					Ref:    "contract://rfcs/service-sla",
+					Title:  "Service SLA",
+					Status: "draft",
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"summary: indexed",
+		"indexed by: contracts",
+		"indexed_markdown_contract",
+		"inferred ref: contract://rfcs/service-sla",
+		"inferred title: Service SLA",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderExplainFileResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandTableSearchSpecs(t *testing.T) {
 	t.Parallel()
 

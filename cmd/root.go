@@ -15,6 +15,7 @@ var commands = map[string]string{
 	"status":           "show current index status",
 	"version":          "show Pituitary and Go runtime versions",
 	"preview-sources":  "show which files each source will index",
+	"explain-file":     "explain how one file is treated by configured sources",
 	"search-specs":     "search spec sections semantically",
 	"check-overlap":    "find overlapping specs",
 	"compare-specs":    "compare design tradeoffs across specs",
@@ -78,6 +79,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if name == "preview-sources" {
 		return runPreviewSourcesContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "explain-file" {
+		return runExplainFileContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "search-specs" {
 		return runSearchSpecsContext(ctx, remainingArgs[1:], stdout, stderr)
