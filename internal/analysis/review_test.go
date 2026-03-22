@@ -93,3 +93,42 @@ func TestReviewSpecSupportsDraftSpecRecord(t *testing.T) {
 		t.Fatalf("draft doc_drift = %+v, want targeted doc_refs scope", result.DocDrift)
 	}
 }
+
+func TestReviewSpecSurfacesStaleNamedArtifacts(t *testing.T) {
+	t.Parallel()
+
+	cfg := writeArtifactContractWorkspace(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := ReviewSpec(cfg, ReviewRequest{SpecRef: "SPEC-200"})
+	if err != nil {
+		t.Fatalf("ReviewSpec() error = %v", err)
+	}
+	if result.DocDrift == nil || result.DocDrift.Scope.Mode != "doc_refs" {
+		t.Fatalf("doc_drift = %+v, want targeted doc_refs scope", result.DocDrift)
+	}
+	if len(result.DocDrift.DriftItems) != 1 || result.DocDrift.DriftItems[0].DocRef != "doc://guides/runtime-cache" {
+		t.Fatalf("doc_drift items = %+v, want stale runtime-cache doc", result.DocDrift.DriftItems)
+	}
+
+	var found bool
+	for _, finding := range result.DocDrift.DriftItems[0].Findings {
+		if finding.Artifact == "work_queue.json" && finding.Code == "artifact_runtime_input_mismatch" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("findings = %+v, want work_queue.json runtime-input drift", result.DocDrift.DriftItems[0].Findings)
+	}
+
+	if result.DocRemediation == nil || len(result.DocRemediation.Items) != 1 || result.DocRemediation.Items[0].DocRef != "doc://guides/runtime-cache" {
+		t.Fatalf("doc_remediation = %+v, want runtime-cache remediation", result.DocRemediation)
+	}
+}
