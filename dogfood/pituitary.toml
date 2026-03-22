@@ -1,0 +1,33 @@
+[workspace]
+root = ".."
+index_path = ".pituitary/dogfood-phase1.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "dogfood/contracts"
+files = [
+  "product-scope.md",
+  "contributor-workflow.md",
+]
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "."
+files = [
+  "README.md",
+  "ARCHITECTURE.md",
+  "docs/development/architecture-guide.md",
+  "docs/development/adding-a-command.md",
+  "docs/development/testing-guide.md",
+  "docs/development/prerequisites.md",
+]
