@@ -155,6 +155,28 @@ func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocD
 	return success(request, result)
 }
 
+// CheckCompliance loads config, executes compliance analysis, and classifies failures.
+func CheckCompliance(ctx context.Context, configPath string, request analysis.ComplianceRequest) Response[analysis.ComplianceRequest, analysis.ComplianceResult] {
+	cfg, issue := loadConfig(configPath)
+	if issue != nil {
+		return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+
+	result, err := analysis.CheckComplianceContext(ctx, cfg, request)
+	if err != nil {
+		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeConfigError, missingIndexMessage(err), 2)
+		case index.IsDependencyUnavailable(err):
+			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+		default:
+			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeValidationError, err.Error(), 2)
+		}
+	}
+
+	return success(request, result)
+}
+
 // ReviewSpec loads config, executes the review workflow, and classifies failures.
 func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewRequest) Response[analysis.ReviewRequest, analysis.ReviewResult] {
 	cfg, issue := loadConfig(configPath)

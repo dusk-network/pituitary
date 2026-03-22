@@ -36,6 +36,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCompareResult(w, typed)
 	case *analysis.AnalyzeImpactResult:
 		renderAnalyzeImpactResult(w, typed)
+	case *analysis.ComplianceResult:
+		renderComplianceResult(w, typed)
 	case *analysis.DocDriftResult:
 		renderDocDriftResult(w, typed)
 	case *analysis.ReviewResult:
@@ -226,6 +228,33 @@ func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult
 	fmt.Fprintf(w, "affected specs: %d\n", len(result.AffectedSpecs))
 	fmt.Fprintf(w, "affected refs: %d\n", len(result.AffectedRefs))
 	fmt.Fprintf(w, "affected docs: %d\n", len(result.AffectedDocs))
+}
+
+func renderComplianceResult(w io.Writer, result *analysis.ComplianceResult) {
+	fmt.Fprintf(w, "paths: %s\n", strings.Join(result.Paths, ", "))
+	fmt.Fprintf(w, "relevant specs: %d\n", len(result.RelevantSpecs))
+	renderComplianceFindingGroup(w, "conflicts", result.Conflicts)
+	renderComplianceFindingGroup(w, "compliant", result.Compliant)
+	renderComplianceFindingGroup(w, "unspecified", result.Unspecified)
+}
+
+func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis.ComplianceFinding) {
+	if len(findings) == 0 {
+		fmt.Fprintf(w, "%s: none\n", label)
+		return
+	}
+
+	fmt.Fprintf(w, "%s: %d\n", label, len(findings))
+	for _, item := range findings {
+		fmt.Fprintf(w, "- %s", item.Path)
+		if item.SpecRef != "" {
+			fmt.Fprintf(w, " | %s", item.SpecRef)
+		}
+		if item.SectionHeading != "" {
+			fmt.Fprintf(w, " | %s", item.SectionHeading)
+		}
+		fmt.Fprintf(w, " | %s\n", item.Message)
+	}
 }
 
 func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
