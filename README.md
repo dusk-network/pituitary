@@ -245,7 +245,7 @@ Key design decisions:
 
 ## Project Status
 
-Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See [IMPLEMENTATION_BACKLOG.md](IMPLEMENTATION_BACKLOG.md) for what's shipped and what's planned.
+Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See the [GitHub issue queue](https://github.com/dusk-network/pituitary/issues) for active priorities and planned follow-up work.
 
 **What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, doc drift detection, composite review, JSON output, MCP server.
 
@@ -268,7 +268,7 @@ Requires `CGO_ENABLED=1` and a C toolchain — the sqlite-vec extension is linke
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and guidelines.
 
-In short: the project is early and welcomes contributors. The best way to get started is to pick an item from the [backlog](IMPLEMENTATION_BACKLOG.md), open an issue to claim it, and submit a PR. The codebase is structured with clear package boundaries (`internal/analysis`, `internal/index`, `internal/mcp`, etc.) so you can contribute to one area without needing to understand the whole system.
+In short: the project is early and welcomes contributors. The best way to get started is to pick an open issue, comment to claim it, and submit a PR. The codebase is structured with clear package boundaries (`internal/analysis`, `internal/index`, `internal/mcp`, etc.) so you can contribute to one area without needing to understand the whole system.
 
 ## License
 

@@ -110,7 +110,7 @@ If the command is user-facing, update:
 
 - `README.md` for the command surface
 - `ARCHITECTURE.md` if contracts or architecture boundaries changed
-- `IMPLEMENTATION_BACKLOG.md` if backlog state changed
+- the relevant GitHub issue if shipped scope or follow-up work changed
 
 If you changed contributor workflow, update the development docs too.
 

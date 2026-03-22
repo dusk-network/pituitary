@@ -24,7 +24,7 @@ This structures contributions and saves maintainer time triaging vague issues.
 Create `.github/PULL_REQUEST_TEMPLATE.md` with a lightweight checklist:
 
 - What does this PR do?
-- Which backlog item does it address?
+- Which issue does it address?
 - Did you run `make ci`?
 - Any new tests?
 
@@ -50,7 +50,7 @@ The previous README read like internal engineering notes. The new version:
 
 ### Good First Issues
 
-Label 5-10 issues as `good first issue`. Ideal candidates from the backlog:
+Label 5-10 issues as `good first issue`. Ideal candidates from the issue queue:
 
 - Add `--verbose` flag to `index --rebuild` showing per-source chunk counts.
 - Implement `--dry-run` for `index --rebuild` (parse and validate but don't write).

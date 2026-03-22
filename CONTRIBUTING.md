@@ -4,7 +4,7 @@ Pituitary is in active early development and welcomes contributions. Whether you
 
 ## Finding Something to Work On
 
-The [Implementation Backlog](IMPLEMENTATION_BACKLOG.md) tracks what's shipped and what's next. Look for issues labeled `good first issue` on GitHub — these are self-contained tasks that don't require understanding the full codebase.
+GitHub issues track what's shipped, in progress, and what's next. Look for issues labeled `good first issue` — these are self-contained tasks that don't require understanding the full codebase.
 
 If you want to work on something, open an issue (or comment on an existing one) to claim it. This avoids duplicate work.
 
