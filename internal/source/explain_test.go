@@ -23,10 +23,16 @@ func TestExplainFileReportsExcludedMarkdownDoc(t *testing.T) {
 	if got, want := result.Summary.Status, "excluded"; got != want {
 		t.Fatalf("summary status = %q, want %q", got, want)
 	}
-	if got, want := result.Sources[1].Reason, explainReasonNotMatchedByInclude; got != want {
+	docsSource, ok := findSourceExplanation(result.Sources, func(src SourceFileExplanation) bool {
+		return src.Name == "docs"
+	})
+	if !ok {
+		t.Fatal("did not find docs source in result.Sources")
+	}
+	if got, want := docsSource.Reason, explainReasonNotMatchedByInclude; got != want {
 		t.Fatalf("docs source reason = %q, want %q", got, want)
 	}
-	if got, want := result.Sources[1].RelativePath, "development/testing-guide.md"; got != want {
+	if got, want := docsSource.RelativePath, "development/testing-guide.md"; got != want {
 		t.Fatalf("docs source relative path = %q, want %q", got, want)
 	}
 }
@@ -144,10 +150,25 @@ func TestExplainFileReportsBundleMemberNotIndexedDirectly(t *testing.T) {
 	if got, want := result.Summary.Status, "not_indexed"; got != want {
 		t.Fatalf("summary status = %q, want %q", got, want)
 	}
-	if got, want := result.Sources[0].Reason, explainReasonBundleMemberNotIndexed; got != want {
+	specSource, ok := findSourceExplanation(result.Sources, func(src SourceFileExplanation) bool {
+		return src.BundlePath == "specs/rate-limit-v2/spec.toml"
+	})
+	if !ok {
+		t.Fatalf("spec source with bundle path %q not found", "specs/rate-limit-v2/spec.toml")
+	}
+	if got, want := specSource.Reason, explainReasonBundleMemberNotIndexed; got != want {
 		t.Fatalf("spec source reason = %q, want %q", got, want)
 	}
-	if got, want := result.Sources[0].BundlePath, "specs/rate-limit-v2/spec.toml"; got != want {
+	if got, want := specSource.BundlePath, "specs/rate-limit-v2/spec.toml"; got != want {
 		t.Fatalf("bundle path = %q, want %q", got, want)
 	}
+}
+
+func findSourceExplanation(sources []SourceFileExplanation, match func(SourceFileExplanation) bool) (SourceFileExplanation, bool) {
+	for _, source := range sources {
+		if match(source) {
+			return source, true
+		}
+	}
+	return SourceFileExplanation{}, false
 }

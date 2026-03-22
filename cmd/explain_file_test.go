@@ -32,12 +32,7 @@ func TestRunExplainFileJSON(t *testing.T) {
 			Summary       struct {
 				Status string `json:"status"`
 			} `json:"summary"`
-			Sources []struct {
-				Name         string `json:"name"`
-				Reason       string `json:"reason"`
-				Selected     bool   `json:"selected"`
-				RelativePath string `json:"relative_path"`
-			} `json:"sources"`
+			Sources []explainFileSourceJSON `json:"sources"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -56,8 +51,14 @@ func TestRunExplainFileJSON(t *testing.T) {
 	if len(payload.Result.Sources) != 2 {
 		t.Fatalf("sources = %+v, want 2 explanations", payload.Result.Sources)
 	}
-	if payload.Result.Sources[1].Name != "docs" || payload.Result.Sources[1].Reason != "not_matched_by_include" || payload.Result.Sources[1].Selected {
-		t.Fatalf("docs explanation = %+v, want excluded docs explanation", payload.Result.Sources[1])
+	docsSource, ok := findExplainFileSource(payload.Result.Sources, func(src explainFileSourceJSON) bool {
+		return src.Name == "docs"
+	})
+	if !ok {
+		t.Fatal("did not find docs source in payload result")
+	}
+	if docsSource.Reason != "not_matched_by_include" || docsSource.Selected {
+		t.Fatalf("docs explanation = %+v, want excluded docs explanation", docsSource)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
@@ -85,16 +86,7 @@ func TestRunExplainFileContractJSON(t *testing.T) {
 			Summary struct {
 				Status string `json:"status"`
 			} `json:"summary"`
-			Sources []struct {
-				Name         string `json:"name"`
-				Reason       string `json:"reason"`
-				ArtifactKind string `json:"artifact_kind"`
-				InferredSpec struct {
-					Ref    string `json:"ref"`
-					Title  string `json:"title"`
-					Status string `json:"status"`
-				} `json:"inferred_spec"`
-			} `json:"sources"`
+			Sources []explainFileSourceJSON `json:"sources"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -106,7 +98,12 @@ func TestRunExplainFileContractJSON(t *testing.T) {
 	if len(payload.Result.Sources) != 3 {
 		t.Fatalf("sources = %+v, want 3 explanations", payload.Result.Sources)
 	}
-	contract := payload.Result.Sources[2]
+	contract, ok := findExplainFileSource(payload.Result.Sources, func(src explainFileSourceJSON) bool {
+		return src.Name == "contracts"
+	})
+	if !ok {
+		t.Fatal("did not find contracts source in payload result")
+	}
 	if got, want := contract.Name, "contracts"; got != want {
 		t.Fatalf("contract source name = %q, want %q", got, want)
 	}
@@ -170,4 +167,26 @@ func TestResolveExplainPathResolvesRelativePath(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("withWorkingDir() exit code = %d, want 0", exitCode)
 	}
+}
+
+type explainFileSourceJSON struct {
+	Name         string `json:"name"`
+	Reason       string `json:"reason"`
+	Selected     bool   `json:"selected"`
+	RelativePath string `json:"relative_path"`
+	ArtifactKind string `json:"artifact_kind"`
+	InferredSpec struct {
+		Ref    string `json:"ref"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	} `json:"inferred_spec"`
+}
+
+func findExplainFileSource(sources []explainFileSourceJSON, match func(explainFileSourceJSON) bool) (explainFileSourceJSON, bool) {
+	for _, source := range sources {
+		if match(source) {
+			return source, true
+		}
+	}
+	return explainFileSourceJSON{}, false
 }
