@@ -20,5 +20,46 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run repository checks
-        run: make ci
+      - name: Run formatting check
+        run: make fmt-check
+
+      - name: Run SQLite readiness smoke test
+        run: make smoke-sqlite-vec
+
+      - name: Run tests
+        run: make test
+
+      - name: Run static analysis
+        run: make vet
+
+  macos:
+    runs-on: macos-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # fmt-check is platform-independent; run it only in the linux go job.
+      - name: Run SQLite readiness smoke test
+        run: make smoke-sqlite-vec
+
+      - name: Run tests
+        run: make test
+
+      - name: Run static analysis
+        run: make vet
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build contributor Dockerfile
+        run: docker build --progress=plain --tag pituitary-dev:${{ github.sha }} .
