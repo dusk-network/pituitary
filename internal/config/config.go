@@ -474,6 +474,12 @@ func nextQuotedString(value string) string {
 	return value
 }
 
+// Validate resolves derived paths and verifies that a config can be used by the
+// current bootstrap runtime.
+func Validate(cfg *Config) error {
+	return validate(cfg)
+}
+
 func validate(cfg *Config) error {
 	var errs validationErrors
 

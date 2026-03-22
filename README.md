@@ -151,12 +151,22 @@ files = ["rate-limit-v2/spec.toml", "burst-handling/spec.toml"]
 
 Selectors narrow what gets indexed; they do not rewrite refs. For example, a docs source rooted at `.` still produces refs like `doc://docs/guides/api-rate-limits` even when `files` narrows the selection to one file.
 
+For an existing repo without a hand-written config yet, the default onboarding flow is:
+
+```sh
+./pituitary discover --path .
+./pituitary discover --path . --write
+./pituitary preview-sources
+./pituitary index --rebuild
+```
+
 ## Commands
 
 Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports.
 
 | Command | What it does |
 |---|---|
+| `discover --path .` | Scan a repo, propose conservative sources, and show the generated local config |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status` | Report whether the configured index exists and basic spec/doc/chunk counts |

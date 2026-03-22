@@ -20,6 +20,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
 
 	switch typed := result.(type) {
+	case *source.DiscoverResult:
+		renderDiscoverResult(w, typed)
 	case *index.RebuildResult:
 		renderIndexResult(w, typed)
 	case *statusResult:
@@ -90,6 +92,33 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
 	renderIndexSourceSummaries(w, result.Sources)
+}
+
+func renderDiscoverResult(w io.Writer, result *source.DiscoverResult) {
+	fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	fmt.Fprintf(w, "config path: %s\n", result.ConfigPath)
+	if result.WroteConfig {
+		fmt.Fprintln(w, "config write: wrote local config")
+	} else {
+		fmt.Fprintln(w, "config write: skipped")
+	}
+
+	for _, discovered := range result.Sources {
+		fmt.Fprintf(w, "source: %s | %s | root: %s | items: %d | confidence: %s\n", discovered.Name, discovered.Kind, discovered.Path, discovered.ItemCount, discovered.Confidence)
+		for _, reason := range discovered.Rationale {
+			fmt.Fprintf(w, "rationale: %s\n", reason)
+		}
+		for _, item := range discovered.Items {
+			fmt.Fprintf(w, "- %s | %s\n", item.Path, item.Confidence)
+		}
+	}
+
+	if result.Preview != nil {
+		fmt.Fprintf(w, "preview sources: %d\n", len(result.Preview.Sources))
+	}
+
+	fmt.Fprintln(w, "generated config:")
+	fmt.Fprint(w, result.Config)
 }
 
 func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary) {

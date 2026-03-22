@@ -9,6 +9,7 @@ import (
 )
 
 var commands = map[string]string{
+	"discover":         "scan a repo and propose a local config",
 	"index":            "rebuild or validate the local Pituitary index",
 	"status":           "show current index status",
 	"version":          "show Pituitary and Go runtime versions",
@@ -61,6 +62,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	if name == "index" {
 		return runIndexContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "discover" {
+		return runDiscoverContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "status" {
 		return runStatusContext(ctx, remainingArgs[1:], stdout, stderr)

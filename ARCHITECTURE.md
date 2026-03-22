@@ -104,7 +104,7 @@ path = "rfcs"
 include = ["**/*.md"]
 ```
 
-This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots, even as the repo grows into inferred-contract sources.
+This keeps the first ship explicit and easy to reason about. The indexed config remains explicit even as the repo grows into inferred-contract sources: `pituitary discover` may propose a local `.pituitary/pituitary.toml`, but it must stay conservative, inspectable before write, and never introduce hidden indexing behavior behind the user's back.
 
 Inferred `markdown_contract` records must preserve confidence metadata alongside the normalized artifact so result surfaces can distinguish strong explicit extraction from weaker path/default fallbacks. Search should expose those confidence signals inline, while higher-stakes outputs such as impact and doc-drift should elevate weak inference as warnings instead of silently treating it as equally strong.
 
