@@ -142,7 +142,7 @@ Selectors narrow what gets indexed; they do not rewrite refs. For example, a doc
 
 ## Commands
 
-Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries.
+Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports.
 
 | Command | What it does |
 |---|---|
@@ -154,8 +154,10 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-overlap --spec-ref SPEC-042` | Detect specs that cover overlapping ground |
 | `compare-specs --spec-ref SPEC-008 --spec-ref SPEC-042` | Side-by-side tradeoff analysis of two specs |
 | `analyze-impact --spec-ref SPEC-042` | Trace which specs, code refs, and docs are affected by a change |
+| `check-compliance --path PATH` | Check one or more code paths against accepted specs |
+| `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
-| `review-spec --spec-ref SPEC-042` | Full review: overlap + comparison + impact + drift in one report |
+| `review-spec --spec-ref SPEC-042` | Full review: overlap + comparison + impact + drift + remediation in one report |
 
 ### Example: full spec review
 
@@ -245,11 +247,11 @@ Key design decisions:
 
 ## Project Status
 
-Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See [IMPLEMENTATION_BACKLOG.md](IMPLEMENTATION_BACKLOG.md) for what's shipped and what's planned.
+Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See the [GitHub issue queue](https://github.com/dusk-network/pituitary/issues) for active priorities and planned follow-up work.
 
-**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, doc drift detection, composite review, JSON output, MCP server.
+**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
 
-**Coming next:** `check_compliance` (code compliance checking), incremental indexing, non-filesystem source adapters, CI vendor integrations.
+**Coming next:** incremental indexing, non-filesystem source adapters, CI vendor integrations.
 
 ## Development
 
@@ -268,7 +270,7 @@ Requires `CGO_ENABLED=1` and a C toolchain — the sqlite-vec extension is linke
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and guidelines.
 
-In short: the project is early and welcomes contributors. The best way to get started is to pick an item from the [backlog](IMPLEMENTATION_BACKLOG.md), open an issue to claim it, and submit a PR. The codebase is structured with clear package boundaries (`internal/analysis`, `internal/index`, `internal/mcp`, etc.) so you can contribute to one area without needing to understand the whole system.
+In short: the project is early and welcomes contributors. The best way to get started is to pick an open issue, comment to claim it, and submit a PR. The codebase is structured with clear package boundaries (`internal/analysis`, `internal/index`, `internal/mcp`, etc.) so you can contribute to one area without needing to understand the whole system.
 
 ## License
 

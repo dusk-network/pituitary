@@ -36,6 +36,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCompareResult(w, typed)
 	case *analysis.AnalyzeImpactResult:
 		renderAnalyzeImpactResult(w, typed)
+	case *analysis.ComplianceResult:
+		renderComplianceResult(w, typed)
 	case *analysis.DocDriftResult:
 		renderDocDriftResult(w, typed)
 	case *analysis.ReviewResult:
@@ -61,6 +63,19 @@ func renderCommandTable(w io.Writer, command string, result any) error {
 		return nil
 	default:
 		return fmt.Errorf("format %q is only supported for search-specs", "table")
+	}
+}
+
+func renderCommandMarkdown(w io.Writer, command string, result any) error {
+	switch typed := result.(type) {
+	case *analysis.ReviewResult:
+		if command != "review-spec" {
+			return fmt.Errorf("format %q is only supported for review-spec", "markdown")
+		}
+		renderReviewMarkdown(w, typed)
+		return nil
+	default:
+		return fmt.Errorf("format %q is only supported for review-spec", "markdown")
 	}
 }
 
@@ -228,13 +243,53 @@ func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult
 	fmt.Fprintf(w, "affected docs: %d\n", len(result.AffectedDocs))
 }
 
+func renderComplianceResult(w io.Writer, result *analysis.ComplianceResult) {
+	fmt.Fprintf(w, "paths: %s\n", strings.Join(result.Paths, ", "))
+	fmt.Fprintf(w, "relevant specs: %d\n", len(result.RelevantSpecs))
+	renderComplianceFindingGroup(w, "conflicts", result.Conflicts)
+	renderComplianceFindingGroup(w, "compliant", result.Compliant)
+	renderComplianceFindingGroup(w, "unspecified", result.Unspecified)
+}
+
+func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis.ComplianceFinding) {
+	if len(findings) == 0 {
+		fmt.Fprintf(w, "%s: none\n", label)
+		return
+	}
+
+	fmt.Fprintf(w, "%s: %d\n", label, len(findings))
+	for _, item := range findings {
+		fmt.Fprintf(w, "- %s", item.Path)
+		if item.SpecRef != "" {
+			fmt.Fprintf(w, " | %s", item.SpecRef)
+		}
+		if item.SectionHeading != "" {
+			fmt.Fprintf(w, " | %s", item.SectionHeading)
+		}
+		fmt.Fprintf(w, " | %s\n", item.Message)
+	}
+}
+
 func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 	if len(result.DriftItems) == 0 {
 		fmt.Fprintln(w, "no drift items")
 		return
 	}
+	remediation := remediationItemsByDocRef(result.Remediation)
 	for i, item := range result.DriftItems {
-		fmt.Fprintf(w, "%d. %s | %s | findings: %d\n", i+1, item.DocRef, item.Title, len(item.Findings))
+		fmt.Fprintf(w, "%d. %s | %s | findings: %d", i+1, item.DocRef, item.Title, len(item.Findings))
+		if suggestions := remediation[item.DocRef]; len(suggestions) > 0 {
+			fmt.Fprintf(w, " | remediation: %d", len(suggestions))
+		}
+		fmt.Fprintln(w)
+		for _, suggestion := range remediation[item.DocRef] {
+			fmt.Fprintf(w, "   remediation: %s | %s\n", suggestion.SpecRef, suggestion.Summary)
+			if suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "" {
+				fmt.Fprintf(w, "   suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
+			} else if suggestion.SuggestedEdit.Note != "" {
+				fmt.Fprintf(w, "   suggested edit: %s\n", suggestion.SuggestedEdit.Note)
+			}
+		}
 	}
 }
 
@@ -263,4 +318,117 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 	} else {
 		fmt.Fprintln(w, "doc drift: none")
 	}
+	if result.DocRemediation != nil {
+		fmt.Fprintf(w, "doc remediation: %d item(s)\n", len(result.DocRemediation.Items))
+	} else {
+		fmt.Fprintln(w, "doc remediation: none")
+	}
+}
+
+func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
+	fmt.Fprintf(w, "# Review Spec Report\n\n")
+	fmt.Fprintf(w, "## Spec\n\n")
+	fmt.Fprintf(w, "- Ref: `%s`\n", result.SpecRef)
+
+	fmt.Fprintf(w, "\n## Overlap\n\n")
+	if result.Overlap == nil {
+		fmt.Fprintln(w, "No overlap analysis.")
+	} else {
+		fmt.Fprintf(w, "- Recommendation: `%s`\n", result.Overlap.Recommendation)
+		if len(result.Overlap.Overlaps) == 0 {
+			fmt.Fprintln(w, "- No overlapping specs detected.")
+		} else {
+			for _, item := range result.Overlap.Overlaps {
+				fmt.Fprintf(w, "- `%s` %s (%s, %.3f)\n", item.Ref, item.Title, item.Relationship, item.Score)
+			}
+		}
+	}
+
+	fmt.Fprintf(w, "\n## Comparison\n\n")
+	if result.Comparison == nil {
+		fmt.Fprintln(w, "No comparison generated.")
+	} else {
+		fmt.Fprintf(w, "- Recommendation: `%s`\n", result.Comparison.Comparison.Recommendation)
+		for _, tradeoff := range result.Comparison.Comparison.Tradeoffs {
+			fmt.Fprintf(w, "- %s: %s\n", tradeoff.Topic, tradeoff.Summary)
+		}
+	}
+
+	fmt.Fprintf(w, "\n## Impact\n\n")
+	if result.Impact == nil {
+		fmt.Fprintln(w, "No impact analysis generated.")
+	} else {
+		if len(result.Impact.AffectedSpecs) == 0 {
+			fmt.Fprintln(w, "- Affected specs: none")
+		} else {
+			specRefs := make([]string, 0, len(result.Impact.AffectedSpecs))
+			for _, item := range result.Impact.AffectedSpecs {
+				specRefs = append(specRefs, "`"+item.Ref+"`")
+			}
+			fmt.Fprintf(w, "- Affected specs: %s\n", strings.Join(specRefs, ", "))
+		}
+		if len(result.Impact.AffectedDocs) == 0 {
+			fmt.Fprintln(w, "- Affected docs: none")
+		} else {
+			docRefs := make([]string, 0, len(result.Impact.AffectedDocs))
+			for _, item := range result.Impact.AffectedDocs {
+				docRefs = append(docRefs, "`"+item.Ref+"`")
+			}
+			fmt.Fprintf(w, "- Affected docs: %s\n", strings.Join(docRefs, ", "))
+		}
+	}
+
+	fmt.Fprintf(w, "\n## Doc Drift\n\n")
+	if result.DocDrift == nil || len(result.DocDrift.DriftItems) == 0 {
+		fmt.Fprintln(w, "No drifting docs detected.")
+	} else {
+		for _, item := range result.DocDrift.DriftItems {
+			fmt.Fprintf(w, "### `%s`\n\n", item.DocRef)
+			for _, finding := range item.Findings {
+				fmt.Fprintf(w, "- `%s` from `%s`: %s", finding.Code, finding.SpecRef, finding.Message)
+				if finding.Expected != "" || finding.Observed != "" {
+					fmt.Fprintf(w, " (expected `%s`, observed `%s`)", finding.Expected, finding.Observed)
+				}
+				fmt.Fprintln(w)
+			}
+			fmt.Fprintln(w)
+		}
+	}
+
+	fmt.Fprintf(w, "## Doc Remediation\n\n")
+	if result.DocRemediation == nil || len(result.DocRemediation.Items) == 0 {
+		fmt.Fprintln(w, "No remediation guidance.")
+		return
+	}
+	for _, item := range result.DocRemediation.Items {
+		fmt.Fprintf(w, "### `%s`\n\n", item.DocRef)
+		for _, suggestion := range item.Suggestions {
+			fmt.Fprintf(w, "- `%s` from `%s`: %s\n", suggestion.Code, suggestion.SpecRef, suggestion.Summary)
+			if suggestion.Evidence.SpecExcerpt != "" {
+				fmt.Fprintf(w, "  Evidence: spec says %q", suggestion.Evidence.SpecExcerpt)
+				if suggestion.Evidence.DocExcerpt != "" {
+					fmt.Fprintf(w, "; doc says %q", suggestion.Evidence.DocExcerpt)
+				}
+				fmt.Fprintln(w)
+			}
+			switch {
+			case suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "":
+				fmt.Fprintf(w, "  Suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
+			case suggestion.SuggestedEdit.Note != "":
+				fmt.Fprintf(w, "  Suggested edit: %s\n", suggestion.SuggestedEdit.Note)
+			}
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func remediationItemsByDocRef(result *analysis.DocRemediationResult) map[string][]analysis.DocRemediationSuggestion {
+	if result == nil {
+		return map[string][]analysis.DocRemediationSuggestion{}
+	}
+	items := make(map[string][]analysis.DocRemediationSuggestion, len(result.Items))
+	for _, item := range result.Items {
+		items[item.DocRef] = item.Suggestions
+	}
+	return items
 }

@@ -16,11 +16,12 @@ type ReviewRequest struct {
 
 // ReviewResult is the composed review-spec response.
 type ReviewResult struct {
-	SpecRef    string               `json:"spec_ref"`
-	Overlap    *OverlapResult       `json:"overlap"`
-	Comparison *CompareResult       `json:"comparison"`
-	Impact     *AnalyzeImpactResult `json:"impact"`
-	DocDrift   *DocDriftResult      `json:"doc_drift"`
+	SpecRef        string                `json:"spec_ref"`
+	Overlap        *OverlapResult        `json:"overlap"`
+	Comparison     *CompareResult        `json:"comparison"`
+	Impact         *AnalyzeImpactResult  `json:"impact"`
+	DocDrift       *DocDriftResult       `json:"doc_drift"`
+	DocRemediation *DocRemediationResult `json:"doc_remediation"`
 }
 
 // ReviewSpec composes overlap, comparison, impact, and targeted doc-drift.
@@ -91,6 +92,9 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	docDrift := &DocDriftResult{
 		Scope:      DocDriftScope{Mode: "doc_refs", DocRefs: []string{}},
 		DriftItems: nil,
+		Remediation: &DocRemediationResult{
+			Items: nil,
+		},
 	}
 	if impact != nil && len(impact.AffectedDocs) > 0 {
 		docDriftSpecRefs, err := repo.relevantDocDriftSpecRefs(impactDocs)
@@ -104,11 +108,17 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 		docDrift = buildDocDriftResult(DocDriftScope{Mode: "doc_refs", DocRefs: uniqueStrings(impactDocRefs)}, impactDocs, docDriftSpecs)
 	}
 
+	docRemediation := &DocRemediationResult{Items: nil}
+	if docDrift != nil && docDrift.Remediation != nil {
+		docRemediation = docDrift.Remediation
+	}
+
 	return &ReviewResult{
-		SpecRef:    overlap.Candidate.Ref,
-		Overlap:    overlap,
-		Comparison: comparison,
-		Impact:     impact,
-		DocDrift:   docDrift,
+		SpecRef:        overlap.Candidate.Ref,
+		Overlap:        overlap,
+		Comparison:     comparison,
+		Impact:         impact,
+		DocDrift:       docDrift,
+		DocRemediation: docRemediation,
 	}, nil
 }

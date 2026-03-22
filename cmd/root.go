@@ -9,18 +9,19 @@ import (
 )
 
 var commands = map[string]string{
-	"index":           "rebuild or validate the local Pituitary index",
-	"status":          "show current index status",
-	"version":         "show Pituitary and Go runtime versions",
-	"preview-sources": "show which files each source will index",
-	"search-specs":    "search spec sections semantically",
-	"check-overlap":   "find overlapping specs",
-	"compare-specs":   "compare design tradeoffs across specs",
-	"analyze-impact":  "report affected specs and docs",
-	"check-doc-drift": "find docs that drift from specs",
-	"review-spec":     "run the common spec-review workflow",
-	"serve":           "run the optional MCP server transport",
-	"help":            "show available commands",
+	"index":            "rebuild or validate the local Pituitary index",
+	"status":           "show current index status",
+	"version":          "show Pituitary and Go runtime versions",
+	"preview-sources":  "show which files each source will index",
+	"search-specs":     "search spec sections semantically",
+	"check-overlap":    "find overlapping specs",
+	"compare-specs":    "compare design tradeoffs across specs",
+	"analyze-impact":   "report affected specs and docs",
+	"check-compliance": "check code paths and diffs against accepted specs",
+	"check-doc-drift":  "find docs that drift from specs",
+	"review-spec":      "run the common spec-review workflow",
+	"serve":            "run the optional MCP server transport",
+	"help":             "show available commands",
 }
 
 // Run executes the bootstrap CLI transport and returns the desired process exit code.
@@ -81,6 +82,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if name == "analyze-impact" {
 		return runAnalyzeImpactContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "check-compliance" {
+		return runCheckComplianceContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "check-doc-drift" {
 		return runCheckDocDriftContext(ctx, remainingArgs[1:], stdout, stderr)

@@ -31,7 +31,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "index" {
 					args = []string{name, "--rebuild"}
@@ -54,6 +54,16 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				} else {
 					indexStdout := bytes.Buffer{}
 					indexStderr := bytes.Buffer{}
+					if name == "check-compliance" {
+						writeComplianceSourceFile(t, repoRoot, "src/api/middleware/ratelimiter.go", `
+package middleware
+
+// Apply limits per tenant rather than per API key.
+// Enforce a default limit of 200 requests per minute.
+// Use a sliding-window limiter.
+func buildLimiter() {}
+`)
+					}
 					exitCode := withWorkingDir(t, repoRoot, func() int {
 						return runIndex([]string{"--rebuild"}, &indexStdout, &indexStderr)
 					})
@@ -66,6 +76,8 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 						args = []string{name, "--spec-ref", "SPEC-008", "--spec-ref", "SPEC-042"}
 					} else if name == "analyze-impact" {
 						args = []string{name, "--spec-ref", "SPEC-042"}
+					} else if name == "check-compliance" {
+						args = []string{name, "--path", "src/api/middleware/ratelimiter.go"}
 					} else if name == "review-spec" {
 						args = []string{name, "--spec-ref", "SPEC-042"}
 					} else {

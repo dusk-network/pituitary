@@ -63,7 +63,7 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 - Database-backed source adapters
 - Incremental index updates
 - Stored code-summary embeddings
-- Code compliance checks against diffs or source files
+- Provider-backed code-compliance adjudication beyond the shipped deterministic CLI slice
 
 ### Also shipped in this repo during v1
 
@@ -592,9 +592,9 @@ The shared `errors[]` shape above applies to every shipped command. Path-specifi
 | `analyze_impact` | required | Depends on explicit graph plus doc retrieval |
 | `check_doc_drift` | required | Markdown docs only in first ship |
 | `review_spec` | required | Compound wrapper over the required tools |
-| `check_compliance` | deferred | Important, but not required for the first shipping slice |
+| `check_compliance` | shipped after first ship | CLI-first deterministic slice; MCP exposure can follow once the request shape settles |
 
-The first shipping slice is intentionally **spec-and-doc centric**. Code remains in the model through `applies_to` references, but Pituitary does not need to inspect raw source files before the core spec workflows are shipped and validated.
+The first shipping slice was intentionally **spec-and-doc centric**. Code remained in the model through `applies_to` references until the core spec workflows were shipped and validated. The current repo now includes a CLI-first deterministic `check_compliance` slice on top of that same index.
 
 #### Tool: `check_overlap`
 
@@ -661,11 +661,11 @@ Output:
 
 **Purpose:** determine whether code matches accepted specs.
 
-**Status:** deferred until after the first shipping slice.
+**Status:** shipped in the CLI as a deterministic first follow-on after the first shipping slice.
 
 ```text
 Input:
-  { code_ref: "code://src/api/middleware/ratelimiter.go" }
+  { paths: ["src/api/middleware/ratelimiter.go"] }
   OR { diff_text: "..." }
 
 Process:
@@ -673,16 +673,16 @@ Process:
      a. via applies_to reverse lookups in the graph
      b. via semantic search from the current file or diff into spec chunks
   2. Read actual source or use the supplied diff as primary evidence
-  3. For each relevant spec, ask the LLM to assess:
-     - implemented requirements
-     - contradictions
-     - unspecified behaviors
-     - line-level evidence
+  3. Deterministically classify findings into:
+     - compliant
+     - conflicting
+     - unspecified / no-governing-spec
+  4. Cite spec refs, section headings, and changed paths
 
 Output:
   compliant[]
-  violations[]
-  unspecified_behaviors[]
+  conflicts[]
+  unspecified[]
 ```
 
 #### Tool: `check_doc_drift`
@@ -864,12 +864,12 @@ pituitary/
 
 ## Data Flow Summary by Goal
 
-| Goal | First ship | Trigger | Key Data Path |
+| Goal | Current status | Trigger | Key Data Path |
 |---|---|---|---|
 | 1. Overlap detection | yes | New or changed spec | Spec record -> embed -> candidate retrieval -> deterministic overlap analysis today |
 | 2. Tradeoff analysis | yes | Overlap detected | Spec refs -> full text retrieval -> deterministic comparison today |
 | 3. Impact analysis | yes | Spec accepted/modified/deprecated | Graph traversal + doc search -> deterministic impact analysis today |
-| 4. Code compliance | no | Changed code or diff | Source/diff -> relevant spec retrieval -> LLM compliance check |
+| 4. Code compliance | yes (CLI) | Changed code or diff | Source/diff -> applies_to lookup + semantic fallback -> deterministic compliance findings today |
 | 5. Doc sync | yes | Changed docs or changed spec | Doc chunks vs spec chunks -> deterministic drift detection today |
 
 All tools keep the same discipline: retrieval first, then deterministic analysis today or provider-backed adjudication later.
@@ -908,6 +908,7 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 - Implement `check_overlap`
 - Implement `compare_specs`
 - Implement `analyze_impact`
+- Implement CLI-first deterministic `check_compliance`
 - Implement `check_doc_drift`
 - Implement `review_spec`
 
@@ -920,7 +921,6 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 
 ### Deferred Until After First Ship
 
-- `check_compliance`
 - Non-filesystem source adapters
 - GitHub-specific flows and vendor-specific CI/reporting integrations
 - Incremental indexing

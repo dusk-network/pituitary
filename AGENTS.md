@@ -9,7 +9,7 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 
 ## Coding Standards
 
-- Read [README.md](README.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [IMPLEMENTATION_BACKLOG.md](IMPLEMENTATION_BACKLOG.md) before deep implementation work.
+- Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before deep implementation work. Use the active GitHub issues for backlog and priority context.
 - Treat repository docs as the primary source of truth; keep GitHub issues aligned with them rather than the reverse.
 - Prefer small, reversible changes and deterministic tooling over hand-maintained generated state.
 - Keep outputs machine-readable where the architecture expects JSON-first behavior.
@@ -20,7 +20,7 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 - Scope is local filesystem only: `spec.toml` + `body.md` bundles, Markdown docs, SQLite, and `sqlite-vec`.
 - The repo ships CI for fmt, readiness, test, and vet validation, but GitHub- or vendor-specific reporting integrations remain out of scope.
 - Spec and doc analysis come before code-compliance features.
-- Canonical contract decisions live in `ARCHITECTURE.md`; update docs and backlog together when those contracts change.
+- Canonical contract decisions live in `ARCHITECTURE.md`; update repo docs and GitHub issues together when those contracts change.
 
 ## Workflow
 
@@ -39,5 +39,5 @@ Pituitary is a spec-management tool for keeping specifications and documentation
 ## Safety
 
 - No secrets in tracked files, docs, or fixtures.
-- Stay within the active backlog item and call out scope drift when it appears.
+- Stay within the active issue or approved work item and call out scope drift when it appears.
 - Do not overwrite user changes or reset the worktree without explicit approval.

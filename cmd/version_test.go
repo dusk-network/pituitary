@@ -144,3 +144,21 @@ func TestRunVersionRejectsTableFormat(t *testing.T) {
 		t.Fatalf("runVersion(--format table) stderr = %q, want explicit table-format error", stderr.String())
 	}
 }
+
+func TestRunVersionRejectsMarkdownFormat(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runVersion([]string{"--format", "markdown"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("runVersion(--format markdown) exit code = %d, want 2", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("runVersion(--format markdown) wrote unexpected stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), `pituitary version: format "markdown" is only supported for review-spec`) {
+		t.Fatalf("runVersion(--format markdown) stderr = %q, want explicit markdown-format error", stderr.String())
+	}
+}

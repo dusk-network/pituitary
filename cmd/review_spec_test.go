@@ -57,6 +57,15 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 					DocRef string `json:"doc_ref"`
 				} `json:"drift_items"`
 			} `json:"doc_drift"`
+			DocRemediation struct {
+				Items []struct {
+					DocRef      string `json:"doc_ref"`
+					Suggestions []struct {
+						SpecRef string `json:"spec_ref"`
+						Code    string `json:"code"`
+					} `json:"suggestions"`
+				} `json:"items"`
+			} `json:"doc_remediation"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -81,8 +90,52 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	if payload.Result.DocDrift.Scope.Mode != "doc_refs" || len(payload.Result.DocDrift.DriftItems) != 1 || payload.Result.DocDrift.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("doc_drift = %+v, want targeted guide drift", payload.Result.DocDrift)
 	}
+	if len(payload.Result.DocRemediation.Items) != 1 || payload.Result.DocRemediation.Items[0].DocRef != "doc://guides/api-rate-limits" {
+		t.Fatalf("doc_remediation = %+v, want targeted guide remediation", payload.Result.DocRemediation)
+	}
+	if len(payload.Result.DocRemediation.Items[0].Suggestions) == 0 || payload.Result.DocRemediation.Items[0].Suggestions[0].SpecRef == "" {
+		t.Fatalf("doc_remediation = %+v, want stable remediation suggestions", payload.Result.DocRemediation)
+	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunReviewSpecMarkdown(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--spec-ref", "SPEC-042", "--format", "markdown"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec(--format markdown) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec(--format markdown) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"# Review Spec Report",
+		"## Overlap",
+		"`SPEC-008`",
+		"## Comparison",
+		"## Impact",
+		"`SPEC-055`",
+		"## Doc Drift",
+		"`doc://guides/api-rate-limits`",
+		"## Doc Remediation",
+		"Suggested edit:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runReviewSpec(--format markdown) output %q does not contain %q", out, want)
+		}
 	}
 }
 
