@@ -107,6 +107,13 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
+include = ["**/*.md"]
 ```
 
 Selectors are always evaluated relative to the configured source `path`:
@@ -115,7 +122,9 @@ Selectors are always evaluated relative to the configured source `path`:
 - `include` and `exclude` are glob filters over those same source-relative paths.
 - If `files` is present, a path must be listed there before `include` / `exclude` are applied.
 - For `spec_bundle`, `files` entries must point to `spec.toml`.
-- For `markdown_docs`, `files` entries must point to `.md` files.
+- For `markdown_docs` and `markdown_contract`, `files` entries must point to `.md` files.
+
+`markdown_contract` treats Markdown files as inferred specs. Pituitary reads the first H1 as the title, picks up common metadata lines such as `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` when present, and otherwise falls back to a stable workspace-derived ref like `contract://rfcs/auth/session-policy` with status `draft`.
 
 Example for a mixed-layout repo without changing source roots:
 

@@ -103,6 +103,36 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 		if err != nil {
 			return SourcePreview{}, err
 		}
+	case config.SourceKindMarkdownContract:
+		err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || filepath.Ext(path) != ".md" {
+				return nil
+			}
+
+			relPath, err := filepath.Rel(source.ResolvedPath, path)
+			if err != nil {
+				return fmt.Errorf("source %q contract %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+			}
+			allowed, err := sourcePathAllowed(source, relPath)
+			if err != nil {
+				return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+			}
+			if !allowed {
+				return nil
+			}
+
+			preview.Items = append(preview.Items, PreviewItem{
+				ArtifactKind: "spec",
+				Path:         workspaceRelative(workspaceRoot, path),
+			})
+			return nil
+		})
+		if err != nil {
+			return SourcePreview{}, err
+		}
 	default:
 		return SourcePreview{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 	}

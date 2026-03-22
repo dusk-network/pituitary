@@ -95,9 +95,16 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "rfcs"
+include = ["**/*.md"]
 ```
 
-This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots.
+This keeps the first ship explicit and easy to reason about. No auto-discovery, no hidden conventions beyond the configured roots, even as the repo grows into inferred-contract sources.
 
 ---
 
@@ -311,10 +318,11 @@ The core should not care whether a record came from:
 
 The adapter contract keeps that variability out of the analysis engine.
 
-**V1 scope:**
+**Current scope:**
 
 - `filesystem` adapter for spec bundles
 - `filesystem` adapter for docs directories
+- `filesystem` adapter for inferred Markdown contracts
 
 **V1 filesystem enumeration rules:**
 
@@ -323,13 +331,16 @@ The adapter contract keeps that variability out of the analysis engine.
 - A valid bundle must contain exactly one `spec.toml`; its `body` field must resolve to exactly one file relative to the bundle directory.
 - Nested bundles inside another bundle directory are invalid and should fail with a clear path-specific error.
 - For `kind = "markdown_docs"`, recursively index `*.md` files under the configured source root, then apply selectors against source-relative paths.
+- For `kind = "markdown_contract"`, recursively index `*.md` files under the configured source root, infer spec metadata from common Markdown fields, and normalize the file into a `SpecRecord`.
 - `files` is an optional exact allowlist of source-relative files.
 - `include` and `exclude` are optional glob filters over those same source-relative paths.
 - If `files` is present, it narrows the candidate set before `include` / `exclude` are applied.
 - For `kind = "spec_bundle"`, `files` entries must point to `spec.toml`.
-- For `kind = "markdown_docs"`, `files` entries must point to `.md` files.
+- For `kind = "markdown_docs"` and `kind = "markdown_contract"`, `files` entries must point to `.md` files.
 - A doc title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
 - A doc `ref` should be derived from the Markdown path relative to the configured doc source root, without the `.md` suffix.
+- An inferred contract title should come from the first H1 heading when present; otherwise it should fall back to the filename stem.
+- An inferred contract should use explicit `Ref:` / `ID:` metadata when present; otherwise it should fall back to a stable workspace-relative `contract://...` ref and default `status = "draft"` when no valid status is declared.
 
 **Later, as extensions:**
 

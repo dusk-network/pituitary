@@ -74,6 +74,16 @@ func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
 			}
 			summary.DocCount = len(docs)
 			summary.ItemCount = len(docs)
+		case source.Kind == config.SourceKindMarkdownContract:
+			specs, err := loadMarkdownContracts(cfg.Workspace.RootPath, source)
+			if err != nil {
+				return nil, err
+			}
+			if err := appendUniqueSpecRecords(result, seenSpecs, source, specs); err != nil {
+				return nil, err
+			}
+			summary.SpecCount = len(specs)
+			summary.ItemCount = len(specs)
 		default:
 			return nil, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 		}
@@ -122,10 +132,14 @@ func appendUniqueDocRecords(result *LoadResult, seen map[string]artifactOrigin, 
 }
 
 func specOrigin(source config.Source, record model.SpecRecord) artifactOrigin {
+	itemPath := record.Metadata["bundle_path"]
+	if itemPath == "" {
+		itemPath = record.Metadata["path"]
+	}
 	return artifactOrigin{
 		sourceName: source.Name,
 		sourcePath: source.Path,
-		itemPath:   record.Metadata["bundle_path"],
+		itemPath:   itemPath,
 	}
 }
 
@@ -382,6 +396,45 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 	return records, nil
 }
 
+func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
+	var records []model.SpecRecord
+	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		relPath, err := filepath.Rel(source.ResolvedPath, path)
+		if err != nil {
+			return fmt.Errorf("source %q contract %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+		allowed, err := sourcePathAllowed(source, relPath)
+		if err != nil {
+			return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+		if !allowed {
+			return nil
+		}
+
+		bodyBytes, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+
+		record, err := inferMarkdownContract(workspaceRoot, source, path, bodyBytes)
+		if err != nil {
+			return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+		}
+		records = append(records, record)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func sourcePathAllowed(source config.Source, relPath string) (bool, error) {
 	relPath = filepath.ToSlash(relPath)
 	if len(source.Files) > 0 {
@@ -448,6 +501,245 @@ func docTitle(path string, body []byte) string {
 		}
 	}
 	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+}
+
+type markdownContractFields struct {
+	Ref        string
+	Status     string
+	Domain     string
+	DependsOn  []string
+	Supersedes []string
+	AppliesTo  []string
+}
+
+func inferMarkdownContract(workspaceRoot string, source config.Source, path string, body []byte) (model.SpecRecord, error) {
+	fields := inferMarkdownContractFields(body)
+	fallbackRef, err := markdownContractRefForPath(workspaceRoot, path)
+	if err != nil {
+		return model.SpecRecord{}, err
+	}
+
+	refSource := "explicit"
+	ref := strings.TrimSpace(fields.Ref)
+	if ref == "" {
+		ref = fallbackRef
+		refSource = "path"
+	}
+
+	statusSource := "explicit"
+	status := normalizeInferredStatus(fields.Status)
+	if status == "" {
+		status = model.StatusDraft
+		statusSource = "default"
+	}
+
+	domain := strings.ToLower(strings.TrimSpace(fields.Domain))
+	metadata := map[string]string{
+		"source_name":   source.Name,
+		"path":          workspaceRelative(workspaceRoot, path),
+		"source_kind":   config.SourceKindMarkdownContract,
+		"ref_source":    refSource,
+		"status_source": statusSource,
+		"path_ref":      fallbackRef,
+	}
+
+	return model.SpecRecord{
+		Ref:         ref,
+		Kind:        model.ArtifactKindSpec,
+		Title:       docTitle(path, body),
+		Status:      status,
+		Domain:      domain,
+		Relations:   buildRelations(fields.DependsOn, fields.Supersedes),
+		AppliesTo:   uniqueStringValues(fields.AppliesTo),
+		SourceRef:   fileSourceRef(workspaceRoot, path),
+		BodyFormat:  model.BodyFormatMarkdown,
+		BodyText:    string(body),
+		ContentHash: contentHash(body),
+		Metadata:    metadata,
+	}, nil
+}
+
+func inferMarkdownContractFields(body []byte) markdownContractFields {
+	var (
+		fields     markdownContractFields
+		activeList string
+	)
+
+	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "", line == "---":
+			if activeList != "" && line == "" {
+				activeList = ""
+			}
+			continue
+		case activeList != "":
+			if !strings.HasPrefix(line, "- ") {
+				activeList = ""
+			} else {
+				assignMarkdownContractListField(&fields, activeList, []string{normalizeMarkdownMetadataValue(strings.TrimSpace(strings.TrimPrefix(line, "- ")))})
+				continue
+			}
+		}
+
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+
+		key = normalizeMarkdownContractKey(key)
+		if !isMarkdownContractField(key) {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		if value == "" {
+			if isMarkdownContractListField(key) {
+				activeList = key
+			}
+			continue
+		}
+		if isMarkdownContractListField(key) {
+			assignMarkdownContractListField(&fields, key, parseMarkdownMetadataList(value))
+			continue
+		}
+		assignMarkdownContractScalarField(&fields, key, normalizeMarkdownMetadataValue(value))
+	}
+
+	fields.Ref = strings.TrimSpace(fields.Ref)
+	fields.Status = normalizeInferredStatus(fields.Status)
+	fields.Domain = strings.TrimSpace(fields.Domain)
+	fields.DependsOn = uniqueStringValues(fields.DependsOn)
+	fields.Supersedes = uniqueStringValues(fields.Supersedes)
+	fields.AppliesTo = uniqueStringValues(fields.AppliesTo)
+	return fields
+}
+
+func normalizeMarkdownContractKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.ReplaceAll(key, "-", "_")
+	key = strings.ReplaceAll(key, " ", "_")
+	switch key {
+	case "spec_ref":
+		return "ref"
+	case "dependson", "related", "related_refs":
+		return "depends_on"
+	case "appliesto":
+		return "applies_to"
+	default:
+		return key
+	}
+}
+
+func isMarkdownContractField(key string) bool {
+	switch key {
+	case "id", "ref", "status", "domain", "depends_on", "supersedes", "applies_to":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMarkdownContractListField(key string) bool {
+	switch key {
+	case "depends_on", "supersedes", "applies_to":
+		return true
+	default:
+		return false
+	}
+}
+
+func assignMarkdownContractScalarField(fields *markdownContractFields, key, value string) {
+	switch key {
+	case "id", "ref":
+		if fields.Ref == "" {
+			fields.Ref = value
+		}
+	case "status":
+		fields.Status = value
+	case "domain":
+		fields.Domain = strings.ToLower(value)
+	}
+}
+
+func assignMarkdownContractListField(fields *markdownContractFields, key string, values []string) {
+	switch key {
+	case "depends_on":
+		fields.DependsOn = append(fields.DependsOn, values...)
+	case "supersedes":
+		fields.Supersedes = append(fields.Supersedes, values...)
+	case "applies_to":
+		fields.AppliesTo = append(fields.AppliesTo, values...)
+	}
+}
+
+func parseMarkdownMetadataList(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "[")
+	value = strings.TrimSuffix(value, "]")
+	if value == "" {
+		return nil
+	}
+
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		normalized := normalizeMarkdownMetadataValue(part)
+		if normalized == "" {
+			continue
+		}
+		items = append(items, normalized)
+	}
+	if len(items) > 0 {
+		return items
+	}
+
+	normalized := normalizeMarkdownMetadataValue(value)
+	if normalized == "" {
+		return nil
+	}
+	return []string{normalized}
+}
+
+func normalizeMarkdownMetadataValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "\"'`")
+	return strings.TrimSpace(value)
+}
+
+func normalizeInferredStatus(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case model.StatusDraft, model.StatusReview, model.StatusAccepted, model.StatusSuperseded, model.StatusDeprecated:
+		return value
+	default:
+		return ""
+	}
+}
+
+func uniqueStringValues(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func markdownContractRefForPath(workspaceRoot, path string) (string, error) {
+	rel, err := filepath.Rel(workspaceRoot, path)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Ext(rel) != ".md" {
+		return "", fmt.Errorf("contract path %q is not markdown", rel)
+	}
+	return "contract://" + strings.TrimSuffix(filepath.ToSlash(rel), ".md"), nil
 }
 
 func parseSpecBundle(contents []byte) (rawSpecBundle, error) {

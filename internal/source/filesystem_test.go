@@ -588,6 +588,149 @@ files = ["rate-limit-v2/spec.toml", "burst-handling/spec.toml"]
 	}
 }
 
+func TestLoadFromConfigLoadsMarkdownContractsWithExplicitMetadata(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "contracts"
+`)
+	mustWriteFile(t, filepath.Join(repo, "contracts", "auth", "session-policy.md"), `
+---
+id: RFC-AUTH-001
+status: accepted
+domain: identity
+supersedes: SPEC-008
+depends_on:
+  - SPEC-042
+applies_to:
+  - code://src/auth/session_policy.go
+  - config://config/auth/session.yaml
+---
+
+# Session Policy
+
+All interactive sessions must use tenant-scoped policy evaluation.
+`)
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Specs), 1; got != want {
+		t.Fatalf("spec count = %d, want %d", got, want)
+	}
+
+	spec := result.Specs[0]
+	if got, want := spec.Ref, "RFC-AUTH-001"; got != want {
+		t.Fatalf("ref = %q, want %q", got, want)
+	}
+	if got, want := spec.Status, model.StatusAccepted; got != want {
+		t.Fatalf("status = %q, want %q", got, want)
+	}
+	if got, want := spec.Domain, "identity"; got != want {
+		t.Fatalf("domain = %q, want %q", got, want)
+	}
+	if got, want := spec.Title, "Session Policy"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+	if !hasRelation(spec.Relations, model.RelationSupersedes, "SPEC-008") {
+		t.Fatalf("relations = %+v, want supersedes SPEC-008", spec.Relations)
+	}
+	if !hasRelation(spec.Relations, model.RelationDependsOn, "SPEC-042") {
+		t.Fatalf("relations = %+v, want depends_on SPEC-042", spec.Relations)
+	}
+	if got, want := spec.AppliesTo, []string{"code://src/auth/session_policy.go", "config://config/auth/session.yaml"}; !equalStrings(got, want) {
+		t.Fatalf("applies_to = %#v, want %#v", got, want)
+	}
+	if got, want := spec.SourceRef, "file://contracts/auth/session-policy.md"; got != want {
+		t.Fatalf("source_ref = %q, want %q", got, want)
+	}
+	if got, want := spec.Metadata["ref_source"], "explicit"; got != want {
+		t.Fatalf("metadata.ref_source = %q, want %q", got, want)
+	}
+
+	preview, err := PreviewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("PreviewFromConfig() error = %v", err)
+	}
+	if got, want := preview.Sources[0].Items[0].ArtifactKind, "spec"; got != want {
+		t.Fatalf("preview artifact kind = %q, want %q", got, want)
+	}
+	if got, want := preview.Sources[0].Items[0].Path, "contracts/auth/session-policy.md"; got != want {
+		t.Fatalf("preview path = %q, want %q", got, want)
+	}
+}
+
+func TestLoadFromConfigMarkdownContractsDegradeGracefullyWhenMetadataMissing(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "contracts"
+files = ["platform/tenant-rate-limits.md"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "contracts", "platform", "tenant-rate-limits.md"), `
+# Tenant Rate Limits
+
+Use tenant-scoped limits and preserve burst budgets.
+`)
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Specs), 1; got != want {
+		t.Fatalf("spec count = %d, want %d", got, want)
+	}
+
+	spec := result.Specs[0]
+	if got, want := spec.Ref, "contract://contracts/platform/tenant-rate-limits"; got != want {
+		t.Fatalf("fallback ref = %q, want %q", got, want)
+	}
+	if got, want := spec.Status, model.StatusDraft; got != want {
+		t.Fatalf("fallback status = %q, want %q", got, want)
+	}
+	if got, want := spec.Title, "Tenant Rate Limits"; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+	if spec.Domain != "" {
+		t.Fatalf("domain = %q, want empty fallback", spec.Domain)
+	}
+	if got, want := spec.Metadata["ref_source"], "path"; got != want {
+		t.Fatalf("metadata.ref_source = %q, want %q", got, want)
+	}
+	if got, want := spec.Metadata["status_source"], "default"; got != want {
+		t.Fatalf("metadata.status_source = %q, want %q", got, want)
+	}
+}
+
 func TestPreviewFromConfigUsesSelectors(t *testing.T) {
 	t.Parallel()
 
