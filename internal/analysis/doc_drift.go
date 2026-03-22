@@ -52,10 +52,51 @@ type DriftItem struct {
 	Findings  []DriftFinding `json:"findings"`
 }
 
+// DocRemediationEvidence separates the observed contradiction from the accepted spec evidence.
+type DocRemediationEvidence struct {
+	SpecSection string `json:"spec_section,omitempty"`
+	SpecExcerpt string `json:"spec_excerpt,omitempty"`
+	DocSection  string `json:"doc_section,omitempty"`
+	DocExcerpt  string `json:"doc_excerpt,omitempty"`
+	Expected    string `json:"expected,omitempty"`
+	Observed    string `json:"observed,omitempty"`
+}
+
+// DocSuggestedEdit is one actionable update recommendation.
+type DocSuggestedEdit struct {
+	Action  string `json:"action"`
+	Replace string `json:"replace,omitempty"`
+	With    string `json:"with,omitempty"`
+	Note    string `json:"note,omitempty"`
+}
+
+// DocRemediationSuggestion is one actionable guidance item derived from a drift finding.
+type DocRemediationSuggestion struct {
+	SpecRef       string                 `json:"spec_ref"`
+	Code          string                 `json:"code"`
+	Summary       string                 `json:"summary"`
+	Evidence      DocRemediationEvidence `json:"evidence"`
+	SuggestedEdit DocSuggestedEdit       `json:"suggested_edit"`
+}
+
+// DocRemediationItem groups all remediation suggestions for one drifting doc.
+type DocRemediationItem struct {
+	DocRef      string                     `json:"doc_ref"`
+	Title       string                     `json:"title"`
+	SourceRef   string                     `json:"source_ref"`
+	Suggestions []DocRemediationSuggestion `json:"suggestions"`
+}
+
+// DocRemediationResult is the structured remediation payload shared by doc-drift and review-spec.
+type DocRemediationResult struct {
+	Items []DocRemediationItem `json:"items"`
+}
+
 // DocDriftResult is the structured doc-drift response.
 type DocDriftResult struct {
-	Scope      DocDriftScope `json:"scope"`
-	DriftItems []DriftItem   `json:"drift_items"`
+	Scope       DocDriftScope         `json:"scope"`
+	DriftItems  []DriftItem           `json:"drift_items"`
+	Remediation *DocRemediationResult `json:"remediation"`
 }
 
 type normalizedClaims struct {
@@ -114,18 +155,26 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 
 func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument) *DocDriftResult {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
+	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
 	for _, ref := range sortedDocRefs(selectedDocs) {
 		doc := selectedDocs[ref]
-		item := driftAgainstAcceptedSpecs(doc, specs)
+		relevant := relevantAcceptedSpecs(doc, specs)
+		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
 		if item == nil {
 			continue
 		}
 		driftItems = append(driftItems, *item)
+		if remediation != nil {
+			remediationItems = append(remediationItems, *remediation)
+		}
 	}
 
 	return &DocDriftResult{
 		Scope:      scope,
 		DriftItems: driftItems,
+		Remediation: &DocRemediationResult{
+			Items: remediationItems,
+		},
 	}
 }
 
@@ -291,31 +340,59 @@ func sortedDocRefs(docs map[string]docDocument) []string {
 	return refs
 }
 
-func driftAgainstAcceptedSpecs(doc docDocument, specs map[string]specDocument) *DriftItem {
-	relevant := relevantAcceptedSpecs(doc, specs)
+func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*DriftItem, *DocRemediationItem) {
 	if len(relevant) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	docClaims := claimsFromText(joinDocumentText(doc.Sections))
 	var (
 		specRefs []string
 		findings []DriftFinding
+		byRef    = make(map[string]specDocument, len(relevant))
 	)
 	for _, spec := range relevant {
+		byRef[spec.Record.Ref] = spec
 		specRefs = append(specRefs, spec.Record.Ref)
 		findings = append(findings, contradictingFindings(docClaims, claimsFromText(joinDocumentText(spec.Sections)), spec.Record.Ref)...)
 	}
 	if len(findings) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	return &DriftItem{
+	item := &DriftItem{
 		DocRef:    doc.Record.Ref,
 		Title:     doc.Record.Title,
 		SourceRef: doc.Record.SourceRef,
 		SpecRefs:  uniqueStrings(specRefs),
 		Findings:  findings,
+	}
+	return item, buildDocRemediationItem(doc, byRef, findings)
+}
+
+func buildDocRemediationItem(doc docDocument, specs map[string]specDocument, findings []DriftFinding) *DocRemediationItem {
+	suggestions := make([]DocRemediationSuggestion, 0, len(findings))
+	for _, finding := range findings {
+		spec, ok := specs[finding.SpecRef]
+		if !ok {
+			continue
+		}
+		suggestions = append(suggestions, DocRemediationSuggestion{
+			SpecRef:       finding.SpecRef,
+			Code:          finding.Code,
+			Summary:       remediationSummaryForFinding(finding),
+			Evidence:      remediationEvidence(doc, spec, finding),
+			SuggestedEdit: suggestedEditForFinding(finding),
+		})
+	}
+	if len(suggestions) == 0 {
+		return nil
+	}
+	return &DocRemediationItem{
+		DocRef:      doc.Record.Ref,
+		Title:       doc.Record.Title,
+		SourceRef:   doc.Record.SourceRef,
+		Suggestions: suggestions,
 	}
 }
 
@@ -440,6 +517,159 @@ func contradictingFindings(docClaims, specClaims normalizedClaims, specRef strin
 		})
 	}
 	return findings
+}
+
+func remediationSummaryForFinding(finding DriftFinding) string {
+	switch finding.Code {
+	case "window_mismatch":
+		return "replace the stale limiter-window wording with the accepted window model"
+	case "subject_mismatch":
+		return "update the subject wording so the doc describes tenant-scoped limits"
+	case "default_limit_mismatch":
+		return "update the documented default rate limit to the accepted value"
+	case "override_support_mismatch":
+		return "replace the stale override-support statement with the accepted configuration behavior"
+	default:
+		return finding.Message
+	}
+}
+
+func remediationEvidence(doc docDocument, spec specDocument, finding DriftFinding) DocRemediationEvidence {
+	docSection, docExcerpt := docEvidenceForFinding(doc, finding)
+	specSection, specExcerpt := specEvidenceForFinding(spec, finding)
+	return DocRemediationEvidence{
+		SpecSection: specSection,
+		SpecExcerpt: specExcerpt,
+		DocSection:  docSection,
+		DocExcerpt:  docExcerpt,
+		Expected:    humanizedDriftValue(finding.Code, finding.Expected),
+		Observed:    humanizedDriftValue(finding.Code, finding.Observed),
+	}
+}
+
+func suggestedEditForFinding(finding DriftFinding) DocSuggestedEdit {
+	switch finding.Code {
+	case "window_mismatch":
+		return DocSuggestedEdit{
+			Action:  "replace_claim",
+			Replace: humanizedDriftValue(finding.Code, finding.Observed),
+			With:    humanizedDriftValue(finding.Code, finding.Expected),
+			Note:    "Update the limiter-window description to match the accepted design.",
+		}
+	case "subject_mismatch":
+		return DocSuggestedEdit{
+			Action:  "replace_claim",
+			Replace: humanizedDriftValue(finding.Code, finding.Observed),
+			With:    humanizedDriftValue(finding.Code, finding.Expected),
+			Note:    "Describe rate limits in terms of tenants, not API keys.",
+		}
+	case "default_limit_mismatch":
+		return DocSuggestedEdit{
+			Action:  "replace_claim",
+			Replace: humanizedDriftValue(finding.Code, finding.Observed),
+			With:    humanizedDriftValue(finding.Code, finding.Expected),
+			Note:    "Bring the documented default limit back in line with the accepted spec.",
+		}
+	case "override_support_mismatch":
+		return DocSuggestedEdit{
+			Action:  "replace_claim",
+			Replace: humanizedDriftValue(finding.Code, finding.Observed),
+			With:    humanizedDriftValue(finding.Code, finding.Expected),
+			Note:    "Document the accepted override behavior instead of the stale configuration guidance.",
+		}
+	default:
+		return DocSuggestedEdit{
+			Action: "update_section",
+			Note:   finding.Message,
+		}
+	}
+}
+
+func humanizedDriftValue(code, value string) string {
+	switch code {
+	case "window_mismatch":
+		switch value {
+		case "sliding-window":
+			return "sliding-window rate limiter"
+		case "fixed-window":
+			return "fixed-window rate limiter"
+		}
+	case "subject_mismatch":
+		switch value {
+		case "tenant":
+			return "tenant-scoped limits"
+		case "api_key":
+			return "API-key-scoped limits"
+		}
+	case "default_limit_mismatch":
+		if value != "" {
+			return value + " requests per minute"
+		}
+	case "override_support_mismatch":
+		switch value {
+		case "true":
+			return "tenant-specific overrides are supported through configuration"
+		case "false":
+			return "tenant-specific overrides are not supported"
+		}
+	}
+	return value
+}
+
+func docEvidenceForFinding(doc docDocument, finding DriftFinding) (string, string) {
+	keywords := evidenceKeywordsForFinding(finding)
+	for _, section := range doc.Sections {
+		if excerpt, ok := sectionExcerptForKeywords(section, keywords); ok {
+			return section.Heading, excerpt
+		}
+	}
+	return "", ""
+}
+
+func specEvidenceForFinding(spec specDocument, finding DriftFinding) (string, string) {
+	keywords := evidenceKeywordsForFinding(finding)
+	for _, section := range spec.Sections {
+		if excerpt, ok := sectionExcerptForKeywords(section, keywords); ok {
+			return section.Heading, excerpt
+		}
+	}
+	return "", ""
+}
+
+func evidenceKeywordsForFinding(finding DriftFinding) []string {
+	switch finding.Code {
+	case "window_mismatch":
+		return []string{"window", "sliding-window", "fixed-window", "sliding window", "fixed window"}
+	case "subject_mismatch":
+		return []string{"tenant", "api key", "tenant-scoped", "api-key"}
+	case "default_limit_mismatch":
+		return []string{"requests per minute", finding.Expected, finding.Observed}
+	case "override_support_mismatch":
+		return []string{"override", "overrides", "configuration"}
+	default:
+		return []string{finding.Expected, finding.Observed}
+	}
+}
+
+func sectionExcerptForKeywords(section embeddedSection, keywords []string) (string, bool) {
+	lines := strings.Split(section.Content, "\n")
+	for _, line := range lines {
+		trimmed := stringsTrimSpace(strings.TrimPrefix(line, "- "))
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		for _, keyword := range keywords {
+			keyword = strings.ToLower(stringsTrimSpace(keyword))
+			if keyword == "" {
+				continue
+			}
+			if strings.Contains(lower, keyword) {
+				return trimmed, true
+			}
+		}
+	}
+	return "", false
 }
 
 func stringsTrimSpace(value string) string {

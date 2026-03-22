@@ -45,6 +45,19 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 	if foundRunbook {
 		t.Fatalf("drift_items = %+v, did not expect aligned runbook", result.DriftItems)
 	}
+	if result.Remediation == nil || len(result.Remediation.Items) != 1 {
+		t.Fatalf("remediation = %+v, want one remediation item", result.Remediation)
+	}
+	if result.Remediation.Items[0].DocRef != "doc://guides/api-rate-limits" {
+		t.Fatalf("remediation item = %+v, want guide remediation", result.Remediation.Items[0])
+	}
+	if len(result.Remediation.Items[0].Suggestions) < 3 {
+		t.Fatalf("remediation suggestions = %+v, want multiple actionable suggestions", result.Remediation.Items[0].Suggestions)
+	}
+	top := result.Remediation.Items[0].Suggestions[0]
+	if top.SpecRef == "" || top.Evidence.SpecSection == "" || top.SuggestedEdit.Action == "" {
+		t.Fatalf("top remediation suggestion = %+v, want evidence and suggested edit", top)
+	}
 }
 
 func TestCheckDocDriftSupportsTargetedDocRefs(t *testing.T) {

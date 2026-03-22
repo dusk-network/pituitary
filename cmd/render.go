@@ -262,8 +262,21 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 		fmt.Fprintln(w, "no drift items")
 		return
 	}
+	remediation := remediationItemsByDocRef(result.Remediation)
 	for i, item := range result.DriftItems {
-		fmt.Fprintf(w, "%d. %s | %s | findings: %d\n", i+1, item.DocRef, item.Title, len(item.Findings))
+		fmt.Fprintf(w, "%d. %s | %s | findings: %d", i+1, item.DocRef, item.Title, len(item.Findings))
+		if suggestions := remediation[item.DocRef]; len(suggestions) > 0 {
+			fmt.Fprintf(w, " | remediation: %d", len(suggestions))
+		}
+		fmt.Fprintln(w)
+		for _, suggestion := range remediation[item.DocRef] {
+			fmt.Fprintf(w, "   remediation: %s | %s\n", suggestion.SpecRef, suggestion.Summary)
+			if suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "" {
+				fmt.Fprintf(w, "   suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
+			} else if suggestion.SuggestedEdit.Note != "" {
+				fmt.Fprintf(w, "   suggested edit: %s\n", suggestion.SuggestedEdit.Note)
+			}
+		}
 	}
 }
 
@@ -292,4 +305,20 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 	} else {
 		fmt.Fprintln(w, "doc drift: none")
 	}
+	if result.DocRemediation != nil {
+		fmt.Fprintf(w, "doc remediation: %d item(s)\n", len(result.DocRemediation.Items))
+	} else {
+		fmt.Fprintln(w, "doc remediation: none")
+	}
+}
+
+func remediationItemsByDocRef(result *analysis.DocRemediationResult) map[string][]analysis.DocRemediationSuggestion {
+	if result == nil {
+		return map[string][]analysis.DocRemediationSuggestion{}
+	}
+	items := make(map[string][]analysis.DocRemediationSuggestion, len(result.Items))
+	for _, item := range result.Items {
+		items[item.DocRef] = item.Suggestions
+	}
+	return items
 }

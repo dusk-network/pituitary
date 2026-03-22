@@ -57,6 +57,15 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 					DocRef string `json:"doc_ref"`
 				} `json:"drift_items"`
 			} `json:"doc_drift"`
+			DocRemediation struct {
+				Items []struct {
+					DocRef      string `json:"doc_ref"`
+					Suggestions []struct {
+						SpecRef string `json:"spec_ref"`
+						Code    string `json:"code"`
+					} `json:"suggestions"`
+				} `json:"items"`
+			} `json:"doc_remediation"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -80,6 +89,12 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	}
 	if payload.Result.DocDrift.Scope.Mode != "doc_refs" || len(payload.Result.DocDrift.DriftItems) != 1 || payload.Result.DocDrift.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("doc_drift = %+v, want targeted guide drift", payload.Result.DocDrift)
+	}
+	if len(payload.Result.DocRemediation.Items) != 1 || payload.Result.DocRemediation.Items[0].DocRef != "doc://guides/api-rate-limits" {
+		t.Fatalf("doc_remediation = %+v, want targeted guide remediation", payload.Result.DocRemediation)
+	}
+	if len(payload.Result.DocRemediation.Items[0].Suggestions) == 0 || payload.Result.DocRemediation.Items[0].Suggestions[0].SpecRef == "" {
+		t.Fatalf("doc_remediation = %+v, want stable remediation suggestions", payload.Result.DocRemediation)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
