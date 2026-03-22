@@ -14,8 +14,10 @@ import (
 const (
 	defaultConfigPath = "pituitary.toml"
 	serverName        = "Pituitary"
-	serverVersion     = "0.1.0"
 )
+
+// serverVersion defaults to "dev" and can be overridden at build time with -ldflags.
+var serverVersion = "dev"
 
 var sqliteReadyCheck = index.CheckSQLiteReady
 

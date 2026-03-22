@@ -1,0 +1,71 @@
+version: 2
+
+project_name: pituitary
+
+builds:
+  - id: linux-amd64
+    main: .
+    binary: pituitary
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/dusk-network/pituitary/cmd.Version={{ .Version }} -X github.com/dusk-network/pituitary/cmd.Commit={{ .FullCommit }} -X github.com/dusk-network/pituitary/cmd.BuildDate={{ .Date }} -X github.com/dusk-network/pituitary/internal/mcp.serverVersion={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    skip: '{{ if index .Env "PITUITARY_RELEASE_RUNNER_OS" }}{{ ne .Env.PITUITARY_RELEASE_RUNNER_OS "linux" }}{{ else }}false{{ end }}'
+
+  - id: darwin-arm64
+    main: .
+    binary: pituitary
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/dusk-network/pituitary/cmd.Version={{ .Version }} -X github.com/dusk-network/pituitary/cmd.Commit={{ .FullCommit }} -X github.com/dusk-network/pituitary/cmd.BuildDate={{ .Date }} -X github.com/dusk-network/pituitary/internal/mcp.serverVersion={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    skip: '{{ if index .Env "PITUITARY_RELEASE_RUNNER_OS" }}{{ ne .Env.PITUITARY_RELEASE_RUNNER_OS "darwin" }}{{ else }}false{{ end }}'
+
+  - id: windows-amd64
+    main: .
+    binary: pituitary
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/dusk-network/pituitary/cmd.Version={{ .Version }} -X github.com/dusk-network/pituitary/cmd.Commit={{ .FullCommit }} -X github.com/dusk-network/pituitary/cmd.BuildDate={{ .Date }} -X github.com/dusk-network/pituitary/internal/mcp.serverVersion={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    skip: '{{ if index .Env "PITUITARY_RELEASE_RUNNER_OS" }}{{ ne .Env.PITUITARY_RELEASE_RUNNER_OS "windows" }}{{ else }}false{{ end }}'
+
+archives:
+  - ids:
+      - linux-amd64
+      - darwin-arm64
+      - windows-amd64
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ if eq .Os \"darwin\" }}macOS{{ else }}{{ .Os }}{{ end }}_{{ .Arch }}"
+
+checksum:
+  disable: true
+
+source:
+  enabled: false
