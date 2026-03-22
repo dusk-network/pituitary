@@ -101,6 +101,44 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	}
 }
 
+func TestRunReviewSpecMarkdown(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--spec-ref", "SPEC-042", "--format", "markdown"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec(--format markdown) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec(--format markdown) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"# Review Spec Report",
+		"## Overlap",
+		"`SPEC-008`",
+		"## Comparison",
+		"## Impact",
+		"`SPEC-055`",
+		"## Doc Drift",
+		"`doc://guides/api-rate-limits`",
+		"## Doc Remediation",
+		"Suggested edit:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runReviewSpec(--format markdown) output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunReviewSpecWithSpecRecordFileJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
