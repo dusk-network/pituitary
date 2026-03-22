@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"context"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -170,6 +171,44 @@ func BenchmarkReviewSpec(b *testing.B) {
 			}
 			if result.Overlap == nil || result.Impact == nil {
 				b.Fatalf("ReviewSpec() draft result = %+v, want composed output", result)
+			}
+		}
+	})
+}
+
+func BenchmarkLoadIndexedTargets(b *testing.B) {
+	fixture := prepareBenchmarkFixture(b)
+
+	db, err := index.OpenReadOnlyContext(context.Background(), fixture.cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		b.Fatalf("index.OpenReadOnlyContext() error = %v", err)
+	}
+	defer db.Close()
+
+	b.Run("specs_selected", func(b *testing.B) {
+		refs := []string{"SPEC-042", "SPEC-055"}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			specs, err := loadIndexedSpecsContext(context.Background(), db, refs)
+			if err != nil {
+				b.Fatalf("loadIndexedSpecsContext() error = %v", err)
+			}
+			if len(specs) != 2 {
+				b.Fatalf("loadIndexedSpecsContext() returned %d specs, want 2", len(specs))
+			}
+		}
+	})
+
+	b.Run("docs_selected", func(b *testing.B) {
+		refs := []string{"doc://guides/api-rate-limits", "doc://runbooks/rate-limit-rollout"}
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			docs, err := loadIndexedDocsContext(context.Background(), db, refs)
+			if err != nil {
+				b.Fatalf("loadIndexedDocsContext() error = %v", err)
+			}
+			if len(docs) != 2 {
+				b.Fatalf("loadIndexedDocsContext() returned %d docs, want 2", len(docs))
 			}
 		}
 	})

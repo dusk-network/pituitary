@@ -351,10 +351,22 @@ func loadSpecEdges(db *sql.DB, specs map[string]specDocument) error {
 }
 
 func loadSpecEdgesContext(ctx context.Context, db *sql.DB, specs map[string]specDocument) error {
-	rows, err := db.QueryContext(ctx, `
+	refs := sortedSpecRefs(specs)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	var builder strings.Builder
+	args := make([]any, 0, len(refs))
+	builder.WriteString(`
 SELECT from_ref, to_ref, edge_type
 FROM edges
 WHERE edge_type IN ('depends_on', 'supersedes', 'applies_to')`)
+	appendRefFilterClause(&builder, &args, "from_ref", refs)
+	builder.WriteString(`
+ORDER BY from_ref ASC, edge_type ASC, to_ref ASC`)
+
+	rows, err := db.QueryContext(ctx, builder.String(), args...)
 	if err != nil {
 		return fmt.Errorf("query spec edges: %w", err)
 	}
@@ -397,13 +409,25 @@ func loadSpecSections(db *sql.DB, specs map[string]specDocument) error {
 }
 
 func loadSpecSectionsContext(ctx context.Context, db *sql.DB, specs map[string]specDocument) error {
-	rows, err := db.QueryContext(ctx, `
+	refs := sortedSpecRefs(specs)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	var builder strings.Builder
+	args := make([]any, 0, 1+len(refs))
+	builder.WriteString(`
 SELECT c.artifact_ref, c.section, c.content, cv.embedding
 FROM chunks c
 JOIN chunks_vec cv ON cv.chunk_id = c.id
 JOIN artifacts a ON a.ref = c.artifact_ref
-WHERE a.kind = ?
-ORDER BY c.id`, model.ArtifactKindSpec)
+WHERE a.kind = ?`)
+	args = append(args, model.ArtifactKindSpec)
+	appendRefFilterClause(&builder, &args, "c.artifact_ref", refs)
+	builder.WriteString(`
+ORDER BY c.id`)
+
+	rows, err := db.QueryContext(ctx, builder.String(), args...)
 	if err != nil {
 		return fmt.Errorf("query spec sections: %w", err)
 	}
@@ -464,6 +488,33 @@ func overlapScore(candidate, target specDocument) float64 {
 		score = 0
 	}
 	return score
+}
+
+func sortedSpecRefs(specs map[string]specDocument) []string {
+	refs := make([]string, 0, len(specs))
+	for ref := range specs {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func appendRefFilterClause(builder *strings.Builder, args *[]any, column string, refs []string) {
+	refs = uniqueStrings(refs)
+	if len(refs) == 0 {
+		return
+	}
+	builder.WriteString(" AND ")
+	builder.WriteString(column)
+	builder.WriteString(" IN (")
+	for i, ref := range refs {
+		if i > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString("?")
+		*args = append(*args, ref)
+	}
+	builder.WriteString(")")
 }
 
 func bestSectionOverlap(left, right []embeddedSection) float64 {

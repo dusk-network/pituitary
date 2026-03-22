@@ -288,13 +288,25 @@ func loadDocSections(db *sql.DB, docs map[string]docDocument) error {
 }
 
 func loadDocSectionsContext(ctx context.Context, db *sql.DB, docs map[string]docDocument) error {
-	rows, err := db.QueryContext(ctx, `
+	refs := sortedDocRefs(docs)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	var builder strings.Builder
+	args := make([]any, 0, 1+len(refs))
+	builder.WriteString(`
 SELECT c.artifact_ref, c.section, c.content, cv.embedding
 FROM chunks c
 JOIN chunks_vec cv ON cv.chunk_id = c.id
 JOIN artifacts a ON a.ref = c.artifact_ref
-WHERE a.kind = ?
-ORDER BY c.id`, model.ArtifactKindDoc)
+WHERE a.kind = ?`)
+	args = append(args, model.ArtifactKindDoc)
+	appendRefFilterClause(&builder, &args, "c.artifact_ref", refs)
+	builder.WriteString(`
+ORDER BY c.id`)
+
+	rows, err := db.QueryContext(ctx, builder.String(), args...)
 	if err != nil {
 		return fmt.Errorf("query doc sections: %w", err)
 	}
