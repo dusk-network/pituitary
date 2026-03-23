@@ -190,6 +190,39 @@ func TestRunReviewSpecMarkdown(t *testing.T) {
 	}
 }
 
+func TestRunReviewSpecTextIncludesTopImpactSummaries(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--spec-ref", "SPEC-042"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"impact: 2 spec(s), 2 ref(s), 2 doc(s)",
+		"top impacted specs:",
+		"SPEC-055",
+		"top impacted docs:",
+		"doc://guides/api-rate-limits",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runReviewSpec() output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunReviewSpecWithSpecRecordFileJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

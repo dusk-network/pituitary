@@ -338,6 +338,39 @@ func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
 	}
 }
 
+func TestRenderReviewResultIncludesTopImpactSummaries(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderReviewResult(&stdout, &analysis.ReviewResult{
+		SpecRef: "SPEC-042",
+		Impact: &analysis.AnalyzeImpactResult{
+			AffectedSpecs: []analysis.ImpactedSpec{
+				{Ref: "SPEC-055", Title: "Tenant Overrides Rollout", Relationship: "depends_on"},
+				{Ref: "SPEC-008", Title: "Legacy Rate Limiting", Relationship: "supersedes", Historical: true},
+			},
+			AffectedDocs: []analysis.ImpactedDoc{
+				{Ref: "doc://guides/api-rate-limits", Title: "API Rate Limits", SourceRef: "file://docs/guides/api-rate-limits.md", Score: 0.912},
+				{Ref: "doc://runbooks/rate-limit-rollout", Title: "Rate Limit Rollout", SourceRef: "file://docs/runbooks/rate-limit-rollout.md", Score: 0.701},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"impact: 2 spec(s), 0 ref(s), 2 doc(s)",
+		"top impacted specs:",
+		"- SPEC-055 | Tenant Overrides Rollout | depends_on",
+		"- SPEC-008 | Legacy Rate Limiting | supersedes | historical",
+		"top impacted docs:",
+		"- doc://guides/api-rate-limits | API Rate Limits | 0.912 | file://docs/guides/api-rate-limits.md",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderReviewResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	t.Parallel()
 
@@ -360,8 +393,8 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 			},
 		},
 		Impact: &analysis.AnalyzeImpactResult{
-			AffectedSpecs: []analysis.ImpactedSpec{{Ref: "SPEC-055"}},
-			AffectedDocs:  []analysis.ImpactedDoc{{Ref: "doc://guides/api-rate-limits"}},
+			AffectedSpecs: []analysis.ImpactedSpec{{Ref: "SPEC-055", Title: "Tenant Overrides Rollout", Relationship: "depends_on"}},
+			AffectedDocs:  []analysis.ImpactedDoc{{Ref: "doc://guides/api-rate-limits", Title: "API Rate Limits", SourceRef: "file://docs/guides/api-rate-limits.md", Score: 0.912}},
 		},
 		DocDrift: &analysis.DocDriftResult{
 			DriftItems: []analysis.DriftItem{
@@ -408,7 +441,10 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 		"`SPEC-008`",
 		"## Comparison",
 		"## Impact",
-		"`SPEC-055`",
+		"Top impacted specs",
+		"`SPEC-055` Tenant Overrides Rollout (depends_on)",
+		"Top impacted docs",
+		"`doc://guides/api-rate-limits` API Rate Limits (score 0.912, file://docs/guides/api-rate-limits.md)",
 		"## Doc Drift",
 		"## Doc Remediation",
 		"Suggested edit: replace",

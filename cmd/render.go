@@ -569,6 +569,7 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 	}
 	if result.Impact != nil {
 		fmt.Fprintf(w, "impact: %d spec(s), %d ref(s), %d doc(s)\n", len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
+		renderReviewImpactSummary(w, result.Impact)
 	} else {
 		fmt.Fprintln(w, "impact: none")
 	}
@@ -620,20 +621,32 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 		if len(result.Impact.AffectedSpecs) == 0 {
 			fmt.Fprintln(w, "- Affected specs: none")
 		} else {
-			specRefs := make([]string, 0, len(result.Impact.AffectedSpecs))
-			for _, item := range result.Impact.AffectedSpecs {
-				specRefs = append(specRefs, "`"+item.Ref+"`")
+			fmt.Fprintln(w, "- Top impacted specs:")
+			for _, item := range topImpactedSpecs(result.Impact.AffectedSpecs, 3) {
+				fmt.Fprintf(w, "  - `%s` %s (%s", item.Ref, item.Title, item.Relationship)
+				if item.Historical {
+					fmt.Fprint(w, ", historical")
+				}
+				fmt.Fprintln(w, ")")
 			}
-			fmt.Fprintf(w, "- Affected specs: %s\n", strings.Join(specRefs, ", "))
+			if extra := len(result.Impact.AffectedSpecs) - minInt(len(result.Impact.AffectedSpecs), 3); extra > 0 {
+				fmt.Fprintf(w, "  - `%d` more impacted spec(s)\n", extra)
+			}
 		}
 		if len(result.Impact.AffectedDocs) == 0 {
 			fmt.Fprintln(w, "- Affected docs: none")
 		} else {
-			docRefs := make([]string, 0, len(result.Impact.AffectedDocs))
-			for _, item := range result.Impact.AffectedDocs {
-				docRefs = append(docRefs, "`"+item.Ref+"`")
+			fmt.Fprintln(w, "- Top impacted docs:")
+			for _, item := range topImpactedDocs(result.Impact.AffectedDocs, 3) {
+				fmt.Fprintf(w, "  - `%s` %s (score %.3f", item.Ref, item.Title, item.Score)
+				if item.SourceRef != "" {
+					fmt.Fprintf(w, ", %s", item.SourceRef)
+				}
+				fmt.Fprintln(w, ")")
 			}
-			fmt.Fprintf(w, "- Affected docs: %s\n", strings.Join(docRefs, ", "))
+			if extra := len(result.Impact.AffectedDocs) - minInt(len(result.Impact.AffectedDocs), 3); extra > 0 {
+				fmt.Fprintf(w, "  - `%d` more impacted doc(s)\n", extra)
+			}
 		}
 	}
 
@@ -712,4 +725,70 @@ func driftAssessmentsFromItems(items []analysis.DriftItem) []analysis.DocDriftAs
 		})
 	}
 	return result
+}
+
+func renderReviewImpactSummary(w io.Writer, impact *analysis.AnalyzeImpactResult) {
+	if impact == nil {
+		return
+	}
+	specs := topImpactedSpecs(impact.AffectedSpecs, 3)
+	if len(specs) == 0 {
+		fmt.Fprintln(w, "top impacted specs: none")
+	} else {
+		fmt.Fprintln(w, "top impacted specs:")
+		for _, item := range specs {
+			fmt.Fprintf(w, "- %s | %s | %s", item.Ref, item.Title, item.Relationship)
+			if item.Historical {
+				fmt.Fprint(w, " | historical")
+			}
+			fmt.Fprintln(w)
+		}
+		if extra := len(impact.AffectedSpecs) - len(specs); extra > 0 {
+			fmt.Fprintf(w, "- %d more impacted spec(s)\n", extra)
+		}
+	}
+
+	docs := topImpactedDocs(impact.AffectedDocs, 3)
+	if len(docs) == 0 {
+		fmt.Fprintln(w, "top impacted docs: none")
+		return
+	}
+	fmt.Fprintln(w, "top impacted docs:")
+	for _, item := range docs {
+		fmt.Fprintf(w, "- %s | %s | %.3f", item.Ref, item.Title, item.Score)
+		if item.SourceRef != "" {
+			fmt.Fprintf(w, " | %s", item.SourceRef)
+		}
+		fmt.Fprintln(w)
+	}
+	if extra := len(impact.AffectedDocs) - len(docs); extra > 0 {
+		fmt.Fprintf(w, "- %d more impacted doc(s)\n", extra)
+	}
+}
+
+func topImpactedSpecs(items []analysis.ImpactedSpec, limit int) []analysis.ImpactedSpec {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) <= limit {
+		return append([]analysis.ImpactedSpec(nil), items...)
+	}
+	return append([]analysis.ImpactedSpec(nil), items[:limit]...)
+}
+
+func topImpactedDocs(items []analysis.ImpactedDoc, limit int) []analysis.ImpactedDoc {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) <= limit {
+		return append([]analysis.ImpactedDoc(nil), items...)
+	}
+	return append([]analysis.ImpactedDoc(nil), items[:limit]...)
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
