@@ -35,8 +35,30 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 				Mode string `json:"mode"`
 			} `json:"scope"`
 			DriftItems []struct {
-				DocRef string `json:"doc_ref"`
+				DocRef   string `json:"doc_ref"`
+				Findings []struct {
+					Code      string `json:"code"`
+					Rationale string `json:"rationale"`
+					Evidence  struct {
+						SpecSection string `json:"spec_section"`
+						DocSection  string `json:"doc_section"`
+					} `json:"evidence"`
+					Confidence struct {
+						Level string `json:"level"`
+					} `json:"confidence"`
+				} `json:"findings"`
 			} `json:"drift_items"`
+			Assessments []struct {
+				DocRef   string `json:"doc_ref"`
+				Status   string `json:"status"`
+				Evidence struct {
+					SpecSection string `json:"spec_section"`
+					DocSection  string `json:"doc_section"`
+				} `json:"evidence"`
+				Confidence struct {
+					Level string `json:"level"`
+				} `json:"confidence"`
+			} `json:"assessments"`
 			Remediation struct {
 				Items []struct {
 					DocRef      string `json:"doc_ref"`
@@ -63,6 +85,25 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 	}
 	if len(payload.Result.DriftItems) != 1 || payload.Result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("drift_items = %+v, want only guide drift", payload.Result.DriftItems)
+	}
+	if len(payload.Result.DriftItems[0].Findings) == 0 ||
+		payload.Result.DriftItems[0].Findings[0].Rationale == "" ||
+		payload.Result.DriftItems[0].Findings[0].Evidence.SpecSection == "" ||
+		payload.Result.DriftItems[0].Findings[0].Evidence.DocSection == "" ||
+		payload.Result.DriftItems[0].Findings[0].Confidence.Level == "" {
+		t.Fatalf("top drift finding = %+v, want rationale, evidence, and confidence", payload.Result.DriftItems[0].Findings)
+	}
+	var foundDrift, foundAligned bool
+	for _, assessment := range payload.Result.Assessments {
+		switch {
+		case assessment.DocRef == "doc://guides/api-rate-limits" && assessment.Status == "drift":
+			foundDrift = true
+		case assessment.DocRef == "doc://runbooks/rate-limit-rollout" && assessment.Status == "aligned":
+			foundAligned = true
+		}
+	}
+	if !foundDrift || !foundAligned {
+		t.Fatalf("assessments = %+v, want guide drift and runbook aligned assessments", payload.Result.Assessments)
 	}
 	if len(payload.Result.Remediation.Items) != 1 || payload.Result.Remediation.Items[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("remediation = %+v, want guide remediation", payload.Result.Remediation)
@@ -115,6 +156,10 @@ func TestRunCheckDocDriftTargetedRefsJSON(t *testing.T) {
 			DriftItems []struct {
 				DocRef string `json:"doc_ref"`
 			} `json:"drift_items"`
+			Assessments []struct {
+				DocRef string `json:"doc_ref"`
+				Status string `json:"status"`
+			} `json:"assessments"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
@@ -125,6 +170,16 @@ func TestRunCheckDocDriftTargetedRefsJSON(t *testing.T) {
 	}
 	if len(payload.Result.DriftItems) != 1 || payload.Result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("drift_items = %+v, want only guide drift", payload.Result.DriftItems)
+	}
+	var foundAligned bool
+	for _, assessment := range payload.Result.Assessments {
+		if assessment.DocRef == "doc://runbooks/rate-limit-rollout" && assessment.Status == "aligned" {
+			foundAligned = true
+			break
+		}
+	}
+	if !foundAligned {
+		t.Fatalf("assessments = %+v, want aligned runbook assessment", payload.Result.Assessments)
 	}
 }
 
@@ -148,11 +203,19 @@ func TestRunCheckDocDriftTextIncludesRemediation(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "remediation:") {
-		t.Fatalf("runCheckDocDrift() output %q does not contain remediation summary", out)
-	}
-	if !strings.Contains(out, "suggested edit:") {
-		t.Fatalf("runCheckDocDrift() output %q does not contain suggested edit guidance", out)
+	for _, want := range []string{
+		"status: drift",
+		"status: aligned",
+		"confidence:",
+		"rationale:",
+		"spec evidence:",
+		"doc evidence:",
+		"remediation:",
+		"suggested edit:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runCheckDocDrift() output %q does not contain %q", out, want)
+		}
 	}
 }
 

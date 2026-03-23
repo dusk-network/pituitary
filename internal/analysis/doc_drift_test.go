@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -38,6 +39,10 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 			if len(item.Findings) == 0 {
 				t.Fatalf("guide drift item = %+v, want findings", item)
 			}
+			top := item.Findings[0]
+			if top.Rationale == "" || top.Evidence == nil || top.Evidence.SpecSection == "" || top.Evidence.DocSection == "" || top.Confidence == nil || top.Confidence.Level == "" {
+				t.Fatalf("top finding = %+v, want rationale, evidence, and confidence", top)
+			}
 		case "doc://runbooks/rate-limit-rollout":
 			foundRunbook = true
 		}
@@ -60,6 +65,34 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 	top := result.Remediation.Items[0].Suggestions[0]
 	if top.SpecRef == "" || top.Evidence.SpecSection == "" || top.SuggestedEdit.Action == "" {
 		t.Fatalf("top remediation suggestion = %+v, want evidence and suggested edit", top)
+	}
+
+	var foundGuideAssessment, foundRunbookAssessment bool
+	for _, assessment := range result.Assessments {
+		switch assessment.DocRef {
+		case "doc://guides/api-rate-limits":
+			foundGuideAssessment = true
+			if assessment.Status != "drift" {
+				t.Fatalf("guide assessment = %+v, want drift status", assessment)
+			}
+			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
+				t.Fatalf("guide assessment = %+v, want rationale, evidence, and confidence", assessment)
+			}
+		case "doc://runbooks/rate-limit-rollout":
+			foundRunbookAssessment = true
+			if assessment.Status != "aligned" {
+				t.Fatalf("runbook assessment = %+v, want aligned status", assessment)
+			}
+			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
+				t.Fatalf("runbook assessment = %+v, want rationale, evidence, and confidence", assessment)
+			}
+		}
+	}
+	if !foundGuideAssessment {
+		t.Fatalf("assessments = %+v, want guide assessment", result.Assessments)
+	}
+	if !foundRunbookAssessment {
+		t.Fatalf("assessments = %+v, want aligned runbook assessment", result.Assessments)
 	}
 }
 
@@ -89,6 +122,18 @@ func TestCheckDocDriftSupportsTargetedDocRefs(t *testing.T) {
 	}
 	if len(result.DriftItems) != 1 || result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("drift_items = %+v, want only guide drift", result.DriftItems)
+	}
+	var foundAligned bool
+	for _, assessment := range result.Assessments {
+		if assessment.DocRef == "doc://runbooks/rate-limit-rollout" {
+			foundAligned = true
+			if got, want := assessment.Status, "aligned"; got != want {
+				t.Fatalf("assessment.status = %q, want %q", got, want)
+			}
+		}
+	}
+	if !foundAligned {
+		t.Fatalf("assessments = %+v, want aligned runbook assessment", result.Assessments)
 	}
 }
 
@@ -242,6 +287,40 @@ func TestCheckDocDriftUsesAnalysisProviderWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestCheckDocDriftSurfacesPossibleDriftForConceptualNearMatch(t *testing.T) {
+	t.Parallel()
+
+	cfg := writePossibleDocDriftWorkspace(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+	if len(result.DriftItems) != 0 {
+		t.Fatalf("drift_items = %+v, want no deterministic drift items", result.DriftItems)
+	}
+	if len(result.Assessments) != 1 {
+		t.Fatalf("assessments = %+v, want one assessment", result.Assessments)
+	}
+	assessment := result.Assessments[0]
+	if got, want := assessment.Status, "possible_drift"; got != want {
+		t.Fatalf("assessment.status = %q, want %q", got, want)
+	}
+	if assessment.Confidence == nil || assessment.Confidence.Level != "low" {
+		t.Fatalf("assessment.confidence = %+v, want low confidence", assessment.Confidence)
+	}
+	if assessment.Evidence == nil || assessment.Evidence.SpecSection == "" || assessment.Evidence.DocSection == "" {
+		t.Fatalf("assessment = %+v, want evidence sections", assessment)
+	}
+}
+
 func TestClassifyArtifactConstraintScopesRuntimeInputToLocalArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +387,72 @@ kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md"]
 `)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		tb.Fatalf("config.Load() error = %v", err)
+	}
+	return cfg
+}
+
+func writePossibleDocDriftWorkspace(tb testing.TB) *config.Config {
+	tb.Helper()
+
+	root := tb.TempDir()
+	indexPath := filepath.Join(root, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(root, "pituitary.toml")
+
+	mustWriteFile(tb, filepath.Join(root, "specs", "kernel-locality", "spec.toml"), `
+id = "SPEC-LOCALITY"
+title = "Kernel Locality Contract"
+status = "accepted"
+domain = "kernel"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "specs", "kernel-locality", "body.md"), `
+# Kernel Locality Contract
+
+## Core Model
+
+The kernel keeps continuity in clone-local state and treats locality as the primary runtime boundary.
+
+## Operator Guidance
+
+Use locality and continuity language in operator guidance.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "kernel-migration.md"), `
+# Kernel Migration Guide
+
+## Working Notes
+
+The kernel keeps continuity in local state during migration.
+Operators should map old repository language to the new locality model while updating guides.
+`)
+
+	mustWriteFile(tb, configPath, fmt.Sprintf(`
+[workspace]
+root = %q
+index_path = %q
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = %q
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = %q
+`, root, indexPath, filepath.Join(root, "specs"), filepath.Join(root, "docs")))
 
 	cfg, err := config.Load(configPath)
 	if err != nil {

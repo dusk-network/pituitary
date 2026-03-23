@@ -590,9 +590,12 @@ CLI exit codes should stay simple:
 - `analyze_impact` (`pituitary analyze-impact`)
   - Request: `{ "spec_ref": "SPEC-042", "change_type": "accepted" | "modified" | "deprecated" }`
   - Result: `{ "spec_ref": "SPEC-042", "change_type": "accepted", "affected_specs": [...], "affected_refs": [...], "affected_docs": [...] }`
+- `check_terminology` (`pituitary check-terminology`)
+  - Request: `{ "terms": ["repo", "workflow"], "canonical_terms": ["locality", "continuity"], "spec_ref": "SPEC-LOCALITY", "scope": "all" | "docs" | "specs" }`
+  - Result: `{ "scope": { "mode": "workspace" | "spec_ref", "artifact_kinds": ["doc", "spec"], "spec_ref": "SPEC-LOCALITY" }, "terms": [...], "canonical_terms": [...], "anchor_specs": [...], "findings": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [{ "section": "...", "terms": [...], "excerpt": "...", "evidence": { "spec_ref": "SPEC-LOCALITY", "section": "...", "score": 0.0 } | null }] }] }`
 - `check_doc_drift` (`pituitary check-doc-drift`)
   - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
-  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [...] }`
+  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
 - `review_spec` (`pituitary review-spec`)
   - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
   - Result: `{ "spec_ref": "SPEC-042", "overlap": { ... }, "comparison": { ... } | null, "impact": { ... }, "doc_drift": { ... } }`
@@ -609,6 +612,7 @@ The shared `errors[]` shape above applies to every shipped command. Path-specifi
 | `check_overlap` | required | Primary product value |
 | `compare_specs` | required | Used only on overlapping or user-selected specs |
 | `analyze_impact` | required | Depends on explicit graph plus doc retrieval |
+| `check_terminology` | shipped after first ship | Hybrid lexical-plus-semantic audit for conceptual migrations |
 | `check_doc_drift` | required | Markdown docs only in first ship |
 | `review_spec` | required | Compound wrapper over the required tools |
 | `check_compliance` | shipped after first ship | CLI-first deterministic slice; MCP exposure can follow once the request shape settles |

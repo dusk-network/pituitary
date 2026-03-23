@@ -42,6 +42,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCompareResult(w, typed)
 	case *analysis.AnalyzeImpactResult:
 		renderAnalyzeImpactResult(w, typed)
+	case *analysis.TerminologyAuditResult:
+		renderTerminologyAuditResult(w, typed)
 	case *analysis.ComplianceResult:
 		renderComplianceResult(w, typed)
 	case *analysis.DocDriftResult:
@@ -411,25 +413,141 @@ func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis
 	}
 }
 
+func renderTerminologyAuditResult(w io.Writer, result *analysis.TerminologyAuditResult) {
+	fmt.Fprintf(w, "scope: %s\n", result.Scope.Mode)
+	if len(result.Scope.ArtifactKinds) > 0 {
+		fmt.Fprintf(w, "artifact kinds: %s\n", strings.Join(result.Scope.ArtifactKinds, ", "))
+	}
+	if result.Scope.SpecRef != "" {
+		fmt.Fprintf(w, "anchor spec: %s\n", result.Scope.SpecRef)
+	}
+	fmt.Fprintf(w, "terms: %s\n", strings.Join(result.Terms, ", "))
+	if len(result.CanonicalTerms) > 0 {
+		fmt.Fprintf(w, "canonical terms: %s\n", strings.Join(result.CanonicalTerms, ", "))
+	}
+	if len(result.AnchorSpecs) > 0 {
+		refs := make([]string, 0, len(result.AnchorSpecs))
+		for _, anchor := range result.AnchorSpecs {
+			refs = append(refs, anchor.Ref)
+		}
+		fmt.Fprintf(w, "evidence specs: %s\n", strings.Join(refs, ", "))
+	}
+	fmt.Fprintf(w, "findings: %d artifact(s)\n", len(result.Findings))
+	if len(result.Findings) == 0 {
+		return
+	}
+
+	for i, finding := range result.Findings {
+		fmt.Fprintf(w, "%d. %s | %s | %s | terms: %s\n", i+1, finding.Ref, finding.Kind, finding.Title, strings.Join(finding.Terms, ", "))
+		if finding.SourceRef != "" {
+			fmt.Fprintf(w, "   source: %s\n", finding.SourceRef)
+		}
+		for _, section := range finding.Sections {
+			fmt.Fprintf(w, "   - %s | terms: %s\n", section.Section, strings.Join(section.Terms, ", "))
+			if section.Excerpt != "" {
+				fmt.Fprintf(w, "     excerpt: %s\n", section.Excerpt)
+			}
+			if section.Evidence != nil {
+				fmt.Fprintf(w, "     evidence: %s | %s | %.3f\n", section.Evidence.SpecRef, section.Evidence.Section, section.Evidence.Score)
+				if section.Evidence.Excerpt != "" {
+					fmt.Fprintf(w, "     expected: %s\n", section.Evidence.Excerpt)
+				}
+			}
+		}
+	}
+}
+
 func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
-	if len(result.DriftItems) == 0 {
+	if len(result.DriftItems) == 0 && len(result.Assessments) == 0 {
 		fmt.Fprintln(w, "no drift items")
 		return
 	}
+
+	assessments := result.Assessments
+	if len(assessments) == 0 {
+		assessments = driftAssessmentsFromItems(result.DriftItems)
+	}
+	driftItems := driftItemsByDocRef(result.DriftItems)
 	remediation := remediationItemsByDocRef(result.Remediation)
-	for i, item := range result.DriftItems {
-		fmt.Fprintf(w, "%d. %s | %s | findings: %d", i+1, item.DocRef, item.Title, len(item.Findings))
-		if suggestions := remediation[item.DocRef]; len(suggestions) > 0 {
+	for i, assessment := range assessments {
+		fmt.Fprintf(w, "%d. %s | %s | status: %s", i+1, assessment.DocRef, assessment.Title, assessment.Status)
+		if assessment.Confidence != nil && assessment.Confidence.Level != "" {
+			fmt.Fprintf(w, " | confidence: %s", assessment.Confidence.Level)
+			if assessment.Confidence.Score > 0 {
+				fmt.Fprintf(w, " (%.3f)", assessment.Confidence.Score)
+			}
+		}
+		if item, ok := driftItems[assessment.DocRef]; ok {
+			fmt.Fprintf(w, " | findings: %d", len(item.Findings))
+		}
+		if suggestions := remediation[assessment.DocRef]; len(suggestions) > 0 {
 			fmt.Fprintf(w, " | remediation: %d", len(suggestions))
 		}
 		fmt.Fprintln(w)
-		for _, suggestion := range remediation[item.DocRef] {
+		if assessment.Rationale != "" {
+			fmt.Fprintf(w, "   rationale: %s\n", assessment.Rationale)
+		}
+		if assessment.Evidence != nil {
+			renderDriftEvidence(w, assessment.Evidence, "   ")
+		}
+		if assessment.Confidence != nil && assessment.Confidence.Basis != "" {
+			fmt.Fprintf(w, "   confidence basis: %s\n", assessment.Confidence.Basis)
+		}
+		if item, ok := driftItems[assessment.DocRef]; ok {
+			for _, finding := range item.Findings {
+				fmt.Fprintf(w, "   finding: %s", finding.Code)
+				if finding.Artifact != "" {
+					fmt.Fprintf(w, " | artifact: %s", finding.Artifact)
+				}
+				if finding.Confidence != nil && finding.Confidence.Level != "" {
+					fmt.Fprintf(w, " | confidence: %s", finding.Confidence.Level)
+				}
+				fmt.Fprintln(w)
+				fmt.Fprintf(w, "     message: %s\n", finding.Message)
+				if finding.Rationale != "" {
+					fmt.Fprintf(w, "     rationale: %s\n", finding.Rationale)
+				}
+				if finding.Expected != "" || finding.Observed != "" {
+					fmt.Fprintf(w, "     expected: %s\n", finding.Expected)
+					fmt.Fprintf(w, "     observed: %s\n", finding.Observed)
+				}
+				if finding.Evidence != nil {
+					renderDriftEvidence(w, finding.Evidence, "     ")
+				}
+				if finding.Confidence != nil && finding.Confidence.Basis != "" {
+					fmt.Fprintf(w, "     confidence basis: %s\n", finding.Confidence.Basis)
+				}
+			}
+		}
+		for _, suggestion := range remediation[assessment.DocRef] {
 			fmt.Fprintf(w, "   remediation: %s | %s\n", suggestion.SpecRef, suggestion.Summary)
 			if suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "" {
 				fmt.Fprintf(w, "   suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
 			} else if suggestion.SuggestedEdit.Note != "" {
 				fmt.Fprintf(w, "   suggested edit: %s\n", suggestion.SuggestedEdit.Note)
 			}
+		}
+	}
+}
+
+func renderDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence, prefix string) {
+	if evidence == nil {
+		return
+	}
+	if evidence.SpecRef != "" || evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
+		fmt.Fprintf(w, "%sspec evidence: %s", prefix, evidence.SpecRef)
+		if evidence.SpecSection != "" {
+			fmt.Fprintf(w, " | %s", evidence.SpecSection)
+		}
+		fmt.Fprintln(w)
+		if evidence.SpecExcerpt != "" {
+			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.SpecExcerpt)
+		}
+	}
+	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
+		fmt.Fprintf(w, "%sdoc evidence: %s\n", prefix, evidence.DocSection)
+		if evidence.DocExcerpt != "" {
+			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.DocExcerpt)
 		}
 	}
 }
@@ -451,6 +569,7 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 	}
 	if result.Impact != nil {
 		fmt.Fprintf(w, "impact: %d spec(s), %d ref(s), %d doc(s)\n", len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
+		renderReviewImpactSummary(w, result.Impact)
 	} else {
 		fmt.Fprintln(w, "impact: none")
 	}
@@ -502,20 +621,32 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 		if len(result.Impact.AffectedSpecs) == 0 {
 			fmt.Fprintln(w, "- Affected specs: none")
 		} else {
-			specRefs := make([]string, 0, len(result.Impact.AffectedSpecs))
-			for _, item := range result.Impact.AffectedSpecs {
-				specRefs = append(specRefs, "`"+item.Ref+"`")
+			fmt.Fprintln(w, "- Top impacted specs:")
+			for _, item := range topImpactedSpecs(result.Impact.AffectedSpecs, 3) {
+				fmt.Fprintf(w, "  - `%s` %s (%s", item.Ref, item.Title, item.Relationship)
+				if item.Historical {
+					fmt.Fprint(w, ", historical")
+				}
+				fmt.Fprintln(w, ")")
 			}
-			fmt.Fprintf(w, "- Affected specs: %s\n", strings.Join(specRefs, ", "))
+			if extra := len(result.Impact.AffectedSpecs) - minInt(len(result.Impact.AffectedSpecs), 3); extra > 0 {
+				fmt.Fprintf(w, "  - `%d` more impacted spec(s)\n", extra)
+			}
 		}
 		if len(result.Impact.AffectedDocs) == 0 {
 			fmt.Fprintln(w, "- Affected docs: none")
 		} else {
-			docRefs := make([]string, 0, len(result.Impact.AffectedDocs))
-			for _, item := range result.Impact.AffectedDocs {
-				docRefs = append(docRefs, "`"+item.Ref+"`")
+			fmt.Fprintln(w, "- Top impacted docs:")
+			for _, item := range topImpactedDocs(result.Impact.AffectedDocs, 3) {
+				fmt.Fprintf(w, "  - `%s` %s (score %.3f", item.Ref, item.Title, item.Score)
+				if item.SourceRef != "" {
+					fmt.Fprintf(w, ", %s", item.SourceRef)
+				}
+				fmt.Fprintln(w, ")")
 			}
-			fmt.Fprintf(w, "- Affected docs: %s\n", strings.Join(docRefs, ", "))
+			if extra := len(result.Impact.AffectedDocs) - minInt(len(result.Impact.AffectedDocs), 3); extra > 0 {
+				fmt.Fprintf(w, "  - `%d` more impacted doc(s)\n", extra)
+			}
 		}
 	}
 
@@ -572,4 +703,92 @@ func remediationItemsByDocRef(result *analysis.DocRemediationResult) map[string]
 		items[item.DocRef] = item.Suggestions
 	}
 	return items
+}
+
+func driftItemsByDocRef(items []analysis.DriftItem) map[string]analysis.DriftItem {
+	result := make(map[string]analysis.DriftItem, len(items))
+	for _, item := range items {
+		result[item.DocRef] = item
+	}
+	return result
+}
+
+func driftAssessmentsFromItems(items []analysis.DriftItem) []analysis.DocDriftAssessment {
+	result := make([]analysis.DocDriftAssessment, 0, len(items))
+	for _, item := range items {
+		result = append(result, analysis.DocDriftAssessment{
+			DocRef:    item.DocRef,
+			Title:     item.Title,
+			SourceRef: item.SourceRef,
+			Status:    "drift",
+			SpecRefs:  append([]string(nil), item.SpecRefs...),
+		})
+	}
+	return result
+}
+
+func renderReviewImpactSummary(w io.Writer, impact *analysis.AnalyzeImpactResult) {
+	if impact == nil {
+		return
+	}
+	specs := topImpactedSpecs(impact.AffectedSpecs, 3)
+	if len(specs) == 0 {
+		fmt.Fprintln(w, "top impacted specs: none")
+	} else {
+		fmt.Fprintln(w, "top impacted specs:")
+		for _, item := range specs {
+			fmt.Fprintf(w, "- %s | %s | %s", item.Ref, item.Title, item.Relationship)
+			if item.Historical {
+				fmt.Fprint(w, " | historical")
+			}
+			fmt.Fprintln(w)
+		}
+		if extra := len(impact.AffectedSpecs) - len(specs); extra > 0 {
+			fmt.Fprintf(w, "- %d more impacted spec(s)\n", extra)
+		}
+	}
+
+	docs := topImpactedDocs(impact.AffectedDocs, 3)
+	if len(docs) == 0 {
+		fmt.Fprintln(w, "top impacted docs: none")
+		return
+	}
+	fmt.Fprintln(w, "top impacted docs:")
+	for _, item := range docs {
+		fmt.Fprintf(w, "- %s | %s | %.3f", item.Ref, item.Title, item.Score)
+		if item.SourceRef != "" {
+			fmt.Fprintf(w, " | %s", item.SourceRef)
+		}
+		fmt.Fprintln(w)
+	}
+	if extra := len(impact.AffectedDocs) - len(docs); extra > 0 {
+		fmt.Fprintf(w, "- %d more impacted doc(s)\n", extra)
+	}
+}
+
+func topImpactedSpecs(items []analysis.ImpactedSpec, limit int) []analysis.ImpactedSpec {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) <= limit {
+		return append([]analysis.ImpactedSpec(nil), items...)
+	}
+	return append([]analysis.ImpactedSpec(nil), items[:limit]...)
+}
+
+func topImpactedDocs(items []analysis.ImpactedDoc, limit int) []analysis.ImpactedDoc {
+	if len(items) == 0 || limit <= 0 {
+		return nil
+	}
+	if len(items) <= limit {
+		return append([]analysis.ImpactedDoc(nil), items...)
+	}
+	return append([]analysis.ImpactedDoc(nil), items[:limit]...)
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
