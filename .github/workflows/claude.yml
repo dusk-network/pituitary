@@ -10,6 +10,9 @@ on:
   pull_request_review:
     types: [submitted]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   claude:
     if: |
@@ -26,15 +29,24 @@ jobs:
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
+
+      - name: Install Bun
+        env:
+          BUN_INSTALL: ${{ runner.temp }}/bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          "$BUN_INSTALL/bin/bun" --version
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          path_to_bun_executable: ${{ runner.temp }}/bun/bin/bun
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
