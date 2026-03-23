@@ -17,6 +17,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/openaicompat"
 )
 
 type qualitativeAnalyzer interface {
@@ -108,6 +109,7 @@ const (
 	openAICompatibleDocDriftSystemPrompt = "You are Pituitary's doc-drift adjudicator. Use only the provided deterministic findings and cited spec/doc evidence. Return only one JSON object with keys findings and suggestions. Do not invent new finding codes or spec refs. Findings must correspond to the provided deterministic findings, and suggestions must stay actionable and bounded to the same contradictions."
 	analysisPromptSectionLimit           = 6
 	analysisPromptSectionContentLimit    = 700
+	openAICompatibleAnalysisRuntime      = "runtime.analysis"
 )
 
 func newQualitativeAnalyzer(provider config.RuntimeProvider) (qualitativeAnalyzer, error) {
@@ -131,7 +133,7 @@ func newOpenAICompatibleAnalysisProvider(provider config.RuntimeProvider) (quali
 	if envVar := strings.TrimSpace(provider.APIKeyEnv); envVar != "" {
 		token = strings.TrimSpace(os.Getenv(envVar))
 		if token == "" {
-			return nil, &index.DependencyUnavailableError{Message: "missing API key for runtime.analysis"}
+			return nil, analysisDependencyUnavailable("missing API key for %s", openAICompatibleAnalysisRuntime)
 		}
 	}
 
@@ -220,7 +222,8 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, sys
 
 	if err := json.Unmarshal([]byte(responseBody), target); err != nil {
 		return &index.DependencyUnavailableError{
-			Message: fmt.Sprintf("decode runtime.analysis response as JSON object: %v", err),
+			Runtime: openAICompatibleAnalysisRuntime,
+			Message: fmt.Sprintf("decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err),
 		}
 	}
 	return nil
@@ -245,7 +248,8 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 				return "", err
 			}
 			lastErr = &index.DependencyUnavailableError{
-				Message: fmt.Sprintf("call runtime.analysis endpoint %s: %v", p.endpoint, err),
+				Runtime: openAICompatibleAnalysisRuntime,
+				Message: fmt.Sprintf("call %s endpoint %s: %v", openAICompatibleAnalysisRuntime, p.endpoint, err),
 			}
 			if shouldRetryOpenAICompatibleAnalysisRequest(err, 0) && attempt < p.maxRetries {
 				if waitErr := waitBeforeAnalysisRetry(ctx, attempt, 0); waitErr != nil {
@@ -273,7 +277,7 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 	}
 
 	if lastErr == nil {
-		lastErr = &index.DependencyUnavailableError{Message: "runtime.analysis request failed"}
+		lastErr = analysisDependencyUnavailable("%s request failed", openAICompatibleAnalysisRuntime)
 	}
 	return "", lastErr
 }
@@ -281,11 +285,11 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return "", &index.DependencyUnavailableError{Message: fmt.Sprintf("read runtime.analysis response: %v", err)}
+		return "", analysisDependencyUnavailable("read %s response: %v", openAICompatibleAnalysisRuntime, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := extractOpenAICompatibleChatError(body)
+		message := openaicompat.ExtractErrorMessage(body)
 		if message == "" {
 			message = strings.TrimSpace(string(body))
 		}
@@ -293,71 +297,34 @@ func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
 			message = http.StatusText(resp.StatusCode)
 		}
 		return "", &index.DependencyUnavailableError{
-			Message: fmt.Sprintf("runtime.analysis endpoint %s returned %s: %s", resp.Request.URL, resp.Status, message),
+			Runtime: openAICompatibleAnalysisRuntime,
+			Message: fmt.Sprintf("%s endpoint %s returned %s: %s", openAICompatibleAnalysisRuntime, resp.Request.URL, resp.Status, message),
 		}
 	}
 
 	var payload openAICompatibleChatResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", &index.DependencyUnavailableError{
-			Message: fmt.Sprintf("decode runtime.analysis response: %v", err),
-		}
+		return "", analysisDependencyUnavailable("decode %s response: %v", openAICompatibleAnalysisRuntime, err)
 	}
-	if message := extractOpenAICompatibleChatErrorValue(payload.Err); message != "" {
+	if message := openaicompat.ExtractErrorValue(payload.Err); message != "" {
 		return "", &index.DependencyUnavailableError{
-			Message: fmt.Sprintf("runtime.analysis endpoint %s returned an error: %s", resp.Request.URL, message),
+			Runtime: openAICompatibleAnalysisRuntime,
+			Message: fmt.Sprintf("%s endpoint %s returned an error: %s", openAICompatibleAnalysisRuntime, resp.Request.URL, message),
 		}
 	}
 	if len(payload.Choices) == 0 {
-		return "", &index.DependencyUnavailableError{Message: "runtime.analysis returned no choices"}
+		return "", analysisDependencyUnavailable("%s returned no choices", openAICompatibleAnalysisRuntime)
 	}
 
 	text := extractOpenAICompatibleMessageText(payload.Choices[0].Message.Content)
 	if text == "" {
-		return "", &index.DependencyUnavailableError{Message: "runtime.analysis returned an empty message"}
+		return "", analysisDependencyUnavailable("%s returned an empty message", openAICompatibleAnalysisRuntime)
 	}
 	text = normalizeJSONResponseText(text)
 	if text == "" {
-		return "", &index.DependencyUnavailableError{Message: "runtime.analysis returned no JSON object"}
+		return "", analysisDependencyUnavailable("%s returned no JSON object", openAICompatibleAnalysisRuntime)
 	}
 	return text, nil
-}
-
-func extractOpenAICompatibleChatError(body []byte) string {
-	var payload openAICompatibleChatResponse
-	if err := json.Unmarshal(body, &payload); err == nil {
-		return extractOpenAICompatibleChatErrorValue(payload.Err)
-	}
-	return ""
-}
-
-func extractOpenAICompatibleChatErrorValue(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.TrimSpace(text)
-	}
-
-	var payload struct {
-		Message string `json:"message"`
-		Error   string `json:"error"`
-		Detail  string `json:"detail"`
-	}
-	if err := json.Unmarshal(raw, &payload); err == nil {
-		switch {
-		case strings.TrimSpace(payload.Message) != "":
-			return strings.TrimSpace(payload.Message)
-		case strings.TrimSpace(payload.Error) != "":
-			return strings.TrimSpace(payload.Error)
-		case strings.TrimSpace(payload.Detail) != "":
-			return strings.TrimSpace(payload.Detail)
-		}
-	}
-
-	return ""
 }
 
 func extractOpenAICompatibleMessageText(raw json.RawMessage) string {
@@ -408,6 +375,13 @@ func normalizeJSONResponseText(text string) string {
 		}
 	}
 	return ""
+}
+
+func analysisDependencyUnavailable(format string, args ...any) *index.DependencyUnavailableError {
+	return &index.DependencyUnavailableError{
+		Runtime: openAICompatibleAnalysisRuntime,
+		Message: fmt.Sprintf(format, args...),
+	}
 }
 
 func shouldRetryOpenAICompatibleAnalysisRequest(err error, statusCode int) bool {

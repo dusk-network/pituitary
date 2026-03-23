@@ -245,7 +245,7 @@ func missingIndexMessage(err error) string {
 
 func improveDependencyUnavailableMessage(cfg *config.Config, err error) string {
 	message := strings.TrimSpace(err.Error())
-	runtimeName, provider, ok := dependencyUnavailableRuntimeContext(cfg, message)
+	runtimeName, provider, ok := dependencyUnavailableRuntimeContext(cfg, err, message)
 	if !ok {
 		return message
 	}
@@ -256,15 +256,23 @@ func improveDependencyUnavailableMessage(cfg *config.Config, err error) string {
 	return message
 }
 
-func dependencyUnavailableRuntimeContext(cfg *config.Config, message string) (string, config.RuntimeProvider, bool) {
+func dependencyUnavailableRuntimeContext(cfg *config.Config, err error, message string) (string, config.RuntimeProvider, bool) {
 	if cfg == nil {
 		return "", config.RuntimeProvider{}, false
 	}
 
-	switch {
-	case strings.Contains(message, "runtime.analysis"):
+	switch index.DependencyUnavailableRuntime(err) {
+	case "runtime.analysis":
 		return "runtime.analysis", cfg.Runtime.Analysis, true
-	case strings.Contains(message, "runtime.embedder"):
+	case "runtime.embedder":
+		return "runtime.embedder", cfg.Runtime.Embedder, true
+	}
+
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "runtime.analysis"):
+		return "runtime.analysis", cfg.Runtime.Analysis, true
+	case strings.Contains(lower, "runtime.embedder"):
 		return "runtime.embedder", cfg.Runtime.Embedder, true
 	default:
 		return "", config.RuntimeProvider{}, false

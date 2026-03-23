@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -171,14 +172,15 @@ func TestCompareSpecsClassifiesAnalysisProviderDependencyFailures(t *testing.T) 
 func TestCompareSpecsReportsActionableReachabilityGuidanceForAnalysisProvider(t *testing.T) {
 	t.Parallel()
 
-	configPath := writeOperationWorkspaceWithRuntime(t, "", `
+	endpoint := unreachableLocalEndpoint(t)
+	configPath := writeOperationWorkspaceWithRuntime(t, "", fmt.Sprintf(`
 [runtime.analysis]
 provider = "openai_compatible"
 model = "pituitary-analysis"
-endpoint = "http://127.0.0.1:9/v1"
+endpoint = %q
 timeout_ms = 1000
 max_retries = 0
-`)
+`, endpoint))
 
 	operation := CompareSpecs(context.Background(), configPath, analysis.CompareRequest{
 		SpecRefs: []string{"SPEC-008", "SPEC-042"},
@@ -192,7 +194,8 @@ max_retries = 0
 	if operation.Issue.ExitCode != 3 {
 		t.Fatalf("CompareSpecs() issue.exitCode = %d, want 3", operation.Issue.ExitCode)
 	}
-	if !strings.Contains(operation.Issue.Message, `runtime.analysis (provider "openai_compatible", model "pituitary-analysis", endpoint "http://127.0.0.1:9/v1") is unreachable`) {
+	wantDescriptor := fmt.Sprintf(`runtime.analysis (provider "openai_compatible", model "pituitary-analysis", endpoint %q) is unreachable`, endpoint)
+	if !strings.Contains(operation.Issue.Message, wantDescriptor) {
 		t.Fatalf("CompareSpecs() issue.message = %q, want runtime descriptor", operation.Issue.Message)
 	}
 	if !strings.Contains(operation.Issue.Message, "reachable from this machine") {
@@ -396,4 +399,18 @@ func copyOperationFixtureFile(t *testing.T, srcRelative, dst string) {
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		t.Fatalf("write fixture %s: %v", dst, err)
 	}
+}
+
+func unreachableLocalEndpoint(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen(): %v", err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("listener.Close(): %v", err)
+	}
+	return "http://" + addr + "/v1"
 }

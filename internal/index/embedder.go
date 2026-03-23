@@ -15,6 +15,7 @@ import (
 // DependencyUnavailableError indicates that a required runtime dependency
 // cannot satisfy the current command.
 type DependencyUnavailableError struct {
+	Runtime string
 	Message string
 }
 
@@ -26,6 +27,16 @@ func (e *DependencyUnavailableError) Error() string {
 func IsDependencyUnavailable(err error) bool {
 	var target *DependencyUnavailableError
 	return errors.As(err, &target)
+}
+
+// DependencyUnavailableRuntime reports the runtime surface associated with a
+// dependency-unavailable failure, if one was recorded.
+func DependencyUnavailableRuntime(err error) string {
+	var target *DependencyUnavailableError
+	if !errors.As(err, &target) {
+		return ""
+	}
+	return strings.TrimSpace(target.Runtime)
 }
 
 // Embedder generates embeddings for rebuild and query-time retrieval.
