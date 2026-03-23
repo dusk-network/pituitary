@@ -208,7 +208,7 @@ func loadCandidate(repo *analysisRepository, request OverlapRequest, specs map[s
 	for _, section := range sections {
 		texts = append(texts, textForEmbedding(record.Title, section.Heading, section.Body))
 	}
-	vectors, err := embedder.EmbedTexts(repo.ctx, texts)
+	vectors, err := embedder.EmbedDocuments(repo.ctx, texts)
 	if err != nil {
 		return nil, fmt.Errorf("embed draft spec %s: %w", record.Ref, err)
 	}

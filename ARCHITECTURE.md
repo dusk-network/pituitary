@@ -393,34 +393,36 @@ Step 6: Atomic Swap
 
 **Bootstrap runtime contract (current implementation):**
 
-- The current bootstrap supports one embedder provider: `fixture`.
+- The current runtime supports two embedder providers: `fixture` and `openai_compatible`.
 - `runtime.analysis` is part of the config shape for forward compatibility, but it must currently be `disabled`.
 - Shipped analysis commands are deterministic today and do not call an external qualitative-analysis provider.
 - Tests and CI should use the deterministic fixture embedder and require no live model credentials.
 - Unsupported runtime providers should fail during config validation with clear, intentional errors.
-- A richer provider boundary remains a future design goal, but it is not part of the current runtime contract.
+- Provider-backed embeddings are now part of the runtime contract; provider-backed analysis remains a future design goal.
 
 V1 runtime configuration should be explicit in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`:
 
 | Field | Embedder | Analysis | Notes |
 |---|---|---|---|
-| `provider` | optional, defaults to `fixture` | optional, defaults to `disabled` | Any other value is rejected in the bootstrap |
-| `model` | optional, defaults to `fixture-8d` | ignored when analysis is disabled | Kept in the config shape for forward compatibility |
-| `endpoint` | optional | optional | Parsed but unused in the bootstrap runtime |
-| `api_key_env` | optional | optional | Parsed but unused in the bootstrap runtime |
-| `timeout_ms` | optional, defaults to `1000` | optional, defaults to `1000` | Reserved for later provider-backed runtime work |
-| `max_retries` | optional, defaults to `0` | optional, defaults to `0` | Reserved for later provider-backed runtime work |
+| `provider` | optional, defaults to `fixture` | optional, defaults to `disabled` | Embedder currently supports `fixture` and `openai_compatible` |
+| `model` | defaults to `fixture-8d` for `fixture`; required for `openai_compatible` | ignored when analysis is disabled | Part of the embedder fingerprint stored in index metadata |
+| `endpoint` | required for `openai_compatible`, ignored for `fixture` | optional | Expected to point at an OpenAI-compatible API root such as `http://host:1234/v1` |
+| `api_key_env` | optional | optional | Optional so local servers such as LM Studio can run without credentials |
+| `timeout_ms` | optional, defaults to `1000` | optional, defaults to `1000` | Active for `openai_compatible` embedding requests |
+| `max_retries` | optional, defaults to `0` | optional, defaults to `0` | Active for retryable `openai_compatible` embedding failures |
 
 Degraded behavior rules:
 
 - The `fixture` embedder must be deterministic, require no network access, and be the default mode for CI and local tests.
 - Unsupported embedder or analysis providers must fail during config validation rather than degrading silently.
+- Indexed metadata must store both embedder dimension and embedder fingerprint so provider/model changes fail clearly and require a rebuild.
 - Future provider-backed analysis work should preserve the current storage and transport contracts rather than widening them implicitly.
 
 Retry and timeout rules:
 
-- `timeout_ms` and `max_retries` are parsed today so the config shape does not need a second contract change when richer providers are added.
-- The bootstrap runtime itself does not issue network requests, so those fields are currently inert.
+- `timeout_ms` and `max_retries` remain parsed for both runtime blocks so the config shape does not need a second contract change later.
+- For `openai_compatible` embeddings, those fields control the HTTP client timeout and retry behavior.
+- For `fixture` embeddings and `disabled` analysis, those fields remain inert.
 
 **Chunking strategy:** The current implementation uses a lightweight internal Markdown scanner that splits on ATX headings, preserves the nested heading path in each section title, and falls back to one title-scoped chunk when a document has no headings. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
 

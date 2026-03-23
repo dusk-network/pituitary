@@ -83,7 +83,7 @@ include = ["guides/*.md", "runbooks/*.md"]
 	}
 }
 
-func TestValidateStartupRejectsUnsupportedEmbedderProvider(t *testing.T) {
+func TestValidateStartupRejectsOpenAICompatibleEmbedderWithoutEndpoint(t *testing.T) {
 	configPath := writeMCPServeWorkspace(t, `
 [workspace]
 root = "."
@@ -113,8 +113,8 @@ include = ["guides/*.md", "runbooks/*.md"]
 	if err == nil {
 		t.Fatal("validateStartup() error = nil, want embedder failure")
 	}
-	if !strings.Contains(err.Error(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
-		t.Fatalf("validateStartup() error = %v, want unsupported-provider detail", err)
+	if !strings.Contains(err.Error(), `runtime.embedder.endpoint: value is required for provider "openai_compatible"`) {
+		t.Fatalf("validateStartup() error = %v, want missing-endpoint detail", err)
 	}
 }
 

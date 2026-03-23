@@ -53,7 +53,8 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 8)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 3)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 4)
+	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 	assertSections(t, db, "SPEC-042", []string{
 		"Overview",
 		"Requirements",
@@ -361,6 +362,17 @@ func assertColumnType(t *testing.T, db *sql.DB, query, want string) {
 	}
 	if got != want {
 		t.Fatalf("query %q = %q, want %q", query, got, want)
+	}
+}
+
+func assertMetadataValue(t *testing.T, db *sql.DB, key, want string) {
+	t.Helper()
+	var got string
+	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = ?`, key).Scan(&got); err != nil {
+		t.Fatalf("lookup metadata %s: %v", key, err)
+	}
+	if got != want {
+		t.Fatalf("metadata %s = %q, want %q", key, got, want)
 	}
 }
 

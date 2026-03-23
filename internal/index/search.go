@@ -143,13 +143,15 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 	}
 	defer db.Close()
 
-	if err := validateStoredDimensionContext(ctx, db, embedder.Dimension()); err != nil {
-		return nil, err
-	}
-
-	vectors, err := embedder.EmbedTexts(ctx, []string{query.Query})
+	vectors, err := embedder.EmbedQueries(ctx, []string{query.Query})
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	if len(vectors) != 1 {
+		return nil, fmt.Errorf("embed query: returned %d vector(s) for 1 query", len(vectors))
+	}
+	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), len(vectors[0])); err != nil {
+		return nil, err
 	}
 
 	candidates, err := loadRankedCandidatesContext(ctx, db, query, vectors[0])
@@ -229,14 +231,14 @@ func isSupportedSearchStatus(status string) bool {
 }
 
 func validateStoredDimension(db *sql.DB, configured int) error {
-	return validateStoredDimensionContext(context.Background(), db, configured)
+	return validateStoredEmbedderContext(context.Background(), db, "", configured)
 }
 
-func validateStoredDimensionContext(ctx context.Context, db *sql.DB, configured int) error {
+func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint string, configured int) error {
 	var raw string
 	err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
 	if err == sql.ErrNoRows {
-		return nil
+		return fmt.Errorf("index is missing embedder metadata; run `pituitary index --rebuild`")
 	}
 	if err != nil {
 		return fmt.Errorf("read index metadata: %w", err)
@@ -248,6 +250,22 @@ func validateStoredDimensionContext(ctx context.Context, db *sql.DB, configured 
 	}
 	if stored != configured {
 		return fmt.Errorf("index embedder dimension %d does not match configured embedder dimension %d; run `pituitary index --rebuild`", stored, configured)
+	}
+
+	if strings.TrimSpace(fingerprint) == "" {
+		return nil
+	}
+
+	var storedFingerprint string
+	err = db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'embedder_fingerprint'`).Scan(&storedFingerprint)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("index is missing embedder fingerprint metadata; run `pituitary index --rebuild`")
+	}
+	if err != nil {
+		return fmt.Errorf("read index metadata: %w", err)
+	}
+	if storedFingerprint != fingerprint {
+		return fmt.Errorf("index embedder fingerprint %q does not match configured embedder fingerprint %q; run `pituitary index --rebuild`", storedFingerprint, fingerprint)
 	}
 	return nil
 }

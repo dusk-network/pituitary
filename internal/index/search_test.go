@@ -2,8 +2,10 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -245,5 +247,37 @@ Interactive authentication sessions must use tenant-scoped policy checks and sli
 	}
 	if len(result.Matches[0].Inference.Reasons) == 0 || result.Matches[0].Inference.Reasons[0] != "applies_to missing" {
 		t.Fatalf("top match inference reasons = %+v, want applies_to warning", result.Matches[0].Inference.Reasons)
+	}
+}
+
+func TestSearchSpecsRejectsEmbedderFingerprintMismatch(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite3", cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`UPDATE metadata SET value = ? WHERE key = 'embedder_fingerprint'`, "fixture|fixture-16d|plain_v1"); err != nil {
+		t.Fatalf("update embedder_fingerprint: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close writable db: %v", err)
+	}
+
+	_, err = SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err == nil {
+		t.Fatal("SearchSpecs() error = nil, want fingerprint mismatch")
+	}
+	if got := err.Error(); !strings.Contains(got, "embedder fingerprint") || !strings.Contains(got, "pituitary index --rebuild") {
+		t.Fatalf("SearchSpecs() error = %q, want fingerprint rebuild guidance", got)
 	}
 }

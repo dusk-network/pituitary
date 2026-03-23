@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -16,6 +17,9 @@ const (
 	SourceKindSpecBundle       = "spec_bundle"
 	SourceKindMarkdownDocs     = "markdown_docs"
 	SourceKindMarkdownContract = "markdown_contract"
+	RuntimeProviderFixture     = "fixture"
+	RuntimeProviderOpenAI      = "openai_compatible"
+	RuntimeProviderDisabled    = "disabled"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -136,15 +140,15 @@ func Load(path string) (*Config, error) {
 		},
 		Runtime: Runtime{
 			Embedder: RuntimeProvider{
-				Provider:   defaultString(raw.runtimeEmbedder.provider, "fixture"),
-				Model:      defaultString(raw.runtimeEmbedder.model, "fixture-8d"),
+				Provider:   defaultString(raw.runtimeEmbedder.provider, RuntimeProviderFixture),
+				Model:      raw.runtimeEmbedder.model,
 				Endpoint:   raw.runtimeEmbedder.endpoint,
 				APIKeyEnv:  raw.runtimeEmbedder.apiKeyEnv,
 				TimeoutMS:  defaultInt(raw.runtimeEmbedder.timeoutMS, 1000),
 				MaxRetries: raw.runtimeEmbedder.maxRetries,
 			},
 			Analysis: RuntimeProvider{
-				Provider:   defaultString(raw.runtimeAnalysis.provider, "disabled"),
+				Provider:   defaultString(raw.runtimeAnalysis.provider, RuntimeProviderDisabled),
 				Model:      raw.runtimeAnalysis.model,
 				Endpoint:   raw.runtimeAnalysis.endpoint,
 				APIKeyEnv:  raw.runtimeAnalysis.apiKeyEnv,
@@ -164,6 +168,9 @@ func Load(path string) (*Config, error) {
 			Include: append([]string(nil), source.include...),
 			Exclude: append([]string(nil), source.exclude...),
 		})
+	}
+	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
+		cfg.Runtime.Embedder.Model = "fixture-8d"
 	}
 
 	if err := validate(cfg); err != nil {
@@ -636,12 +643,34 @@ func validateRuntime(runtime Runtime) error {
 		errs.add("runtime.embedder.provider: value is required")
 	} else {
 		switch runtime.Embedder.Provider {
-		case "fixture":
+		case RuntimeProviderFixture:
 			if runtime.Embedder.Model == "" {
 				errs.add("runtime.embedder.model: value is required for provider %q", runtime.Embedder.Provider)
 			}
+		case RuntimeProviderOpenAI:
+			if runtime.Embedder.Model == "" {
+				errs.add("runtime.embedder.model: value is required for provider %q", runtime.Embedder.Provider)
+			}
+			if endpoint := strings.TrimSpace(runtime.Embedder.Endpoint); endpoint == "" {
+				errs.add("runtime.embedder.endpoint: value is required for provider %q", runtime.Embedder.Provider)
+			} else {
+				parsed, err := url.Parse(endpoint)
+				switch {
+				case err != nil:
+					errs.add("runtime.embedder.endpoint: invalid URL %q: %v", runtime.Embedder.Endpoint, err)
+				case !parsed.IsAbs() || parsed.Host == "":
+					errs.add("runtime.embedder.endpoint: %q must be an absolute URL", runtime.Embedder.Endpoint)
+				case parsed.Scheme != "http" && parsed.Scheme != "https":
+					errs.add("runtime.embedder.endpoint: %q must use http or https", runtime.Embedder.Endpoint)
+				}
+			}
 		default:
-			errs.add("runtime.embedder.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Embedder.Provider, "fixture")
+			errs.add(
+				"runtime.embedder.provider: unsupported provider %q (supported providers: %q, %q)",
+				runtime.Embedder.Provider,
+				RuntimeProviderFixture,
+				RuntimeProviderOpenAI,
+			)
 		}
 	}
 	if runtime.Embedder.TimeoutMS < 0 {
@@ -653,8 +682,8 @@ func validateRuntime(runtime Runtime) error {
 
 	if runtime.Analysis.Provider == "" {
 		errs.add("runtime.analysis.provider: value is required")
-	} else if runtime.Analysis.Provider != "disabled" {
-		errs.add("runtime.analysis.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Analysis.Provider, "disabled")
+	} else if runtime.Analysis.Provider != RuntimeProviderDisabled {
+		errs.add("runtime.analysis.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Analysis.Provider, RuntimeProviderDisabled)
 	}
 	if runtime.Analysis.TimeoutMS < 0 {
 		errs.add("runtime.analysis.timeout_ms: must be >= 0")

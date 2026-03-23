@@ -19,7 +19,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // RebuildResult reports the staged rebuild outcome.
 type RebuildResult struct {
@@ -70,11 +70,15 @@ func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	if err != nil {
 		return nil, err
 	}
-	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Dimension()); err != nil {
+	dimension, err := embedder.Dimension(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, dimension); err != nil {
 		return nil, err
 	}
 
-	result := summarizeRebuild(records, embedder.Dimension())
+	result := summarizeRebuild(records, dimension)
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
 	return result, nil
@@ -111,7 +115,10 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	dimension := embedder.Dimension()
+	dimension, err := embedder.Dimension(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	indexPath := cfg.Workspace.ResolvedIndexPath
 	stagePath, err := prepareStagingPath(indexPath)
@@ -377,6 +384,9 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 	if err := insertMetadataContext(ctx, tx, "embedder_dimension", strconv.Itoa(dimension)); err != nil {
 		return nil, err
 	}
+	if err := insertMetadataContext(ctx, tx, "embedder_fingerprint", embedder.Fingerprint()); err != nil {
+		return nil, err
+	}
 
 	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (artifact_ref, section, content) VALUES (?, ?, ?)`)
 	if err != nil {
@@ -617,7 +627,7 @@ func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql
 
 	event.Phase = "embedding"
 	reportRebuildProgress(reporter, event)
-	vectors, err := embedder.EmbedTexts(ctx, texts)
+	vectors, err := embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
 		return 0, fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
 	}
@@ -633,7 +643,7 @@ func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql
 		if err != nil {
 			return 0, err
 		}
-		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, embedder.Dimension(), vectors[i]); err != nil {
+		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, len(vectors[i]), vectors[i]); err != nil {
 			return 0, err
 		}
 	}

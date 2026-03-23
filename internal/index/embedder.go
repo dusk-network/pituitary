@@ -30,21 +30,30 @@ func IsDependencyUnavailable(err error) bool {
 
 // Embedder generates embeddings for rebuild and query-time retrieval.
 type Embedder interface {
-	Dimension() int
-	EmbedTexts(ctx context.Context, texts []string) ([][]float64, error)
+	Fingerprint() string
+	Dimension(ctx context.Context) (int, error)
+	EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error)
+	EmbedQueries(ctx context.Context, texts []string) ([][]float64, error)
 }
 
 // NewEmbedder resolves the configured embedder runtime.
 func NewEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 	switch provider.Provider {
-	case "", "fixture":
+	case "", config.RuntimeProviderFixture:
 		dimension, err := fixtureDimension(provider.Model)
 		if err != nil {
 			return nil, err
 		}
-		return fixtureEmbedder{dimension: dimension}, nil
+		return fixtureEmbedder{dimension: dimension, model: provider.Model}, nil
+	case config.RuntimeProviderOpenAI:
+		return newOpenAICompatibleEmbedder(provider)
 	default:
-		return nil, fmt.Errorf("runtime.embedder.provider %q is not supported in the bootstrap; use %q", provider.Provider, "fixture")
+		return nil, fmt.Errorf(
+			"runtime.embedder.provider %q is not supported; supported providers are %q and %q",
+			provider.Provider,
+			config.RuntimeProviderFixture,
+			config.RuntimeProviderOpenAI,
+		)
 	}
 }
 
@@ -54,13 +63,26 @@ func newEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 
 type fixtureEmbedder struct {
 	dimension int
+	model     string
 }
 
-func (e fixtureEmbedder) Dimension() int {
-	return e.dimension
+func (e fixtureEmbedder) Fingerprint() string {
+	return embedderFingerprint(config.RuntimeProviderFixture, e.model, "plain_v1")
 }
 
-func (e fixtureEmbedder) EmbedTexts(ctx context.Context, texts []string) ([][]float64, error) {
+func (e fixtureEmbedder) Dimension(ctx context.Context) (int, error) {
+	return e.dimension, nil
+}
+
+func (e fixtureEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error) {
+	return e.embedTexts(ctx, texts)
+}
+
+func (e fixtureEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
+	return e.embedTexts(ctx, texts)
+}
+
+func (e fixtureEmbedder) embedTexts(ctx context.Context, texts []string) ([][]float64, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -72,6 +94,10 @@ func (e fixtureEmbedder) EmbedTexts(ctx context.Context, texts []string) ([][]fl
 		vectors = append(vectors, fixtureVector(text, e.dimension))
 	}
 	return vectors, nil
+}
+
+func embedderFingerprint(provider, model, strategy string) string {
+	return fmt.Sprintf("%s|%s|%s", strings.TrimSpace(provider), strings.TrimSpace(model), strings.TrimSpace(strategy))
 }
 
 func fixtureVector(text string, dimension int) []float64 {

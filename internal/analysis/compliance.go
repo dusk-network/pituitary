@@ -294,7 +294,7 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 		texts = append(texts, textForEmbedding(relPath, relPath, string(data)))
 	}
 
-	vectors, err := embedder.EmbedTexts(ctx, texts)
+	vectors, err := embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
 		return nil, fmt.Errorf("embed code paths: %w", err)
 	}
@@ -329,7 +329,7 @@ func loadDiffComplianceTargetsContext(ctx context.Context, diffText string, embe
 		return nil, fmt.Errorf("diff_text does not contain any changed paths with readable content")
 	}
 
-	vectors, err := embedder.EmbedTexts(ctx, texts)
+	vectors, err := embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
 		return nil, fmt.Errorf("embed diff paths: %w", err)
 	}
