@@ -247,7 +247,7 @@ Add to your MCP client config (e.g., Claude Code `settings.json`):
 
 Pituitary's current bootstrap runtime is intentionally narrow and deterministic:
 
-- **Embedder** — `fixture` only. This deterministic embedder is the only supported runtime provider today.
+- **Embedder** — `fixture` by default, with optional `openai_compatible` support for real embeddings.
 - **Analysis** — `disabled` only. The shipped analysis commands are deterministic and do not call an external qualitative-analysis provider yet.
 
 The runtime blocks are optional. If omitted, Pituitary defaults to:
@@ -261,9 +261,27 @@ model = "fixture-8d"
 provider = "disabled"
 ```
 
-Fields such as `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain in the config shape for future runtime work, but non-bootstrap providers are currently rejected during config validation.
+For `fixture`, `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain inert bootstrap fields. For `openai_compatible`, Pituitary uses them for the embeddings API call path.
 
-This means the repo works out of the box with no model credentials. If you configure any provider other than `fixture` for `runtime.embedder` or `disabled` for `runtime.analysis`, Pituitary fails fast with a clear unsupported-provider error.
+This means the repo still works out of the box with no model credentials. Today:
+
+- `runtime.embedder.provider` supports `fixture` and `openai_compatible`
+- `runtime.analysis.provider` supports only `disabled`
+
+For `openai_compatible` embeddings, `model` and `endpoint` are required. `api_key_env` is optional so local servers such as LM Studio can work without a token. Pituitary stores an embedder fingerprint in the index and requires `pituitary index --rebuild` when the configured embedder changes.
+
+Example local embedding setup against LM Studio:
+
+```toml
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = "http://100.92.91.40:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+```
+
+For Nomic-compatible models such as `nomic-embed-text-v1.5`, Pituitary automatically applies the required `search_document:` and `search_query:` prefixes when calling the embeddings endpoint.
 
 ## Architecture
 

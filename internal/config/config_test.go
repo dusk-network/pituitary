@@ -387,7 +387,7 @@ provider = "fixture"
 	}
 }
 
-func TestLoadRejectsUnsupportedEmbedderProvider(t *testing.T) {
+func TestLoadAcceptsOpenAICompatibleEmbedderProvider(t *testing.T) {
 	t.Parallel()
 
 	repo := t.TempDir()
@@ -400,6 +400,72 @@ index_path = ".pituitary/pituitary.db"
 
 [runtime.embedder]
 provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = "http://100.92.91.40:1234/v1"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if got, want := cfg.Runtime.Embedder.Provider, RuntimeProviderOpenAI; got != want {
+		t.Fatalf("runtime.embedder.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.Endpoint, "http://100.92.91.40:1234/v1"; got != want {
+		t.Fatalf("runtime.embedder.endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsOpenAICompatibleEmbedderWithoutEndpoint(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want runtime validation error")
+	}
+	if !strings.Contains(err.Error(), `runtime.embedder.endpoint: value is required for provider "openai_compatible"`) {
+		t.Fatalf("Load() error = %q, want embedder endpoint detail", err)
+	}
+}
+
+func TestLoadRejectsUnsupportedEmbedderProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "anthropic"
 model = "text-embedding-3-small"
 
 [[sources]]
@@ -413,11 +479,11 @@ path = "specs"
 	if err == nil {
 		t.Fatal("Load() error = nil, want runtime validation error")
 	}
-	if !strings.Contains(err.Error(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
+	if !strings.Contains(err.Error(), `runtime.embedder.provider: unsupported provider "anthropic"`) {
 		t.Fatalf("Load() error = %q, want embedder provider detail", err)
 	}
-	if !strings.Contains(err.Error(), `supports only "fixture"`) {
-		t.Fatalf("Load() error = %q, want bootstrap support detail", err)
+	if !strings.Contains(err.Error(), `supported providers: "fixture", "openai_compatible"`) {
+		t.Fatalf("Load() error = %q, want provider list", err)
 	}
 }
 

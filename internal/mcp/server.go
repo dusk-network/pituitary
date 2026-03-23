@@ -1,10 +1,12 @@
 package mcp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
@@ -97,13 +99,17 @@ func validateStartup(options Options) error {
 	}
 	defer db.Close()
 
-	if err := validateIndexReady(db, embedder.Dimension()); err != nil {
+	dimension, err := embedder.Dimension(context.Background())
+	if err != nil {
+		return err
+	}
+	if err := validateIndexReady(db, embedder.Fingerprint(), dimension); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateIndexReady(db *sql.DB, configuredDimension int) error {
+func validateIndexReady(db *sql.DB, configuredFingerprint string, configuredDimension int) error {
 	var raw string
 	err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
 	if err == sql.ErrNoRows {
@@ -119,6 +125,22 @@ func validateIndexReady(db *sql.DB, configuredDimension int) error {
 	}
 	if stored != configuredDimension {
 		return fmt.Errorf("index embedder dimension %d does not match configured embedder dimension %d; run `pituitary index --rebuild`", stored, configuredDimension)
+	}
+
+	if strings.TrimSpace(configuredFingerprint) == "" {
+		return nil
+	}
+
+	var storedFingerprint string
+	err = db.QueryRow(`SELECT value FROM metadata WHERE key = 'embedder_fingerprint'`).Scan(&storedFingerprint)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("index metadata is missing embedder_fingerprint; run `pituitary index --rebuild`")
+	}
+	if err != nil {
+		return fmt.Errorf("read index metadata: %w", err)
+	}
+	if storedFingerprint != configuredFingerprint {
+		return fmt.Errorf("index embedder fingerprint %q does not match configured embedder fingerprint %q; run `pituitary index --rebuild`", storedFingerprint, configuredFingerprint)
 	}
 	return nil
 }

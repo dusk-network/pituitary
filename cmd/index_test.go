@@ -230,7 +230,7 @@ provider = "fixture"
 	}
 }
 
-func TestRunIndexRejectsUnsupportedEmbedderProvider(t *testing.T) {
+func TestRunIndexRejectsOpenAICompatibleEmbedderWithoutEndpoint(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `
 [workspace]
@@ -264,8 +264,8 @@ path = "specs"
 	if !strings.Contains(stderr.String(), `pituitary index: invalid config:`) {
 		t.Fatalf("runIndex() stderr %q does not contain config-error prefix", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), `runtime.embedder.provider: unsupported provider "openai_compatible"`) {
-		t.Fatalf("runIndex() stderr %q does not contain unsupported-provider detail", stderr.String())
+	if !strings.Contains(stderr.String(), `runtime.embedder.endpoint: value is required for provider "openai_compatible"`) {
+		t.Fatalf("runIndex() stderr %q does not contain missing-endpoint detail", stderr.String())
 	}
 }
 
