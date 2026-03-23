@@ -174,7 +174,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
-| `status` | Report whether the configured index exists and basic spec/doc/chunk counts |
+| `status [--check-runtime all]` | Report index counts and optionally probe embedder and analysis runtime readiness |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
@@ -283,6 +283,13 @@ timeout_ms = 30000
 max_retries = 1
 ```
 
+Before a long-running rebuild or search against a local model server, probe the configured embedder directly:
+
+```sh
+pituitary status --check-runtime embedder
+pituitary status --check-runtime embedder --format json
+```
+
 For Nomic-compatible models such as `nomic-embed-text-v1.5`, Pituitary automatically applies the required `search_document:` and `search_query:` prefixes when calling the embeddings endpoint.
 
 Example local analysis setup against LM Studio:
@@ -295,6 +302,14 @@ endpoint = "http://100.92.91.40:1234/v1"
 timeout_ms = 30000
 max_retries = 1
 ```
+
+Before `compare-specs`, `check-doc-drift`, or `review-spec`, probe both runtime surfaces:
+
+```sh
+pituitary status --check-runtime all
+```
+
+`--check-runtime` accepts `embedder`, `analysis`, or `all`. The probe is intentionally lightweight: it verifies endpoint reachability and model availability without rebuilding the index or running a full analysis command.
 
 ## Architecture
 

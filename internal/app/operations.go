@@ -56,7 +56,7 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 		case index.IsMissingIndex(err):
 			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeInternalError, err.Error(), 2)
 		}
@@ -80,7 +80,7 @@ func CheckOverlap(ctx context.Context, configPath string, request analysis.Overl
 		case analysis.IsNotFound(err):
 			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -104,7 +104,7 @@ func CompareSpecs(ctx context.Context, configPath string, request analysis.Compa
 		case analysis.IsNotFound(err):
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -150,7 +150,7 @@ func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocD
 		case analysis.IsNotFound(err):
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -172,7 +172,7 @@ func CheckCompliance(ctx context.Context, configPath string, request analysis.Co
 		case index.IsMissingIndex(err):
 			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -196,7 +196,7 @@ func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewR
 		case analysis.IsNotFound(err):
 			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeNotFound, err.Error(), 2)
 		case index.IsDependencyUnavailable(err):
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
+			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -243,7 +243,7 @@ func missingIndexMessage(err error) string {
 	return fmt.Sprintf("index %s does not exist; run `pituitary index --rebuild`", path)
 }
 
-func improveDependencyUnavailableMessage(cfg *config.Config, err error) string {
+func FormatDependencyUnavailableMessage(cfg *config.Config, err error) string {
 	message := strings.TrimSpace(err.Error())
 	runtimeName, provider, ok := dependencyUnavailableRuntimeContext(cfg, err, message)
 	if !ok {

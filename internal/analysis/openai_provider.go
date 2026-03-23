@@ -21,6 +21,7 @@ import (
 )
 
 type qualitativeAnalyzer interface {
+	Probe(ctx context.Context) error
 	Compare(ctx context.Context, orderedRefs []string, specs map[string]specDocument, base Comparison) (Comparison, error)
 	RefineDocDrift(ctx context.Context, doc docDocument, specs map[string]specDocument, item DriftItem, remediation *DocRemediationItem) (*DriftItem, *DocRemediationItem, error)
 }
@@ -105,6 +106,7 @@ type analysisSectionPrompt struct {
 }
 
 const (
+	openAICompatibleProbeSystemPrompt    = "You are Pituitary's runtime probe. Return only one JSON object with key ok set to true."
 	openAICompatibleCompareSystemPrompt  = "You are Pituitary's compare-specs adjudicator. Use only the provided spec evidence. Return only one JSON object with keys shared_scope, differences, tradeoffs, compatibility, and recommendation. Preserve spec refs exactly. Keep every difference items array concise and limited to concrete design choices from the provided specs."
 	openAICompatibleDocDriftSystemPrompt = "You are Pituitary's doc-drift adjudicator. Use only the provided deterministic findings and cited spec/doc evidence. Return only one JSON object with keys findings and suggestions. Do not invent new finding codes or spec refs. Findings must correspond to the provided deterministic findings, and suggestions must stay actionable and bounded to the same contradictions."
 	analysisPromptSectionLimit           = 6
@@ -149,6 +151,32 @@ func newOpenAICompatibleAnalysisProvider(provider config.RuntimeProvider) (quali
 		maxRetries: provider.MaxRetries,
 		client:     client,
 	}, nil
+}
+
+func ProbeProviderContext(ctx context.Context, provider config.RuntimeProvider) error {
+	analyzer, err := newQualitativeAnalyzer(provider)
+	if err != nil {
+		return err
+	}
+	if analyzer == nil {
+		return nil
+	}
+	return analyzer.Probe(ctx)
+}
+
+func (p *openAICompatibleAnalysisProvider) Probe(ctx context.Context) error {
+	var response struct {
+		OK bool `json:"ok"`
+	}
+	if err := p.completeJSON(ctx, openAICompatibleProbeSystemPrompt, map[string]any{
+		"command": "runtime-probe",
+	}, &response); err != nil {
+		return err
+	}
+	if !response.OK {
+		return analysisDependencyUnavailable("%s probe returned ok=false", openAICompatibleAnalysisRuntime)
+	}
+	return nil
 }
 
 func (p *openAICompatibleAnalysisProvider) Compare(ctx context.Context, orderedRefs []string, specs map[string]specDocument, base Comparison) (Comparison, error) {

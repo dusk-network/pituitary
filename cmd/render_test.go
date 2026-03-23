@@ -7,6 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/runtimeprobe"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -78,6 +79,51 @@ func TestRenderExplainFileResultIncludesInference(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderExplainFileResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
+func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderStatusResult(&stdout, &statusResult{
+		ConfigPath:  "/tmp/repo/pituitary.toml",
+		IndexPath:   "/tmp/repo/.pituitary/pituitary.db",
+		IndexExists: true,
+		SpecCount:   3,
+		DocCount:    2,
+		ChunkCount:  17,
+		Runtime: &runtimeprobe.Result{
+			Scope: "all",
+			Checks: []runtimeprobe.Check{
+				{
+					Name:     "runtime.embedder",
+					Provider: "openai_compatible",
+					Model:    "pituitary-embed",
+					Endpoint: "http://localhost:1234/v1",
+					Status:   "ready",
+				},
+				{
+					Name:     "runtime.analysis",
+					Provider: "disabled",
+					Status:   "disabled",
+					Message:  "runtime.analysis is disabled in config",
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"index: present",
+		"runtime probe: all",
+		"runtime: runtime.embedder | ready | provider: openai_compatible | model: pituitary-embed | endpoint: http://localhost:1234/v1",
+		"runtime: runtime.analysis | disabled | provider: disabled",
+		"runtime note: runtime.analysis is disabled in config",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderStatusResult() output %q does not contain %q", output, want)
 		}
 	}
 }

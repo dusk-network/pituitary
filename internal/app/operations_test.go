@@ -122,7 +122,7 @@ func TestImproveDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testi
 		},
 	}
 
-	message := improveDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
+	message := FormatDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
 		Message: "missing API key for runtime.embedder",
 	})
 	if !strings.Contains(message, "OPENAI_API_KEY") {
@@ -140,7 +140,7 @@ func TestImproveDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *test
 		},
 	}
 
-	message := improveDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
+	message := FormatDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
 		Message: "missing API key for runtime.analysis",
 	})
 	if !strings.Contains(message, "PITUITARY_ANALYSIS_KEY") {
