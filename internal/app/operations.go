@@ -103,6 +103,8 @@ func CompareSpecs(ctx context.Context, configPath string, request analysis.Compa
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeNotFound, err.Error(), 2)
+		case index.IsDependencyUnavailable(err):
+			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeValidationError, err.Error(), 2)
 		}
@@ -147,6 +149,8 @@ func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocD
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeConfigError, missingIndexMessage(err), 2)
 		case analysis.IsNotFound(err):
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeNotFound, err.Error(), 2)
+		case index.IsDependencyUnavailable(err):
+			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeDependencyUnavailable, improveDependencyUnavailableMessage(cfg, err), 3)
 		default:
 			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeValidationError, err.Error(), 2)
 		}

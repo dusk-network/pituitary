@@ -516,8 +516,79 @@ path = "specs"
 	if !strings.Contains(err.Error(), `runtime.analysis.provider: unsupported provider "anthropic"`) {
 		t.Fatalf("Load() error = %q, want analysis provider detail", err)
 	}
-	if !strings.Contains(err.Error(), `supports only "disabled"`) {
-		t.Fatalf("Load() error = %q, want bootstrap support detail", err)
+	if !strings.Contains(err.Error(), `supported providers: "disabled", "openai_compatible"`) {
+		t.Fatalf("Load() error = %q, want provider list", err)
+	}
+}
+
+func TestLoadAcceptsOpenAIAnalysisProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 5000
+max_retries = 1
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Runtime.Analysis.Provider, RuntimeProviderOpenAI; got != want {
+		t.Fatalf("runtime.analysis.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.Model, "pituitary-analysis"; got != want {
+		t.Fatalf("runtime.analysis.model = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.Endpoint, "http://127.0.0.1:1234/v1"; got != want {
+		t.Fatalf("runtime.analysis.endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsOpenAIAnalysisProviderWithoutEndpoint(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want runtime validation error")
+	}
+	if !strings.Contains(err.Error(), `runtime.analysis.endpoint: value is required for provider "openai_compatible"`) {
+		t.Fatalf("Load() error = %q, want missing analysis endpoint detail", err)
 	}
 }
 

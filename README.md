@@ -248,7 +248,7 @@ Add to your MCP client config (e.g., Claude Code `settings.json`):
 Pituitary's current bootstrap runtime is intentionally narrow and deterministic:
 
 - **Embedder** — `fixture` by default, with optional `openai_compatible` support for real embeddings.
-- **Analysis** — `disabled` only. The shipped analysis commands are deterministic and do not call an external qualitative-analysis provider yet.
+- **Analysis** — `disabled` by default, with optional `openai_compatible` support for bounded qualitative adjudication on shortlisted context.
 
 The runtime blocks are optional. If omitted, Pituitary defaults to:
 
@@ -261,14 +261,16 @@ model = "fixture-8d"
 provider = "disabled"
 ```
 
-For `fixture`, `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain inert bootstrap fields. For `openai_compatible`, Pituitary uses them for the embeddings API call path.
+For `fixture` embedder mode and `disabled` analysis mode, `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain inert. For `openai_compatible`, Pituitary uses them for the configured HTTP runtime call path.
 
 This means the repo still works out of the box with no model credentials. Today:
 
 - `runtime.embedder.provider` supports `fixture` and `openai_compatible`
-- `runtime.analysis.provider` supports only `disabled`
+- `runtime.analysis.provider` supports `disabled` and `openai_compatible`
 
 For `openai_compatible` embeddings, `model` and `endpoint` are required. `api_key_env` is optional so local servers such as LM Studio can work without a token. Pituitary stores an embedder fingerprint in the index and requires `pituitary index --rebuild` when the configured embedder changes.
+
+For `openai_compatible` analysis, `model` and `endpoint` are also required. The first provider-backed analysis slice keeps retrieval deterministic, then uses the model only on bounded shortlisted context for `compare-specs` and `check-doc-drift`; `review-spec` inherits that automatically because it composes both.
 
 Example local embedding setup against LM Studio:
 
@@ -283,13 +285,24 @@ max_retries = 1
 
 For Nomic-compatible models such as `nomic-embed-text-v1.5`, Pituitary automatically applies the required `search_document:` and `search_query:` prefixes when calling the embeddings endpoint.
 
+Example local analysis setup against LM Studio:
+
+```toml
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+endpoint = "http://100.92.91.40:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+```
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design, including storage schema, tool design, data flow diagrams, and the implementation roadmap.
 
 Key design decisions:
 
-- **Deterministic bootstrap today.** Retrieval and the shipped analysis commands run without an external LLM. Richer provider-backed runtime integration is deferred until the runtime contract is implemented end to end.
+- **Deterministic retrieval first.** Retrieval and indexing stay deterministic. Optional provider-backed adjudication is layered on top of already-shortlisted context instead of replacing retrieval.
 - **Tools-only, no embedded agent.** Pituitary exposes discrete tools, not an autonomous agent. Orchestration is the caller's responsibility (your editor, CI, or a wrapper script).
 - **Single file storage.** All state lives in one SQLite database (`pituitary.db`). Atomic rebuild via staging DB + swap ensures consistency.
 

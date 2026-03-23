@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/index"
@@ -130,5 +131,86 @@ func TestReviewSpecSurfacesStaleNamedArtifacts(t *testing.T) {
 
 	if result.DocRemediation == nil || len(result.DocRemediation.Items) != 1 || result.DocRemediation.Items[0].DocRef != "doc://guides/runtime-cache" {
 		t.Fatalf("doc_remediation = %+v, want runtime-cache remediation", result.DocRemediation)
+	}
+}
+
+func TestReviewSpecUsesAnalysisProviderForComparisonAndDocDrift(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	configureOpenAIAnalysisProvider(t, cfg, func(t *testing.T, request openAICompatibleChatRequest) string {
+		t.Helper()
+		switch request.Messages[0].Content {
+		case openAICompatibleCompareSystemPrompt:
+			return `{
+				"tradeoffs": [{"topic": "migration", "summary": "SPEC-042 modernizes the accepted path while preserving the same governed scope as SPEC-008."}],
+				"compatibility": {"level": "superseding", "summary": "SPEC-042 replaces SPEC-008 for the same API control surface."},
+				"recommendation": "prefer SPEC-042 after provider-backed review because it is the accepted successor"
+			}`
+		case openAICompatibleDocDriftSystemPrompt:
+			var prompt docDriftAnalysisPrompt
+			if err := json.Unmarshal([]byte(request.Messages[1].Content), &prompt); err != nil {
+				t.Fatalf("unmarshal prompt: %v", err)
+			}
+			if len(prompt.DeterministicFindings) == 0 {
+				t.Fatal("deterministic_findings is empty")
+			}
+			first := prompt.DeterministicFindings[0]
+			return `{
+				"findings": [
+					{
+						"spec_ref": "` + first.SpecRef + `",
+						"artifact": "` + first.Artifact + `",
+						"code": "` + first.Code + `",
+						"message": "provider-backed review confirmed the guide is stale against the accepted rate-limit spec"
+					}
+				],
+				"suggestions": [
+					{
+						"spec_ref": "` + first.SpecRef + `",
+						"code": "` + first.Code + `",
+						"summary": "Refresh the guide so it matches the accepted per-tenant rate-limit behavior.",
+						"suggested_edit": {
+							"action": "replace_statement",
+							"note": "Rewrite the stale sentence instead of layering caveats around it."
+						}
+					}
+				]
+			}`
+		default:
+			t.Fatalf("unexpected system prompt %q", request.Messages[0].Content)
+			return ""
+		}
+	})
+
+	result, err := ReviewSpec(cfg, ReviewRequest{SpecRef: "SPEC-042"})
+	if err != nil {
+		t.Fatalf("ReviewSpec() error = %v", err)
+	}
+	if result.Comparison == nil {
+		t.Fatalf("comparison = %+v, want composed comparison", result.Comparison)
+	}
+	if got, want := result.Comparison.Comparison.Recommendation, "prefer SPEC-042 after provider-backed review because it is the accepted successor"; got != want {
+		t.Fatalf("recommendation = %q, want %q", got, want)
+	}
+	if result.DocDrift == nil || len(result.DocDrift.DriftItems) != 1 {
+		t.Fatalf("doc_drift = %+v, want one drift item", result.DocDrift)
+	}
+	if got, want := result.DocDrift.DriftItems[0].Findings[0].Message, "provider-backed review confirmed the guide is stale against the accepted rate-limit spec"; got != want {
+		t.Fatalf("finding message = %q, want %q", got, want)
+	}
+	if result.DocRemediation == nil || len(result.DocRemediation.Items) != 1 {
+		t.Fatalf("doc_remediation = %+v, want one remediation item", result.DocRemediation)
+	}
+	if got, want := result.DocRemediation.Items[0].Suggestions[0].Summary, "Refresh the guide so it matches the accepted per-tenant rate-limit behavior."; got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
 	}
 }

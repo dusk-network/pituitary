@@ -145,6 +145,11 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	}
 	defer repo.Close()
 
+	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	if err != nil {
+		return nil, err
+	}
+
 	selectedDocs, err := repo.loadDocs(scope.DocRefs)
 	if err != nil {
 		return nil, err
@@ -166,10 +171,10 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 
-	return buildDocDriftResult(scope, selectedDocs, specs), nil
+	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs)
 }
 
-func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument) *DocDriftResult {
+func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument) (*DocDriftResult, error) {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
 	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
 	relevantSpecRefs := make([]string, 0, len(specs))
@@ -180,6 +185,22 @@ func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocumen
 		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
 		if item == nil {
 			continue
+		}
+		if analyzer != nil {
+			relevantByRef := make(map[string]specDocument, len(relevant))
+			for _, spec := range relevant {
+				relevantByRef[spec.Record.Ref] = spec
+			}
+			refinedItem, refinedRemediation, err := analyzer.RefineDocDrift(ctx, doc, relevantByRef, *item, remediation)
+			if err != nil {
+				return nil, err
+			}
+			if refinedItem != nil {
+				item = refinedItem
+			}
+			if refinedRemediation != nil {
+				remediation = refinedRemediation
+			}
 		}
 		driftItems = append(driftItems, *item)
 		if remediation != nil {
@@ -202,7 +223,7 @@ func buildDocDriftResult(scope DocDriftScope, selectedDocs map[string]docDocumen
 			Items: remediationItems,
 		},
 		Warnings: buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
-	}
+	}, nil
 }
 
 func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {

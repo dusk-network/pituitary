@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -145,6 +146,99 @@ func TestCheckDocDriftFlagsStaleNamedArtifacts(t *testing.T) {
 
 	if result.Remediation == nil || len(result.Remediation.Items) != 1 || result.Remediation.Items[0].DocRef != "doc://guides/runtime-cache" {
 		t.Fatalf("remediation = %+v, want runtime-cache remediation only", result.Remediation)
+	}
+}
+
+func TestCheckDocDriftUsesAnalysisProviderWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	cfg := writeArtifactContractWorkspace(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	configureOpenAIAnalysisProvider(t, cfg, func(t *testing.T, request openAICompatibleChatRequest) string {
+		t.Helper()
+		var prompt docDriftAnalysisPrompt
+		if err := json.Unmarshal([]byte(request.Messages[1].Content), &prompt); err != nil {
+			t.Fatalf("unmarshal prompt: %v", err)
+		}
+		if got, want := prompt.Command, "check-doc-drift"; got != want {
+			t.Fatalf("command = %q, want %q", got, want)
+		}
+		if got, want := prompt.Doc.Ref, "doc://guides/runtime-cache"; got != want {
+			t.Fatalf("doc.ref = %q, want %q", got, want)
+		}
+
+		return `{
+			"findings": [
+				{
+					"spec_ref": "SPEC-200",
+					"artifact": "work_queue.json",
+					"code": "artifact_runtime_input_mismatch",
+					"message": "runtime-cache guide still presents work_queue.json as the canonical startup input",
+					"expected": "not a canonical runtime input",
+					"observed": "documented as the canonical startup input"
+				}
+			],
+			"suggestions": [
+				{
+					"spec_ref": "SPEC-200",
+					"code": "artifact_runtime_input_mismatch",
+					"summary": "Rewrite the runtime-cache guide so work_queue.json is clearly described as a derived cache, not a required runtime input.",
+					"evidence": {
+						"expected": "not a canonical runtime input",
+						"observed": "documented as the canonical startup input"
+					},
+					"suggested_edit": {
+						"action": "replace_statement",
+						"note": "Point readers at state.db as the canonical store and downgrade work_queue.json to optional cache status."
+					}
+				}
+			]
+		}`
+	})
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+
+	var stale *DriftItem
+	for i := range result.DriftItems {
+		if result.DriftItems[i].DocRef == "doc://guides/runtime-cache" {
+			stale = &result.DriftItems[i]
+			break
+		}
+	}
+	if stale == nil {
+		t.Fatalf("drift_items = %+v, want runtime-cache drift", result.DriftItems)
+	}
+
+	var refined bool
+	for _, finding := range stale.Findings {
+		if finding.Artifact == "work_queue.json" && finding.Code == "artifact_runtime_input_mismatch" && finding.Message == "runtime-cache guide still presents work_queue.json as the canonical startup input" {
+			refined = true
+			break
+		}
+	}
+	if !refined {
+		t.Fatalf("findings = %+v, want provider-refined work_queue.json message", stale.Findings)
+	}
+
+	if result.Remediation == nil || len(result.Remediation.Items) != 1 {
+		t.Fatalf("remediation = %+v, want one remediation item", result.Remediation)
+	}
+	suggestion := result.Remediation.Items[0].Suggestions[0]
+	if got, want := suggestion.Summary, "Rewrite the runtime-cache guide so work_queue.json is clearly described as a derived cache, not a required runtime input."; got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+	if got, want := suggestion.SuggestedEdit.Note, "Point readers at state.db as the canonical store and downgrade work_queue.json to optional cache status."; got != want {
+		t.Fatalf("suggested_edit.note = %q, want %q", got, want)
 	}
 }
 
