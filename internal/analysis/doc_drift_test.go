@@ -67,7 +67,7 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 		t.Fatalf("top remediation suggestion = %+v, want evidence and suggested edit", top)
 	}
 
-	var foundGuideAssessment bool
+	var foundGuideAssessment, foundRunbookAssessment bool
 	for _, assessment := range result.Assessments {
 		switch assessment.DocRef {
 		case "doc://guides/api-rate-limits":
@@ -78,10 +78,21 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
 				t.Fatalf("guide assessment = %+v, want rationale, evidence, and confidence", assessment)
 			}
+		case "doc://runbooks/rate-limit-rollout":
+			foundRunbookAssessment = true
+			if assessment.Status != "aligned" {
+				t.Fatalf("runbook assessment = %+v, want aligned status", assessment)
+			}
+			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
+				t.Fatalf("runbook assessment = %+v, want rationale, evidence, and confidence", assessment)
+			}
 		}
 	}
 	if !foundGuideAssessment {
 		t.Fatalf("assessments = %+v, want guide assessment", result.Assessments)
+	}
+	if !foundRunbookAssessment {
+		t.Fatalf("assessments = %+v, want aligned runbook assessment", result.Assessments)
 	}
 }
 
@@ -111,6 +122,18 @@ func TestCheckDocDriftSupportsTargetedDocRefs(t *testing.T) {
 	}
 	if len(result.DriftItems) != 1 || result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("drift_items = %+v, want only guide drift", result.DriftItems)
+	}
+	var foundAligned bool
+	for _, assessment := range result.Assessments {
+		if assessment.DocRef == "doc://runbooks/rate-limit-rollout" {
+			foundAligned = true
+			if got, want := assessment.Status, "aligned"; got != want {
+				t.Fatalf("assessment.status = %q, want %q", got, want)
+			}
+		}
+	}
+	if !foundAligned {
+		t.Fatalf("assessments = %+v, want aligned runbook assessment", result.Assessments)
 	}
 }
 

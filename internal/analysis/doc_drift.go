@@ -157,6 +157,14 @@ type artifactConstraint struct {
 	Expected string
 }
 
+type alignedAssessmentCandidate struct {
+	spec            *specDocument
+	evidence        *DriftEvidence
+	score           float64
+	docMentionsSpec bool
+	headingOverlap  bool
+}
+
 // CheckDocDrift detects contradictory docs within a target scope.
 func CheckDocDrift(cfg *config.Config, request DocDriftRequest) (*DocDriftResult, error) {
 	return CheckDocDriftContext(context.Background(), cfg, request)
@@ -205,28 +213,34 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 
-	allSpecs, err := repo.loadAllSpecs()
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, allSpecs)
+	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, repo.loadAllSpecs)
 }
 
-func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, allSpecs map[string]specDocument) (*DocDriftResult, error) {
+func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) (*DocDriftResult, error) {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
 	assessments := make([]DocDriftAssessment, 0, len(selectedDocs))
 	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
 	relevantSpecRefs := make([]string, 0, len(specs))
 	warningSpecs := make([]specDocument, 0, len(specs))
+	inferenceSpecs := specs
+	var allSpecs map[string]specDocument
+	ensureAllSpecs := func() (map[string]specDocument, error) {
+		if allSpecs != nil || loadAllSpecs == nil {
+			return allSpecs, nil
+		}
+		loaded, err := loadAllSpecs()
+		if err != nil {
+			return nil, err
+		}
+		allSpecs = loaded
+		inferenceSpecs = loaded
+		return allSpecs, nil
+	}
 	for _, ref := range sortedDocRefs(selectedDocs) {
 		doc := selectedDocs[ref]
 		relevant := relevantAcceptedSpecs(doc, specs)
 		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
-		if item == nil {
-			continue
-		}
-		if analyzer != nil {
+		if item != nil && analyzer != nil {
 			relevantByRef := make(map[string]specDocument, len(relevant))
 			for _, spec := range relevant {
 				relevantByRef[spec.Record.Ref] = spec
@@ -242,11 +256,11 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 				remediation = refinedRemediation
 			}
 		}
-		if assessment := assessDocDrift(doc, relevant, allSpecs, item); assessment != nil {
+		if assessment := assessDocDrift(doc, relevant, item); assessment != nil {
 			assessments = append(assessments, *assessment)
 			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
 			for _, specRef := range assessment.SpecRefs {
-				if spec, ok := allSpecs[specRef]; ok {
+				if spec, ok := specs[specRef]; ok {
 					warningSpecs = append(warningSpecs, spec)
 				}
 			}
@@ -267,6 +281,10 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 	}
 	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
 	if len(driftItems) == 0 && len(assessments) == 0 {
+		allSpecs, err := ensureAllSpecs()
+		if err != nil {
+			return nil, err
+		}
 		for _, ref := range sortedDocRefs(selectedDocs) {
 			assessment := possibleDriftAssessment(selectedDocs[ref], allSpecs)
 			if assessment == nil {
@@ -287,7 +305,7 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		Scope:          scope,
 		DriftItems:     driftItems,
 		Assessments:    assessments,
-		SpecInferences: buildSpecInferences(allSpecs, relevantSpecRefs),
+		SpecInferences: buildSpecInferences(inferenceSpecs, relevantSpecRefs),
 		Remediation: &DocRemediationResult{
 			Items: remediationItems,
 		},
@@ -521,7 +539,7 @@ func enrichDriftFinding(doc docDocument, spec specDocument, finding DriftFinding
 	return finding
 }
 
-func assessDocDrift(doc docDocument, relevant []specDocument, specs map[string]specDocument, item *DriftItem) *DocDriftAssessment {
+func assessDocDrift(doc docDocument, relevant []specDocument, item *DriftItem) *DocDriftAssessment {
 	if item != nil {
 		assessment := &DocDriftAssessment{
 			DocRef:    item.DocRef,
@@ -546,7 +564,20 @@ func assessDocDrift(doc docDocument, relevant []specDocument, specs map[string]s
 	if len(relevant) == 0 {
 		return nil
 	}
-	return nil
+	candidate := bestAlignedAssessmentCandidateForDocs(doc, relevant)
+	if !shouldEmitAlignedAssessment(candidate) {
+		return nil
+	}
+	return &DocDriftAssessment{
+		DocRef:     doc.Record.Ref,
+		Title:      doc.Record.Title,
+		SourceRef:  doc.Record.SourceRef,
+		Status:     "aligned",
+		SpecRefs:   []string{candidate.spec.Record.Ref},
+		Rationale:  fmt.Sprintf("matched accepted spec %s and found no deterministic contradiction in the reviewed sections", candidate.spec.Record.Ref),
+		Evidence:   candidate.evidence,
+		Confidence: &DriftConfidence{Level: alignmentConfidenceLevel(candidate.score), Score: roundScore(candidate.score), Basis: "nearest accepted spec and doc sections agree semantically, but no explicit contradiction was detected"},
+	}
 }
 
 func possibleDriftAssessment(doc docDocument, specs map[string]specDocument) *DocDriftAssessment {
@@ -1344,24 +1375,44 @@ func keywordDensity(text string, keywords []string) float64 {
 }
 
 func bestAlignedAssessmentEvidence(doc docDocument, relevant []specDocument) (*specDocument, *DriftEvidence, float64) {
-	var (
-		bestSpec     *specDocument
-		bestEvidence *DriftEvidence
-		bestScore    float64
-	)
+	candidate := bestAlignedAssessmentCandidateForDocs(doc, relevant)
+	if candidate == nil {
+		return nil, nil, 0
+	}
+	return candidate.spec, candidate.evidence, candidate.score
+}
+
+func bestAlignedAssessmentCandidateForDocs(doc docDocument, relevant []specDocument) *alignedAssessmentCandidate {
+	docText := strings.ToLower(joinDocumentText(doc.Sections))
+	var best *alignedAssessmentCandidate
 	for i := range relevant {
 		spec := &relevant[i]
-		evidence, score := bestAlignedEvidence(doc, *spec)
-		if evidence == nil {
-			continue
-		}
-		if bestSpec == nil || score > bestScore {
-			bestSpec = spec
-			bestEvidence = evidence
-			bestScore = score
+		for j := range doc.Sections {
+			docSection := &doc.Sections[j]
+			for k := range spec.Sections {
+				specSection := &spec.Sections[k]
+				score := sectionAssessmentScore(*docSection, *specSection)
+				if best != nil && score <= best.score {
+					continue
+				}
+				best = &alignedAssessmentCandidate{
+					spec: spec,
+					evidence: &DriftEvidence{
+						SpecRef:     spec.Record.Ref,
+						SpecTitle:   spec.Record.Title,
+						SpecSection: defaultString(stringsTrimSpace(specSection.Heading), "(body)"),
+						SpecExcerpt: defaultString(sectionExcerpt(*specSection), stringsTrimSpace(spec.Record.Title)),
+						DocSection:  defaultString(stringsTrimSpace(docSection.Heading), "(body)"),
+						DocExcerpt:  sectionExcerpt(*docSection),
+					},
+					score:           score,
+					docMentionsSpec: strings.Contains(docText, strings.ToLower(spec.Record.Ref)),
+					headingOverlap:  lexicalOverlapScore(docSection.Heading, specSection.Heading) >= 0.8,
+				}
+			}
 		}
 	}
-	return bestSpec, bestEvidence, bestScore
+	return best
 }
 
 func bestAlignedEvidence(doc docDocument, spec specDocument) (*DriftEvidence, float64) {
@@ -1393,6 +1444,16 @@ func bestAlignedEvidence(doc docDocument, spec specDocument) (*DriftEvidence, fl
 		DocSection:  defaultString(stringsTrimSpace(bestDoc.Heading), "(body)"),
 		DocExcerpt:  sectionExcerpt(*bestDoc),
 	}, bestScore
+}
+
+func shouldEmitAlignedAssessment(candidate *alignedAssessmentCandidate) bool {
+	if candidate == nil {
+		return false
+	}
+	if candidate.score < 0.7 {
+		return false
+	}
+	return candidate.docMentionsSpec || candidate.headingOverlap
 }
 
 func alignmentConfidenceLevel(score float64) string {
