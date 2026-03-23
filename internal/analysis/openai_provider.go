@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ type openAICompatibleAnalysisProvider struct {
 type openAICompatibleChatRequest struct {
 	Model       string                        `json:"model"`
 	Messages    []openAICompatibleChatMessage `json:"messages"`
-	Temperature float64                       `json:"temperature,omitempty"`
+	Temperature float64                       `json:"temperature"`
 }
 
 type openAICompatibleChatMessage struct {
@@ -251,11 +252,15 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 				Message: fmt.Sprintf("call runtime.analysis endpoint %s: %v", p.endpoint, err),
 			}
 			if shouldRetryOpenAICompatibleAnalysisRequest(err, 0) && attempt < p.maxRetries {
+				if waitErr := waitBeforeAnalysisRetry(ctx, attempt, 0); waitErr != nil {
+					return "", waitErr
+				}
 				continue
 			}
 			return "", lastErr
 		}
 
+		retryAfter := retryAfterDuration(resp.Header.Get("Retry-After"))
 		payload, err := readOpenAICompatibleChatResponse(resp)
 		resp.Body.Close()
 		if err == nil {
@@ -263,6 +268,9 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 		}
 		lastErr = err
 		if shouldRetryOpenAICompatibleAnalysisRequest(err, resp.StatusCode) && attempt < p.maxRetries {
+			if waitErr := waitBeforeAnalysisRetry(ctx, attempt, retryAfter); waitErr != nil {
+				return "", waitErr
+			}
 			continue
 		}
 		return "", err
@@ -362,7 +370,7 @@ func normalizeJSONResponseText(text string) string {
 		trimmed = strings.TrimSuffix(trimmed, "```")
 		trimmed = strings.TrimSpace(trimmed)
 	}
-	if json.Valid([]byte(trimmed)) {
+	if looksLikeJSONObject(trimmed) && json.Valid([]byte(trimmed)) {
 		return trimmed
 	}
 
@@ -370,7 +378,7 @@ func normalizeJSONResponseText(text string) string {
 	end := strings.LastIndex(trimmed, "}")
 	if start >= 0 && end > start {
 		candidate := strings.TrimSpace(trimmed[start : end+1])
-		if json.Valid([]byte(candidate)) {
+		if looksLikeJSONObject(candidate) && json.Valid([]byte(candidate)) {
 			return candidate
 		}
 	}
@@ -468,9 +476,81 @@ func truncateForAnalysisPrompt(text string, limit int) string {
 		return text
 	}
 	if limit <= 3 {
-		return text[:limit]
+		return safePromptPrefix(text, limit)
 	}
-	return text[:limit-3] + "..."
+	prefix := safePromptPrefix(text, limit-3)
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "..."
+}
+
+func safePromptPrefix(text string, byteLimit int) string {
+	if byteLimit <= 0 {
+		return ""
+	}
+	if len(text) <= byteLimit {
+		return text
+	}
+
+	lastSafe := 0
+	for index := range text {
+		if index > byteLimit {
+			break
+		}
+		lastSafe = index
+	}
+	if lastSafe == 0 && byteLimit > 0 {
+		return text[:0]
+	}
+	return text[:lastSafe]
+}
+
+func looksLikeJSONObject(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}")
+}
+
+func retryAfterDuration(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if delay := time.Until(when); delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func waitBeforeAnalysisRetry(ctx context.Context, attempt int, retryAfter time.Duration) error {
+	delay := retryAfter
+	if delay <= 0 {
+		delay = 200 * time.Millisecond
+		for i := 0; i < attempt; i++ {
+			delay *= 2
+			if delay >= 2*time.Second {
+				delay = 2 * time.Second
+				break
+			}
+		}
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func normalizeProvidedComparison(base, provided Comparison, orderedRefs []string, specs map[string]specDocument) Comparison {
