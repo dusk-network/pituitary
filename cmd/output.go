@@ -111,6 +111,8 @@ func cliWarningsForResult(result any) []cliIssue {
 	switch typed := result.(type) {
 	case *analysis.AnalyzeImpactResult:
 		return warningsToCLIIssues(typed.Warnings)
+	case *analysis.TerminologyAuditResult:
+		return warningsToCLIIssues(typed.Warnings)
 	case *analysis.DocDriftResult:
 		return warningsToCLIIssues(typed.Warnings)
 	case *analysis.ReviewResult:

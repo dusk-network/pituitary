@@ -42,6 +42,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCompareResult(w, typed)
 	case *analysis.AnalyzeImpactResult:
 		renderAnalyzeImpactResult(w, typed)
+	case *analysis.TerminologyAuditResult:
+		renderTerminologyAuditResult(w, typed)
 	case *analysis.ComplianceResult:
 		renderComplianceResult(w, typed)
 	case *analysis.DocDriftResult:
@@ -408,6 +410,50 @@ func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis
 			fmt.Fprintf(w, " | %s", item.SectionHeading)
 		}
 		fmt.Fprintf(w, " | %s\n", item.Message)
+	}
+}
+
+func renderTerminologyAuditResult(w io.Writer, result *analysis.TerminologyAuditResult) {
+	fmt.Fprintf(w, "scope: %s\n", result.Scope.Mode)
+	if len(result.Scope.ArtifactKinds) > 0 {
+		fmt.Fprintf(w, "artifact kinds: %s\n", strings.Join(result.Scope.ArtifactKinds, ", "))
+	}
+	if result.Scope.SpecRef != "" {
+		fmt.Fprintf(w, "anchor spec: %s\n", result.Scope.SpecRef)
+	}
+	fmt.Fprintf(w, "terms: %s\n", strings.Join(result.Terms, ", "))
+	if len(result.CanonicalTerms) > 0 {
+		fmt.Fprintf(w, "canonical terms: %s\n", strings.Join(result.CanonicalTerms, ", "))
+	}
+	if len(result.AnchorSpecs) > 0 {
+		refs := make([]string, 0, len(result.AnchorSpecs))
+		for _, anchor := range result.AnchorSpecs {
+			refs = append(refs, anchor.Ref)
+		}
+		fmt.Fprintf(w, "evidence specs: %s\n", strings.Join(refs, ", "))
+	}
+	fmt.Fprintf(w, "findings: %d artifact(s)\n", len(result.Findings))
+	if len(result.Findings) == 0 {
+		return
+	}
+
+	for i, finding := range result.Findings {
+		fmt.Fprintf(w, "%d. %s | %s | %s | terms: %s\n", i+1, finding.Ref, finding.Kind, finding.Title, strings.Join(finding.Terms, ", "))
+		if finding.SourceRef != "" {
+			fmt.Fprintf(w, "   source: %s\n", finding.SourceRef)
+		}
+		for _, section := range finding.Sections {
+			fmt.Fprintf(w, "   - %s | terms: %s\n", section.Section, strings.Join(section.Terms, ", "))
+			if section.Excerpt != "" {
+				fmt.Fprintf(w, "     excerpt: %s\n", section.Excerpt)
+			}
+			if section.Evidence != nil {
+				fmt.Fprintf(w, "     evidence: %s | %s | %.3f\n", section.Evidence.SpecRef, section.Evidence.Section, section.Evidence.Score)
+				if section.Evidence.Excerpt != "" {
+					fmt.Fprintf(w, "     expected: %s\n", section.Evidence.Excerpt)
+				}
+			}
+		}
 	}
 }
 

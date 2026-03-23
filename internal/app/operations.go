@@ -135,6 +135,28 @@ func AnalyzeImpact(ctx context.Context, configPath string, request analysis.Anal
 	return success(request, result)
 }
 
+// CheckTerminology loads config, executes terminology analysis, and classifies failures.
+func CheckTerminology(ctx context.Context, configPath string, request analysis.TerminologyAuditRequest) Response[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult] {
+	cfg, issue := loadConfig(configPath)
+	if issue != nil {
+		return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+
+	result, err := analysis.CheckTerminologyContext(ctx, cfg, request)
+	if err != nil {
+		switch {
+		case index.IsMissingIndex(err):
+			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeConfigError, missingIndexMessage(err), 2)
+		case analysis.IsNotFound(err):
+			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeNotFound, err.Error(), 2)
+		default:
+			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeValidationError, err.Error(), 2)
+		}
+	}
+
+	return success(request, result)
+}
+
 // CheckDocDrift loads config, executes doc drift analysis, and classifies failures.
 func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocDriftRequest) Response[analysis.DocDriftRequest, analysis.DocDriftResult] {
 	cfg, issue := loadConfig(configPath)

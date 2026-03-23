@@ -165,6 +165,62 @@ func TestRenderCommandTableSearchSpecs(t *testing.T) {
 	}
 }
 
+func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderTerminologyAuditResult(&stdout, &analysis.TerminologyAuditResult{
+		Scope: analysis.TerminologyAuditScope{
+			Mode:          "spec_ref",
+			ArtifactKinds: []string{"doc", "spec"},
+			SpecRef:       "SPEC-LOCALITY",
+		},
+		Terms:          []string{"repo", "workflow"},
+		CanonicalTerms: []string{"locality", "continuity"},
+		AnchorSpecs: []analysis.TerminologyAnchorSpec{
+			{Ref: "SPEC-LOCALITY", Title: "Kernel Locality Contract", Status: "accepted"},
+		},
+		Findings: []analysis.TerminologyFinding{
+			{
+				Ref:       "doc://guides/repo-kernel",
+				Kind:      "doc",
+				Title:     "Repo Kernel Guide",
+				SourceRef: "docs/guides/repo-kernel.md",
+				Terms:     []string{"repo", "workflow"},
+				Sections: []analysis.TerminologySectionFinding{
+					{
+						Section: "Core Model",
+						Terms:   []string{"repo"},
+						Excerpt: "The kernel keeps workflow continuity in each repo.",
+						Evidence: &analysis.TerminologyEvidence{
+							SpecRef: "SPEC-LOCALITY",
+							Section: "Core Model",
+							Excerpt: "The kernel keeps continuity in clone-local state.",
+							Score:   0.812,
+						},
+					},
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"scope: spec_ref",
+		"artifact kinds: doc, spec",
+		"anchor spec: SPEC-LOCALITY",
+		"terms: repo, workflow",
+		"canonical terms: locality, continuity",
+		"evidence specs: SPEC-LOCALITY",
+		"doc://guides/repo-kernel | doc | Repo Kernel Guide | terms: repo, workflow",
+		"evidence: SPEC-LOCALITY | Core Model | 0.812",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderTerminologyAuditResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	t.Parallel()
 

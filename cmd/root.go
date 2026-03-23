@@ -9,22 +9,23 @@ import (
 )
 
 var commands = map[string]string{
-	"canonicalize":     "promote an inferred contract into a spec bundle",
-	"discover":         "scan a repo and propose a local config",
-	"index":            "rebuild or validate the local Pituitary index",
-	"status":           "show current index status",
-	"version":          "show Pituitary and Go runtime versions",
-	"preview-sources":  "show which files each source will index",
-	"explain-file":     "explain how one file is treated by configured sources",
-	"search-specs":     "search spec sections semantically",
-	"check-overlap":    "find overlapping specs",
-	"compare-specs":    "compare design tradeoffs across specs",
-	"analyze-impact":   "report affected specs and docs",
-	"check-compliance": "check code paths and diffs against accepted specs",
-	"check-doc-drift":  "find docs that drift from specs",
-	"review-spec":      "run the common spec-review workflow",
-	"serve":            "run the optional MCP server transport",
-	"help":             "show available commands",
+	"canonicalize":      "promote an inferred contract into a spec bundle",
+	"discover":          "scan a repo and propose a local config",
+	"index":             "rebuild or validate the local Pituitary index",
+	"status":            "show current index status",
+	"version":           "show Pituitary and Go runtime versions",
+	"preview-sources":   "show which files each source will index",
+	"explain-file":      "explain how one file is treated by configured sources",
+	"search-specs":      "search spec sections semantically",
+	"check-overlap":     "find overlapping specs",
+	"compare-specs":     "compare design tradeoffs across specs",
+	"analyze-impact":    "report affected specs and docs",
+	"check-terminology": "audit terminology consistency after conceptual changes",
+	"check-compliance":  "check code paths and diffs against accepted specs",
+	"check-doc-drift":   "find docs that drift from specs",
+	"review-spec":       "run the common spec-review workflow",
+	"serve":             "run the optional MCP server transport",
+	"help":              "show available commands",
 }
 
 // Run executes the bootstrap CLI transport and returns the desired process exit code.
@@ -94,6 +95,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if name == "analyze-impact" {
 		return runAnalyzeImpactContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "check-terminology" {
+		return runCheckTerminologyContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "check-compliance" {
 		return runCheckComplianceContext(ctx, remainingArgs[1:], stdout, stderr)

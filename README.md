@@ -180,6 +180,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
 | `compare-specs --path specs/rate-limit-legacy/spec.toml --path specs/rate-limit-v2/spec.toml` | Side-by-side tradeoff analysis of two specs |
 | `analyze-impact --path specs/rate-limit-v2/body.md` | Trace which specs, code refs, and docs are affected by a change |
+| `check-terminology --term repo --canonical-term locality --spec-ref SPEC-042` | Audit docs and specs for displaced terminology after a conceptual migration |
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
@@ -215,6 +216,24 @@ All commands share a consistent JSON envelope:
 ```
 
 Pass `--format json` to any command to get this format, suitable for piping into `jq`, CI scripts, or other tools.
+
+### Example: terminology audit
+
+Use `check-terminology` when accepted specs have moved to new kernel terms and you need a hybrid lexical-plus-semantic audit across related docs and specs.
+
+```sh
+$ ./pituitary check-terminology \
+    --term repo \
+    --term workflow \
+    --canonical-term locality \
+    --canonical-term continuity \
+    --spec-ref SPEC-LOCALITY
+
+# Returns a report covering:
+#   - docs and specs that still use displaced terms
+#   - the specific sections and matched terms
+#   - canonical spec evidence that reflects the replacement language
+```
 
 ## MCP Server
 
@@ -325,7 +344,7 @@ Key design decisions:
 
 Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See the [GitHub issue queue](https://github.com/dusk-network/pituitary/issues) for active priorities and planned follow-up work.
 
-**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
+**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
 
 **Coming next:** incremental indexing, non-filesystem source adapters, CI vendor integrations.
 
