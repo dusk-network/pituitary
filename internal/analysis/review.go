@@ -49,6 +49,11 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	}
 	defer repo.Close()
 
+	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	if err != nil {
+		return nil, err
+	}
+
 	candidate, err := loadCandidate(repo, OverlapRequest{
 		SpecRef:    request.SpecRef,
 		SpecRecord: request.SpecRecord,
@@ -70,7 +75,10 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	var comparison *CompareResult
 	if len(overlap.Overlaps) > 0 {
 		primaryOverlapRef := overlap.Overlaps[0].Ref
-		comparison = buildCompareResult(candidate, []string{candidate.Record.Ref, primaryOverlapRef}, selectSpecs(overlapSpecs, []string{primaryOverlapRef}))
+		comparison, err = buildCompareResult(ctx, analyzer, candidate, []string{candidate.Record.Ref, primaryOverlapRef}, selectSpecs(overlapSpecs, []string{primaryOverlapRef}))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	impactSpecRefs, err := repo.impactedSpecRefs(candidate.Record)
@@ -107,7 +115,10 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 		if err != nil {
 			return nil, err
 		}
-		docDrift = buildDocDriftResult(DocDriftScope{Mode: "doc_refs", DocRefs: uniqueStrings(impactDocRefs)}, impactDocs, docDriftSpecs)
+		docDrift, err = buildDocDriftResult(ctx, analyzer, DocDriftScope{Mode: "doc_refs", DocRefs: uniqueStrings(impactDocRefs)}, impactDocs, docDriftSpecs)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	docRemediation := &DocRemediationResult{Items: nil}

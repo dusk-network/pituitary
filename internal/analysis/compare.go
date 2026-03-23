@@ -81,6 +81,11 @@ func CompareSpecsContext(ctx context.Context, cfg *config.Config, request Compar
 	}
 	defer repo.Close()
 
+	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	if err != nil {
+		return nil, err
+	}
+
 	var candidate *specDocument
 	orderedRefs := append([]string{}, refs...)
 	if request.SpecRecord != nil {
@@ -103,10 +108,10 @@ func CompareSpecsContext(ctx context.Context, cfg *config.Config, request Compar
 			return nil, newSpecRefNotFoundError(ref)
 		}
 	}
-	return buildCompareResult(candidate, orderedRefs, specs), nil
+	return buildCompareResult(ctx, analyzer, candidate, orderedRefs, specs)
 }
 
-func buildCompareResult(candidate *specDocument, orderedRefs []string, specs map[string]specDocument) *CompareResult {
+func buildCompareResult(ctx context.Context, analyzer qualitativeAnalyzer, candidate *specDocument, orderedRefs []string, specs map[string]specDocument) (*CompareResult, error) {
 	comparisonSpecs := copySpecDocuments(specs)
 	if candidate != nil {
 		comparisonSpecs[candidate.Record.Ref] = *candidate
@@ -122,7 +127,7 @@ func buildCompareResult(candidate *specDocument, orderedRefs []string, specs map
 		})
 	}
 
-	return &CompareResult{
+	result := &CompareResult{
 		SpecRefs:       orderedRefs,
 		SpecInferences: buildSpecInferences(comparisonSpecs, orderedRefs),
 		Comparison: Comparison{
@@ -133,6 +138,14 @@ func buildCompareResult(candidate *specDocument, orderedRefs []string, specs map
 			Recommendation: compareRecommendation(comparisonSpecs, orderedRefs),
 		},
 	}
+	if analyzer != nil {
+		refined, err := analyzer.Compare(ctx, orderedRefs, comparisonSpecs, result.Comparison)
+		if err != nil {
+			return nil, err
+		}
+		result.Comparison = refined
+	}
+	return result, nil
 }
 
 func normalizeCompareRefs(values []string) ([]string, error) {

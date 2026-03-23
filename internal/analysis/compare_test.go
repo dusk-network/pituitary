@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,6 +83,64 @@ func TestCompareSpecsSupportsDraftSpecRecord(t *testing.T) {
 	}
 	if result.Comparison.Recommendation == "" {
 		t.Fatal("draft comparison recommendation is empty")
+	}
+}
+
+func TestCompareSpecsUsesAnalysisProviderWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadCompareFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	configureOpenAIAnalysisProvider(t, cfg, func(t *testing.T, request openAICompatibleChatRequest) string {
+		t.Helper()
+		if got, want := request.Model, "pituitary-analysis"; got != want {
+			t.Fatalf("request.model = %q, want %q", got, want)
+		}
+		if len(request.Messages) != 2 {
+			t.Fatalf("messages = %d, want 2", len(request.Messages))
+		}
+
+		var prompt compareAnalysisPrompt
+		if err := json.Unmarshal([]byte(request.Messages[1].Content), &prompt); err != nil {
+			t.Fatalf("unmarshal prompt: %v", err)
+		}
+		if got, want := prompt.OrderedRefs, []string{"SPEC-008", "SPEC-042"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("ordered_refs = %v, want %v", got, want)
+		}
+
+		return `{
+			"shared_scope": ["domain:api", "code://src/api/middleware/ratelimiter.go"],
+			"differences": [
+				{"spec_ref": "SPEC-008", "title": "Per-API-Key Legacy Rate Limiting", "items": ["Uses a fixed window across all tenants"]},
+				{"spec_ref": "SPEC-042", "title": "Per-Tenant Rate Limiting for Public API Endpoints", "items": ["Adds tenant-scoped policy overrides"]}
+			],
+			"tradeoffs": [
+				{"topic": "migration", "summary": "SPEC-042 adds override flexibility but requires tenants to converge on the new policy surface."}
+			],
+			"compatibility": {
+				"level": "superseding",
+				"summary": "SPEC-042 is the accepted successor and should absorb any remaining SPEC-008 rollout work."
+			},
+			"recommendation": "prefer SPEC-042 after provider-backed adjudication because it preserves scope while updating the accepted control surface"
+		}`
+	})
+
+	result, err := CompareSpecs(cfg, CompareRequest{SpecRefs: []string{"SPEC-008", "SPEC-042"}})
+	if err != nil {
+		t.Fatalf("CompareSpecs() error = %v", err)
+	}
+	if got, want := result.Comparison.Recommendation, "prefer SPEC-042 after provider-backed adjudication because it preserves scope while updating the accepted control surface"; got != want {
+		t.Fatalf("recommendation = %q, want %q", got, want)
+	}
+	if len(result.Comparison.Tradeoffs) != 1 || result.Comparison.Tradeoffs[0].Topic != "migration" {
+		t.Fatalf("tradeoffs = %+v, want provider-backed migration tradeoff", result.Comparison.Tradeoffs)
 	}
 }
 

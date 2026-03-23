@@ -682,8 +682,34 @@ func validateRuntime(runtime Runtime) error {
 
 	if runtime.Analysis.Provider == "" {
 		errs.add("runtime.analysis.provider: value is required")
-	} else if runtime.Analysis.Provider != RuntimeProviderDisabled {
-		errs.add("runtime.analysis.provider: unsupported provider %q (the bootstrap currently supports only %q)", runtime.Analysis.Provider, RuntimeProviderDisabled)
+	} else {
+		switch runtime.Analysis.Provider {
+		case RuntimeProviderDisabled:
+		case RuntimeProviderOpenAI:
+			if runtime.Analysis.Model == "" {
+				errs.add("runtime.analysis.model: value is required for provider %q", runtime.Analysis.Provider)
+			}
+			if endpoint := strings.TrimSpace(runtime.Analysis.Endpoint); endpoint == "" {
+				errs.add("runtime.analysis.endpoint: value is required for provider %q", runtime.Analysis.Provider)
+			} else {
+				parsed, err := url.Parse(endpoint)
+				switch {
+				case err != nil:
+					errs.add("runtime.analysis.endpoint: invalid URL %q: %v", runtime.Analysis.Endpoint, err)
+				case !parsed.IsAbs() || parsed.Host == "":
+					errs.add("runtime.analysis.endpoint: %q must be an absolute URL", runtime.Analysis.Endpoint)
+				case parsed.Scheme != "http" && parsed.Scheme != "https":
+					errs.add("runtime.analysis.endpoint: %q must use http or https", runtime.Analysis.Endpoint)
+				}
+			}
+		default:
+			errs.add(
+				"runtime.analysis.provider: unsupported provider %q (supported providers: %q, %q)",
+				runtime.Analysis.Provider,
+				RuntimeProviderDisabled,
+				RuntimeProviderOpenAI,
+			)
+		}
 	}
 	if runtime.Analysis.TimeoutMS < 0 {
 		errs.add("runtime.analysis.timeout_ms: must be >= 0")
