@@ -173,6 +173,22 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
 	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
 	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
+	if result.Runtime != nil {
+		fmt.Fprintf(w, "runtime probe: %s\n", result.Runtime.Scope)
+		for _, check := range result.Runtime.Checks {
+			fmt.Fprintf(w, "runtime: %s | %s | provider: %s", check.Name, check.Status, check.Provider)
+			if check.Model != "" {
+				fmt.Fprintf(w, " | model: %s", check.Model)
+			}
+			if check.Endpoint != "" {
+				fmt.Fprintf(w, " | endpoint: %s", check.Endpoint)
+			}
+			fmt.Fprintln(w)
+			if check.Message != "" {
+				fmt.Fprintf(w, "runtime note: %s\n", check.Message)
+			}
+		}
+	}
 }
 
 func renderVersionResult(w io.Writer, result *versionResult) {

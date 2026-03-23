@@ -113,7 +113,7 @@ path = "specs"
 	}
 }
 
-func TestImproveDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testing.T) {
+func TestFormatDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -122,15 +122,15 @@ func TestImproveDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testi
 		},
 	}
 
-	message := improveDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
+	message := FormatDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
 		Message: "missing API key for runtime.embedder",
 	})
 	if !strings.Contains(message, "OPENAI_API_KEY") {
-		t.Fatalf("improveDependencyUnavailableMessage() = %q, want env var name", message)
+		t.Fatalf("FormatDependencyUnavailableMessage() = %q, want env var name", message)
 	}
 }
 
-func TestImproveDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *testing.T) {
+func TestFormatDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -140,14 +140,14 @@ func TestImproveDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *test
 		},
 	}
 
-	message := improveDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
+	message := FormatDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
 		Message: "missing API key for runtime.analysis",
 	})
 	if !strings.Contains(message, "PITUITARY_ANALYSIS_KEY") {
-		t.Fatalf("improveDependencyUnavailableMessage() = %q, want runtime-specific env var", message)
+		t.Fatalf("FormatDependencyUnavailableMessage() = %q, want runtime-specific env var", message)
 	}
 	if strings.Contains(message, "OPENAI_API_KEY") {
-		t.Fatalf("improveDependencyUnavailableMessage() = %q, did not want embedder env var", message)
+		t.Fatalf("FormatDependencyUnavailableMessage() = %q, did not want embedder env var", message)
 	}
 }
 

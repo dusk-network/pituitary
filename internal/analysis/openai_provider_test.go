@@ -119,6 +119,46 @@ func TestCompleteJSONSendsExplicitTemperatureZero(t *testing.T) {
 	}
 }
 
+func TestProbeProviderContextUsesLightweightJSONProbe(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request openAICompatibleChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(request.Messages) != 2 {
+			t.Fatalf("messages = %+v, want system and user prompt", request.Messages)
+		}
+		if !strings.Contains(request.Messages[0].Content, "runtime probe") {
+			t.Fatalf("system prompt = %q, want runtime probe guidance", request.Messages[0].Content)
+		}
+		if !strings.Contains(request.Messages[1].Content, `"command":"runtime-probe"`) {
+			t.Fatalf("user prompt = %q, want runtime-probe payload", request.Messages[1].Content)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": `{"ok":true}`}},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	err := ProbeProviderContext(context.Background(), config.RuntimeProvider{
+		Provider:   config.RuntimeProviderOpenAI,
+		Model:      "pituitary-analysis",
+		Endpoint:   server.URL,
+		TimeoutMS:  1000,
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("ProbeProviderContext() error = %v, want nil", err)
+	}
+}
+
 func TestOpenAICompatibleAnalysisProviderParsesStringErrorBodies(t *testing.T) {
 	t.Parallel()
 
