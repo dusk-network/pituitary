@@ -2,9 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
@@ -124,6 +129,27 @@ func TestImproveDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testi
 	}
 }
 
+func TestImproveDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Runtime: config.Runtime{
+			Embedder: config.RuntimeProvider{APIKeyEnv: "OPENAI_API_KEY"},
+			Analysis: config.RuntimeProvider{APIKeyEnv: "PITUITARY_ANALYSIS_KEY"},
+		},
+	}
+
+	message := improveDependencyUnavailableMessage(cfg, &index.DependencyUnavailableError{
+		Message: "missing API key for runtime.analysis",
+	})
+	if !strings.Contains(message, "PITUITARY_ANALYSIS_KEY") {
+		t.Fatalf("improveDependencyUnavailableMessage() = %q, want runtime-specific env var", message)
+	}
+	if strings.Contains(message, "OPENAI_API_KEY") {
+		t.Fatalf("improveDependencyUnavailableMessage() = %q, did not want embedder env var", message)
+	}
+}
+
 func TestCompareSpecsClassifiesAnalysisProviderDependencyFailures(t *testing.T) {
 	t.Parallel()
 
@@ -139,6 +165,44 @@ func TestCompareSpecsClassifiesAnalysisProviderDependencyFailures(t *testing.T) 
 	}
 	if !strings.Contains(operation.Issue.Message, "PITUITARY_TEST_ANALYSIS_KEY") {
 		t.Fatalf("CompareSpecs() issue.message = %q, want configured env var", operation.Issue.Message)
+	}
+}
+
+func TestCompareSpecsReportsActionableReachabilityGuidanceForAnalysisProvider(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeOperationWorkspaceWithRuntime(t, "", `
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+endpoint = "http://127.0.0.1:9/v1"
+timeout_ms = 1000
+max_retries = 0
+`)
+
+	operation := CompareSpecs(context.Background(), configPath, analysis.CompareRequest{
+		SpecRefs: []string{"SPEC-008", "SPEC-042"},
+	})
+	if operation.Issue == nil {
+		t.Fatal("CompareSpecs() issue = nil, want dependency error")
+	}
+	if operation.Issue.Code != CodeDependencyUnavailable {
+		t.Fatalf("CompareSpecs() issue.code = %q, want %q", operation.Issue.Code, CodeDependencyUnavailable)
+	}
+	if operation.Issue.ExitCode != 3 {
+		t.Fatalf("CompareSpecs() issue.exitCode = %d, want 3", operation.Issue.ExitCode)
+	}
+	if !strings.Contains(operation.Issue.Message, `runtime.analysis (provider "openai_compatible", model "pituitary-analysis", endpoint "http://127.0.0.1:9/v1") is unreachable`) {
+		t.Fatalf("CompareSpecs() issue.message = %q, want runtime descriptor", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "reachable from this machine") {
+		t.Fatalf("CompareSpecs() issue.message = %q, want reachability guidance", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "LM Studio") {
+		t.Fatalf("CompareSpecs() issue.message = %q, want LM Studio hint", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "Raw provider error:") {
+		t.Fatalf("CompareSpecs() issue.message = %q, want raw provider detail", operation.Issue.Message)
 	}
 }
 
@@ -160,7 +224,102 @@ func TestCheckDocDriftClassifiesAnalysisProviderDependencyFailures(t *testing.T)
 	}
 }
 
+func TestSearchSpecsReportsActionableUnloadedModelErrorForOpenAICompatibleEmbedder(t *testing.T) {
+	t.Parallel()
+
+	var failSearch atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("request path = %q, want /v1/embeddings", r.URL.Path)
+		}
+		if failSearch.Load() {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{"error": "Model unloaded.."}); err != nil {
+				t.Fatalf("encode failure response: %v", err)
+			}
+			return
+		}
+
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		response := map[string]any{"data": []map[string]any{}}
+		for i := range request.Input {
+			response["data"] = append(response["data"].([]map[string]any), map[string]any{
+				"index":     i,
+				"embedding": []float64{float64(i + 1), float64(i + 2), float64(i + 3)},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("encode success response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	configPath := writeOperationWorkspaceWithRuntime(t, fmt.Sprintf(`
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = %q
+timeout_ms = 1000
+max_retries = 0
+`, server.URL+"/v1"), "")
+
+	failSearch.Store(true)
+
+	operation := SearchSpecs(context.Background(), configPath, index.SearchSpecRequest{
+		Query: "rate limiting",
+	})
+	if operation.Issue == nil {
+		t.Fatal("SearchSpecs() issue = nil, want dependency error")
+	}
+	if operation.Issue.Code != CodeDependencyUnavailable {
+		t.Fatalf("SearchSpecs() issue.code = %q, want %q", operation.Issue.Code, CodeDependencyUnavailable)
+	}
+	if operation.Issue.ExitCode != 3 {
+		t.Fatalf("SearchSpecs() issue.exitCode = %d, want 3", operation.Issue.ExitCode)
+	}
+	wantDescriptor := fmt.Sprintf(`runtime.embedder (provider "openai_compatible", model "pituitary-embed", endpoint %q) is unavailable because the configured model appears to be unloaded`, server.URL+"/v1")
+	if !strings.Contains(operation.Issue.Message, wantDescriptor) {
+		t.Fatalf("SearchSpecs() issue.message = %q, want runtime descriptor and unloaded-model guidance", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "load or pin model") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want model loading guidance", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "LM Studio") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want LM Studio hint", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "Raw provider error:") || !strings.Contains(operation.Issue.Message, "Model unloaded..") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want raw provider detail", operation.Issue.Message)
+	}
+}
+
 func writeOperationWorkspace(t *testing.T, enableAnalysisProvider bool) string {
+	t.Helper()
+
+	runtimeAnalysis := ""
+	if enableAnalysisProvider {
+		runtimeAnalysis = `
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+endpoint = "http://127.0.0.1:9/v1"
+api_key_env = "PITUITARY_TEST_ANALYSIS_KEY"
+timeout_ms = 1000
+max_retries = 0
+`
+	}
+
+	return writeOperationWorkspaceWithRuntime(t, "", runtimeAnalysis)
+}
+
+func writeOperationWorkspaceWithRuntime(t *testing.T, runtimeEmbedder, runtimeAnalysis string) string {
 	t.Helper()
 
 	repo := t.TempDir()
@@ -179,14 +338,11 @@ func writeOperationWorkspace(t *testing.T, enableAnalysisProvider bool) string {
 	}
 	copyOperationFixtureFile(t, filepath.Join("docs", "guides", "api-rate-limits.md"), filepath.Join(repo, "docs", "guides", "api-rate-limits.md"))
 
-	var runtimeAnalysis string
-	if enableAnalysisProvider {
-		runtimeAnalysis = `
-[runtime.analysis]
-provider = "openai_compatible"
-model = "pituitary-analysis"
-endpoint = "http://127.0.0.1:9/v1"
-api_key_env = "PITUITARY_TEST_ANALYSIS_KEY"
+	if strings.TrimSpace(runtimeEmbedder) == "" {
+		runtimeEmbedder = `
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
 timeout_ms = 1000
 max_retries = 0
 `
@@ -198,12 +354,7 @@ max_retries = 0
 root = "."
 index_path = ".pituitary/pituitary.db"
 
-[runtime.embedder]
-provider = "fixture"
-model = "fixture-8d"
-timeout_ms = 1000
-max_retries = 0
-`+runtimeAnalysis+`
+`+runtimeEmbedder+runtimeAnalysis+`
 [[sources]]
 name = "specs"
 adapter = "filesystem"

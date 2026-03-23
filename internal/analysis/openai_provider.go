@@ -45,7 +45,7 @@ type openAICompatibleChatMessage struct {
 
 type openAICompatibleChatResponse struct {
 	Choices []openAICompatibleChoice `json:"choices"`
-	Err     *openAICompatibleError   `json:"error,omitempty"`
+	Err     json.RawMessage          `json:"error,omitempty"`
 }
 
 type openAICompatibleChoice struct {
@@ -54,10 +54,6 @@ type openAICompatibleChoice struct {
 
 type openAICompatibleChoiceMessage struct {
 	Content json.RawMessage `json:"content"`
-}
-
-type openAICompatibleError struct {
-	Message string `json:"message"`
 }
 
 type compareAnalysisPrompt struct {
@@ -307,9 +303,9 @@ func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
 			Message: fmt.Sprintf("decode runtime.analysis response: %v", err),
 		}
 	}
-	if payload.Err != nil && strings.TrimSpace(payload.Err.Message) != "" {
+	if message := extractOpenAICompatibleChatErrorValue(payload.Err); message != "" {
 		return "", &index.DependencyUnavailableError{
-			Message: fmt.Sprintf("runtime.analysis endpoint %s returned an error: %s", resp.Request.URL, payload.Err.Message),
+			Message: fmt.Sprintf("runtime.analysis endpoint %s returned an error: %s", resp.Request.URL, message),
 		}
 	}
 	if len(payload.Choices) == 0 {
@@ -329,9 +325,38 @@ func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
 
 func extractOpenAICompatibleChatError(body []byte) string {
 	var payload openAICompatibleChatResponse
-	if err := json.Unmarshal(body, &payload); err == nil && payload.Err != nil {
-		return strings.TrimSpace(payload.Err.Message)
+	if err := json.Unmarshal(body, &payload); err == nil {
+		return extractOpenAICompatibleChatErrorValue(payload.Err)
 	}
+	return ""
+}
+
+func extractOpenAICompatibleChatErrorValue(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+
+	var payload struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+		Detail  string `json:"detail"`
+	}
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		switch {
+		case strings.TrimSpace(payload.Message) != "":
+			return strings.TrimSpace(payload.Message)
+		case strings.TrimSpace(payload.Error) != "":
+			return strings.TrimSpace(payload.Error)
+		case strings.TrimSpace(payload.Detail) != "":
+			return strings.TrimSpace(payload.Detail)
+		}
+	}
+
 	return ""
 }
 

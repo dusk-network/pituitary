@@ -41,16 +41,12 @@ type openAICompatibleEmbeddingsRequest struct {
 
 type openAICompatibleEmbeddingsResponse struct {
 	Data []openAICompatibleEmbedding `json:"data"`
-	Err  *openAICompatibleErrorBody  `json:"error,omitempty"`
+	Err  json.RawMessage             `json:"error,omitempty"`
 }
 
 type openAICompatibleEmbedding struct {
 	Embedding []float64 `json:"embedding"`
 	Index     int       `json:"index"`
-}
-
-type openAICompatibleErrorBody struct {
-	Message string `json:"message"`
 }
 
 func newOpenAICompatibleEmbedder(provider config.RuntimeProvider) (Embedder, error) {
@@ -234,9 +230,9 @@ func readOpenAICompatibleEmbeddingsResponse(resp *http.Response) (*openAICompati
 			Message: fmt.Sprintf("decode runtime.embedder response: %v", err),
 		}
 	}
-	if payload.Err != nil && strings.TrimSpace(payload.Err.Message) != "" {
+	if message := extractOpenAICompatibleErrorValue(payload.Err); message != "" {
 		return nil, &DependencyUnavailableError{
-			Message: fmt.Sprintf("runtime.embedder endpoint %s returned an error: %s", resp.Request.URL, payload.Err.Message),
+			Message: fmt.Sprintf("runtime.embedder endpoint %s returned an error: %s", resp.Request.URL, message),
 		}
 	}
 	return &payload, nil
@@ -244,9 +240,38 @@ func readOpenAICompatibleEmbeddingsResponse(resp *http.Response) (*openAICompati
 
 func extractOpenAICompatibleError(body []byte) string {
 	var payload openAICompatibleEmbeddingsResponse
-	if err := json.Unmarshal(body, &payload); err == nil && payload.Err != nil {
-		return strings.TrimSpace(payload.Err.Message)
+	if err := json.Unmarshal(body, &payload); err == nil {
+		return extractOpenAICompatibleErrorValue(payload.Err)
 	}
+	return ""
+}
+
+func extractOpenAICompatibleErrorValue(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+
+	var payload struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+		Detail  string `json:"detail"`
+	}
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		switch {
+		case strings.TrimSpace(payload.Message) != "":
+			return strings.TrimSpace(payload.Message)
+		case strings.TrimSpace(payload.Error) != "":
+			return strings.TrimSpace(payload.Error)
+		case strings.TrimSpace(payload.Detail) != "":
+			return strings.TrimSpace(payload.Detail)
+		}
+	}
+
 	return ""
 }
 
