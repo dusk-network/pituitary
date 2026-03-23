@@ -458,24 +458,96 @@ func renderTerminologyAuditResult(w io.Writer, result *analysis.TerminologyAudit
 }
 
 func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
-	if len(result.DriftItems) == 0 {
+	if len(result.DriftItems) == 0 && len(result.Assessments) == 0 {
 		fmt.Fprintln(w, "no drift items")
 		return
 	}
+
+	assessments := result.Assessments
+	if len(assessments) == 0 {
+		assessments = driftAssessmentsFromItems(result.DriftItems)
+	}
+	driftItems := driftItemsByDocRef(result.DriftItems)
 	remediation := remediationItemsByDocRef(result.Remediation)
-	for i, item := range result.DriftItems {
-		fmt.Fprintf(w, "%d. %s | %s | findings: %d", i+1, item.DocRef, item.Title, len(item.Findings))
-		if suggestions := remediation[item.DocRef]; len(suggestions) > 0 {
+	for i, assessment := range assessments {
+		fmt.Fprintf(w, "%d. %s | %s | status: %s", i+1, assessment.DocRef, assessment.Title, assessment.Status)
+		if assessment.Confidence != nil && assessment.Confidence.Level != "" {
+			fmt.Fprintf(w, " | confidence: %s", assessment.Confidence.Level)
+			if assessment.Confidence.Score > 0 {
+				fmt.Fprintf(w, " (%.3f)", assessment.Confidence.Score)
+			}
+		}
+		if item, ok := driftItems[assessment.DocRef]; ok {
+			fmt.Fprintf(w, " | findings: %d", len(item.Findings))
+		}
+		if suggestions := remediation[assessment.DocRef]; len(suggestions) > 0 {
 			fmt.Fprintf(w, " | remediation: %d", len(suggestions))
 		}
 		fmt.Fprintln(w)
-		for _, suggestion := range remediation[item.DocRef] {
+		if assessment.Rationale != "" {
+			fmt.Fprintf(w, "   rationale: %s\n", assessment.Rationale)
+		}
+		if assessment.Evidence != nil {
+			renderDriftEvidence(w, assessment.Evidence, "   ")
+		}
+		if assessment.Confidence != nil && assessment.Confidence.Basis != "" {
+			fmt.Fprintf(w, "   confidence basis: %s\n", assessment.Confidence.Basis)
+		}
+		if item, ok := driftItems[assessment.DocRef]; ok {
+			for _, finding := range item.Findings {
+				fmt.Fprintf(w, "   finding: %s", finding.Code)
+				if finding.Artifact != "" {
+					fmt.Fprintf(w, " | artifact: %s", finding.Artifact)
+				}
+				if finding.Confidence != nil && finding.Confidence.Level != "" {
+					fmt.Fprintf(w, " | confidence: %s", finding.Confidence.Level)
+				}
+				fmt.Fprintln(w)
+				fmt.Fprintf(w, "     message: %s\n", finding.Message)
+				if finding.Rationale != "" {
+					fmt.Fprintf(w, "     rationale: %s\n", finding.Rationale)
+				}
+				if finding.Expected != "" || finding.Observed != "" {
+					fmt.Fprintf(w, "     expected: %s\n", finding.Expected)
+					fmt.Fprintf(w, "     observed: %s\n", finding.Observed)
+				}
+				if finding.Evidence != nil {
+					renderDriftEvidence(w, finding.Evidence, "     ")
+				}
+				if finding.Confidence != nil && finding.Confidence.Basis != "" {
+					fmt.Fprintf(w, "     confidence basis: %s\n", finding.Confidence.Basis)
+				}
+			}
+		}
+		for _, suggestion := range remediation[assessment.DocRef] {
 			fmt.Fprintf(w, "   remediation: %s | %s\n", suggestion.SpecRef, suggestion.Summary)
 			if suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "" {
 				fmt.Fprintf(w, "   suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
 			} else if suggestion.SuggestedEdit.Note != "" {
 				fmt.Fprintf(w, "   suggested edit: %s\n", suggestion.SuggestedEdit.Note)
 			}
+		}
+	}
+}
+
+func renderDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence, prefix string) {
+	if evidence == nil {
+		return
+	}
+	if evidence.SpecRef != "" || evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
+		fmt.Fprintf(w, "%sspec evidence: %s", prefix, evidence.SpecRef)
+		if evidence.SpecSection != "" {
+			fmt.Fprintf(w, " | %s", evidence.SpecSection)
+		}
+		fmt.Fprintln(w)
+		if evidence.SpecExcerpt != "" {
+			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.SpecExcerpt)
+		}
+	}
+	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
+		fmt.Fprintf(w, "%sdoc evidence: %s\n", prefix, evidence.DocSection)
+		if evidence.DocExcerpt != "" {
+			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.DocExcerpt)
 		}
 	}
 }
@@ -618,4 +690,26 @@ func remediationItemsByDocRef(result *analysis.DocRemediationResult) map[string]
 		items[item.DocRef] = item.Suggestions
 	}
 	return items
+}
+
+func driftItemsByDocRef(items []analysis.DriftItem) map[string]analysis.DriftItem {
+	result := make(map[string]analysis.DriftItem, len(items))
+	for _, item := range items {
+		result[item.DocRef] = item
+	}
+	return result
+}
+
+func driftAssessmentsFromItems(items []analysis.DriftItem) []analysis.DocDriftAssessment {
+	result := make([]analysis.DocDriftAssessment, 0, len(items))
+	for _, item := range items {
+		result = append(result, analysis.DocDriftAssessment{
+			DocRef:    item.DocRef,
+			Title:     item.Title,
+			SourceRef: item.SourceRef,
+			Status:    "drift",
+			SpecRefs:  append([]string(nil), item.SpecRefs...),
+		})
+	}
+	return result
 }

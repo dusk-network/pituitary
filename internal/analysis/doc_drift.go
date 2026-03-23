@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
@@ -35,14 +36,34 @@ type DocDriftScope struct {
 	DocRefs []string `json:"doc_refs"`
 }
 
+// DriftEvidence reports the concrete spec/doc sections that support one drift judgment.
+type DriftEvidence struct {
+	SpecRef     string `json:"spec_ref,omitempty"`
+	SpecTitle   string `json:"spec_title,omitempty"`
+	SpecSection string `json:"spec_section,omitempty"`
+	SpecExcerpt string `json:"spec_excerpt,omitempty"`
+	DocSection  string `json:"doc_section,omitempty"`
+	DocExcerpt  string `json:"doc_excerpt,omitempty"`
+}
+
+// DriftConfidence reports how certain the analysis is about one judgment.
+type DriftConfidence struct {
+	Level string  `json:"level"`
+	Score float64 `json:"score,omitempty"`
+	Basis string  `json:"basis,omitempty"`
+}
+
 // DriftFinding reports one contradiction between a doc and a spec.
 type DriftFinding struct {
-	SpecRef  string `json:"spec_ref"`
-	Artifact string `json:"artifact,omitempty"`
-	Code     string `json:"code"`
-	Message  string `json:"message"`
-	Expected string `json:"expected,omitempty"`
-	Observed string `json:"observed,omitempty"`
+	SpecRef    string           `json:"spec_ref"`
+	Artifact   string           `json:"artifact,omitempty"`
+	Code       string           `json:"code"`
+	Message    string           `json:"message"`
+	Rationale  string           `json:"rationale,omitempty"`
+	Expected   string           `json:"expected,omitempty"`
+	Observed   string           `json:"observed,omitempty"`
+	Evidence   *DriftEvidence   `json:"evidence,omitempty"`
+	Confidence *DriftConfidence `json:"confidence,omitempty"`
 }
 
 // DriftItem reports one doc that drifts from accepted specs.
@@ -52,6 +73,18 @@ type DriftItem struct {
 	SourceRef string         `json:"source_ref"`
 	SpecRefs  []string       `json:"spec_refs"`
 	Findings  []DriftFinding `json:"findings"`
+}
+
+// DocDriftAssessment reports how one reviewed doc was judged, even when no deterministic drift was proven.
+type DocDriftAssessment struct {
+	DocRef     string           `json:"doc_ref"`
+	Title      string           `json:"title"`
+	SourceRef  string           `json:"source_ref"`
+	Status     string           `json:"status"`
+	SpecRefs   []string         `json:"spec_refs,omitempty"`
+	Rationale  string           `json:"rationale,omitempty"`
+	Evidence   *DriftEvidence   `json:"evidence,omitempty"`
+	Confidence *DriftConfidence `json:"confidence,omitempty"`
 }
 
 // DocRemediationEvidence separates the observed contradiction from the accepted spec evidence.
@@ -98,6 +131,7 @@ type DocRemediationResult struct {
 type DocDriftResult struct {
 	Scope          DocDriftScope         `json:"scope"`
 	DriftItems     []DriftItem           `json:"drift_items"`
+	Assessments    []DocDriftAssessment  `json:"assessments,omitempty"`
 	SpecInferences []SpecInference       `json:"spec_inferences,omitempty"`
 	Remediation    *DocRemediationResult `json:"remediation"`
 	Warnings       []Warning             `json:"warnings,omitempty"`
@@ -171,11 +205,17 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 
-	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs)
+	allSpecs, err := repo.loadAllSpecs()
+	if err != nil {
+		return nil, err
+	}
+
+	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, allSpecs)
 }
 
-func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument) (*DocDriftResult, error) {
+func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, allSpecs map[string]specDocument) (*DocDriftResult, error) {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
+	assessments := make([]DocDriftAssessment, 0, len(selectedDocs))
 	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
 	relevantSpecRefs := make([]string, 0, len(specs))
 	warningSpecs := make([]specDocument, 0, len(specs))
@@ -202,6 +242,18 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 				remediation = refinedRemediation
 			}
 		}
+		if assessment := assessDocDrift(doc, relevant, allSpecs, item); assessment != nil {
+			assessments = append(assessments, *assessment)
+			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
+			for _, specRef := range assessment.SpecRefs {
+				if spec, ok := allSpecs[specRef]; ok {
+					warningSpecs = append(warningSpecs, spec)
+				}
+			}
+		}
+		if item == nil {
+			continue
+		}
 		driftItems = append(driftItems, *item)
 		if remediation != nil {
 			remediationItems = append(remediationItems, *remediation)
@@ -214,11 +266,28 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		}
 	}
 	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
+	if len(driftItems) == 0 && len(assessments) == 0 {
+		for _, ref := range sortedDocRefs(selectedDocs) {
+			assessment := possibleDriftAssessment(selectedDocs[ref], allSpecs)
+			if assessment == nil {
+				continue
+			}
+			assessments = append(assessments, *assessment)
+			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
+			for _, specRef := range assessment.SpecRefs {
+				if spec, ok := allSpecs[specRef]; ok {
+					warningSpecs = append(warningSpecs, spec)
+				}
+			}
+		}
+	}
+	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
 
 	return &DocDriftResult{
 		Scope:          scope,
 		DriftItems:     driftItems,
-		SpecInferences: buildSpecInferences(specs, relevantSpecRefs),
+		Assessments:    assessments,
+		SpecInferences: buildSpecInferences(allSpecs, relevantSpecRefs),
 		Remediation: &DocRemediationResult{
 			Items: remediationItems,
 		},
@@ -426,6 +495,13 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 	if len(findings) == 0 {
 		return nil, nil
 	}
+	for i := range findings {
+		spec, ok := byRef[findings[i].SpecRef]
+		if !ok {
+			continue
+		}
+		findings[i] = enrichDriftFinding(doc, spec, findings[i])
+	}
 
 	item := &DriftItem{
 		DocRef:    doc.Record.Ref,
@@ -435,6 +511,97 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 		Findings:  findings,
 	}
 	return item, buildDocRemediationItem(doc, byRef, findings)
+}
+
+func enrichDriftFinding(doc docDocument, spec specDocument, finding DriftFinding) DriftFinding {
+	evidence, score := driftEvidence(doc, spec, finding)
+	finding.Evidence = evidence
+	finding.Rationale = rationaleForFinding(finding)
+	finding.Confidence = confidenceForDriftFinding(finding, score)
+	return finding
+}
+
+func assessDocDrift(doc docDocument, relevant []specDocument, specs map[string]specDocument, item *DriftItem) *DocDriftAssessment {
+	if item != nil {
+		assessment := &DocDriftAssessment{
+			DocRef:    item.DocRef,
+			Title:     item.Title,
+			SourceRef: item.SourceRef,
+			Status:    "drift",
+			SpecRefs:  append([]string(nil), item.SpecRefs...),
+		}
+		if finding := topDriftFinding(item.Findings); finding != nil {
+			assessment.Rationale = defaultString(stringsTrimSpace(finding.Rationale), finding.Message)
+			assessment.Evidence = cloneDriftEvidence(finding.Evidence)
+			assessment.Confidence = cloneDriftConfidence(finding.Confidence)
+		}
+		if assessment.Confidence == nil {
+			assessment.Confidence = &DriftConfidence{
+				Level: "medium",
+				Basis: "deterministic drift findings were emitted for this doc",
+			}
+		}
+		return assessment
+	}
+	if len(relevant) == 0 {
+		return nil
+	}
+	return nil
+}
+
+func possibleDriftAssessment(doc docDocument, specs map[string]specDocument) *DocDriftAssessment {
+	candidates := assessmentFallbackSpecs(doc, specs)
+	if len(candidates) == 0 {
+		return nil
+	}
+	bestSpec, evidence, score := bestAlignedAssessmentEvidence(doc, candidates)
+	if bestSpec == nil || evidence == nil {
+		return nil
+	}
+	return &DocDriftAssessment{
+		DocRef:     doc.Record.Ref,
+		Title:      doc.Record.Title,
+		SourceRef:  doc.Record.SourceRef,
+		Status:     "possible_drift",
+		SpecRefs:   []string{bestSpec.Record.Ref},
+		Rationale:  fmt.Sprintf("doc is semantically or lexically close to accepted spec %s, but the current deterministic doc-drift rules could not prove contradiction; inspect it manually", bestSpec.Record.Ref),
+		Evidence:   evidence,
+		Confidence: &DriftConfidence{Level: "low", Score: roundScore(score), Basis: "nearest accepted spec is suggestive, but this is not a deterministic contradiction"},
+	}
+}
+
+func assessmentFallbackSpecs(doc docDocument, specs map[string]specDocument) []specDocument {
+	type scoredSpec struct {
+		spec  specDocument
+		score float64
+	}
+
+	var scored []scoredSpec
+	for _, spec := range specs {
+		if spec.Record.Status != model.StatusAccepted {
+			continue
+		}
+		score := assessmentSimilarity(doc.Sections, spec.Sections)
+		scored = append(scored, scoredSpec{spec: spec, score: score})
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		switch {
+		case scored[i].score != scored[j].score:
+			return scored[i].score > scored[j].score
+		default:
+			return scored[i].spec.Record.Ref < scored[j].spec.Record.Ref
+		}
+	})
+	if len(scored) == 0 {
+		return nil
+	}
+
+	limit := minInt(len(scored), 2)
+	result := make([]specDocument, 0, limit)
+	for _, item := range scored[:limit] {
+		result = append(result, item.spec)
+	}
+	return result
 }
 
 func buildDocRemediationItem(doc docDocument, specs map[string]specDocument, findings []DriftFinding) *DocRemediationItem {
@@ -838,13 +1005,18 @@ func remediationSummaryForFinding(finding DriftFinding) string {
 }
 
 func remediationEvidence(doc docDocument, spec specDocument, finding DriftFinding) DocRemediationEvidence {
-	docSection, docExcerpt := docEvidenceForFinding(doc, finding)
-	specSection, specExcerpt := specEvidenceForFinding(spec, finding)
+	evidence, _ := driftEvidence(doc, spec, finding)
+	if evidence == nil {
+		return DocRemediationEvidence{
+			Expected: humanizedDriftValue(finding.Code, finding.Expected),
+			Observed: humanizedDriftValue(finding.Code, finding.Observed),
+		}
+	}
 	return DocRemediationEvidence{
-		SpecSection: specSection,
-		SpecExcerpt: specExcerpt,
-		DocSection:  docSection,
-		DocExcerpt:  docExcerpt,
+		SpecSection: evidence.SpecSection,
+		SpecExcerpt: evidence.SpecExcerpt,
+		DocSection:  evidence.DocSection,
+		DocExcerpt:  evidence.DocExcerpt,
 		Expected:    humanizedDriftValue(finding.Code, finding.Expected),
 		Observed:    humanizedDriftValue(finding.Code, finding.Observed),
 	}
@@ -1048,4 +1220,311 @@ func stringsTrimSpace(value string) string {
 
 func stringsHasPrefix(value, prefix string) bool {
 	return strings.HasPrefix(value, prefix)
+}
+
+func rationaleForFinding(finding DriftFinding) string {
+	switch finding.Code {
+	case "window_mismatch":
+		return fmt.Sprintf("accepted spec expects %s, but the doc still describes %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+	case "subject_mismatch":
+		return fmt.Sprintf("accepted spec expects %s, but the doc still targets %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+	case "default_limit_mismatch":
+		return fmt.Sprintf("accepted spec sets %s, but the doc still states %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+	case "override_support_mismatch":
+		return fmt.Sprintf("accepted spec says %s, but the doc still says %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+	case "artifact_runtime_input_mismatch":
+		if finding.Artifact != "" {
+			return fmt.Sprintf("accepted spec says `%s` is not a canonical runtime input, but the doc still presents it as active startup input", finding.Artifact)
+		}
+	case "artifact_contract_mismatch":
+		if finding.Artifact != "" {
+			return fmt.Sprintf("accepted spec says `%s` is not part of the active runtime contract, but the doc still presents it as active runtime state", finding.Artifact)
+		}
+	}
+	return finding.Message
+}
+
+func confidenceForDriftFinding(finding DriftFinding, score float64) *DriftConfidence {
+	level := "medium"
+	basis := "finding is backed by deterministic evidence excerpts from the doc and accepted spec"
+	if finding.Evidence != nil && finding.Evidence.DocExcerpt != "" && finding.Evidence.SpecExcerpt != "" {
+		level = "high"
+		if score > 0 {
+			basis = "finding is backed by explicit doc/spec excerpts that also align semantically"
+		}
+	} else if finding.Evidence == nil || (finding.Evidence.DocExcerpt == "" && finding.Evidence.SpecExcerpt == "") {
+		level = "low"
+		basis = "finding is deterministic, but the supporting doc/spec excerpts could not be localized precisely"
+	}
+	confidence := &DriftConfidence{
+		Level: level,
+		Basis: basis,
+	}
+	if score > 0 {
+		confidence.Score = roundScore(score)
+	}
+	return confidence
+}
+
+func driftEvidence(doc docDocument, spec specDocument, finding DriftFinding) (*DriftEvidence, float64) {
+	keywords := evidenceKeywordsForFinding(finding)
+	docSection := bestSectionForKeywords(doc.Sections, keywords)
+	specSection := bestSectionForKeywords(spec.Sections, keywords)
+	if docSection == nil && specSection == nil {
+		return nil, 0
+	}
+
+	score := 0.0
+	if docSection != nil && specSection != nil {
+		score = cosineSimilarity(docSection.Embedding, specSection.Embedding)
+	}
+
+	evidence := &DriftEvidence{
+		SpecRef:   spec.Record.Ref,
+		SpecTitle: spec.Record.Title,
+	}
+	if specSection != nil {
+		evidence.SpecSection = defaultString(stringsTrimSpace(specSection.Heading), "(body)")
+		evidence.SpecExcerpt = defaultString(sectionExcerpt(*specSection), stringsTrimSpace(spec.Record.Title))
+	}
+	if docSection != nil {
+		evidence.DocSection = defaultString(stringsTrimSpace(docSection.Heading), "(body)")
+		evidence.DocExcerpt = sectionExcerpt(*docSection)
+	}
+	return evidence, score
+}
+
+func bestSectionForKeywords(sections []embeddedSection, keywords []string) *embeddedSection {
+	for _, section := range sections {
+		if _, ok := sectionExcerptForKeywords(section, keywords); ok {
+			candidate := section
+			return &candidate
+		}
+	}
+	if len(sections) == 0 {
+		return nil
+	}
+
+	var (
+		best      embeddedSection
+		bestScore float64
+		found     bool
+	)
+	for _, section := range sections {
+		excerpt := sectionExcerpt(section)
+		if excerpt == "" {
+			continue
+		}
+		score := keywordDensity(excerpt, keywords) + keywordDensity(section.Heading, keywords)
+		if !found || score > bestScore {
+			best = section
+			bestScore = score
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &best
+}
+
+func keywordDensity(text string, keywords []string) float64 {
+	if stringsTrimSpace(text) == "" || len(keywords) == 0 {
+		return 0
+	}
+	lower := strings.ToLower(text)
+	var score float64
+	for _, keyword := range keywords {
+		keyword = strings.ToLower(stringsTrimSpace(keyword))
+		if keyword != "" && strings.Contains(lower, keyword) {
+			score++
+		}
+	}
+	return score
+}
+
+func bestAlignedAssessmentEvidence(doc docDocument, relevant []specDocument) (*specDocument, *DriftEvidence, float64) {
+	var (
+		bestSpec     *specDocument
+		bestEvidence *DriftEvidence
+		bestScore    float64
+	)
+	for i := range relevant {
+		spec := &relevant[i]
+		evidence, score := bestAlignedEvidence(doc, *spec)
+		if evidence == nil {
+			continue
+		}
+		if bestSpec == nil || score > bestScore {
+			bestSpec = spec
+			bestEvidence = evidence
+			bestScore = score
+		}
+	}
+	return bestSpec, bestEvidence, bestScore
+}
+
+func bestAlignedEvidence(doc docDocument, spec specDocument) (*DriftEvidence, float64) {
+	var (
+		bestDoc   *embeddedSection
+		bestSpec  *embeddedSection
+		bestScore float64
+	)
+	for i := range doc.Sections {
+		docSection := &doc.Sections[i]
+		for j := range spec.Sections {
+			specSection := &spec.Sections[j]
+			score := sectionAssessmentScore(*docSection, *specSection)
+			if bestDoc == nil || score > bestScore {
+				bestScore = score
+				bestDoc = docSection
+				bestSpec = specSection
+			}
+		}
+	}
+	if bestDoc == nil || bestSpec == nil {
+		return nil, 0
+	}
+	return &DriftEvidence{
+		SpecRef:     spec.Record.Ref,
+		SpecTitle:   spec.Record.Title,
+		SpecSection: defaultString(stringsTrimSpace(bestSpec.Heading), "(body)"),
+		SpecExcerpt: defaultString(sectionExcerpt(*bestSpec), stringsTrimSpace(spec.Record.Title)),
+		DocSection:  defaultString(stringsTrimSpace(bestDoc.Heading), "(body)"),
+		DocExcerpt:  sectionExcerpt(*bestDoc),
+	}, bestScore
+}
+
+func alignmentConfidenceLevel(score float64) string {
+	switch {
+	case score >= 0.82:
+		return "high"
+	case score >= 0.65:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func topDriftFinding(findings []DriftFinding) *DriftFinding {
+	if len(findings) == 0 {
+		return nil
+	}
+	bestIndex := 0
+	for i := 1; i < len(findings); i++ {
+		if compareDriftFindings(findings[i], findings[bestIndex]) < 0 {
+			bestIndex = i
+		}
+	}
+	return &findings[bestIndex]
+}
+
+func compareDriftFindings(left, right DriftFinding) int {
+	leftRank := driftConfidenceRank(left.Confidence)
+	rightRank := driftConfidenceRank(right.Confidence)
+	switch {
+	case leftRank != rightRank:
+		return rightRank - leftRank
+	case len(left.Rationale) != len(right.Rationale):
+		if len(left.Rationale) > len(right.Rationale) {
+			return -1
+		}
+		return 1
+	case left.Code < right.Code:
+		return -1
+	case left.Code > right.Code:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func driftConfidenceRank(confidence *DriftConfidence) int {
+	if confidence == nil {
+		return 0
+	}
+	switch confidence.Level {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func cloneDriftEvidence(evidence *DriftEvidence) *DriftEvidence {
+	if evidence == nil {
+		return nil
+	}
+	clone := *evidence
+	return &clone
+}
+
+func cloneDriftConfidence(confidence *DriftConfidence) *DriftConfidence {
+	if confidence == nil {
+		return nil
+	}
+	clone := *confidence
+	return &clone
+}
+
+func assessmentSimilarity(left, right []embeddedSection) float64 {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+
+	best := 0.0
+	for _, leftSection := range left {
+		for _, rightSection := range right {
+			score := sectionAssessmentScore(leftSection, rightSection)
+			if score > best {
+				best = score
+			}
+		}
+	}
+	return best
+}
+
+func sectionAssessmentScore(left, right embeddedSection) float64 {
+	semantic := cosineSimilarity(left.Embedding, right.Embedding)
+	lexical := lexicalOverlapScore(
+		textForEmbedding("", left.Heading, left.Content),
+		textForEmbedding("", right.Heading, right.Content),
+	)
+	if semantic == 0 {
+		return lexical
+	}
+	if lexical == 0 {
+		return semantic
+	}
+	return (semantic * 0.8) + (lexical * 0.2)
+}
+
+func lexicalOverlapScore(left, right string) float64 {
+	leftTokens := normalizedLexicalTokens(left)
+	rightTokens := normalizedLexicalTokens(right)
+	if len(leftTokens) == 0 || len(rightTokens) == 0 {
+		return 0
+	}
+	shared := sharedStrings(leftTokens, rightTokens)
+	if len(shared) == 0 {
+		return 0
+	}
+	return float64(len(shared)) / float64(minInt(len(leftTokens), len(rightTokens)))
+}
+
+func normalizedLexicalTokens(text string) []string {
+	var builder strings.Builder
+	builder.Grow(len(text))
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			builder.WriteRune(r)
+			continue
+		}
+		builder.WriteByte(' ')
+	}
+	return uniqueStrings(strings.Fields(builder.String()))
 }

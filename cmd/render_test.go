@@ -221,6 +221,123 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 	}
 }
 
+func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderDocDriftResult(&stdout, &analysis.DocDriftResult{
+		Assessments: []analysis.DocDriftAssessment{
+			{
+				DocRef:    "doc://guides/api-rate-limits",
+				Title:     "API Rate Limits",
+				SourceRef: "docs/guides/api-rate-limits.md",
+				Status:    "drift",
+				SpecRefs:  []string{"SPEC-042"},
+				Rationale: "accepted spec sets 200 requests per minute, but the doc still states 100 requests per minute",
+				Evidence: &analysis.DriftEvidence{
+					SpecRef:     "SPEC-042",
+					SpecSection: "Defaults",
+					SpecExcerpt: "The default rate limit is 200 requests per minute.",
+					DocSection:  "Quickstart",
+					DocExcerpt:  "The default rate limit is 100 requests per minute.",
+				},
+				Confidence: &analysis.DriftConfidence{
+					Level: "high",
+					Score: 0.911,
+					Basis: "finding is backed by explicit doc/spec excerpts that also align semantically",
+				},
+			},
+			{
+				DocRef:    "doc://runbooks/rate-limit-rollout",
+				Title:     "Rate Limit Rollout",
+				SourceRef: "docs/runbooks/rate-limit-rollout.md",
+				Status:    "aligned",
+				SpecRefs:  []string{"SPEC-042"},
+				Rationale: "matched accepted spec SPEC-042 and found no deterministic contradiction in the reviewed sections",
+				Evidence: &analysis.DriftEvidence{
+					SpecRef:     "SPEC-042",
+					SpecSection: "Rollout",
+					SpecExcerpt: "Rollout steps should keep tenant-scoped defaults intact.",
+					DocSection:  "Rollout",
+					DocExcerpt:  "Rollout steps keep tenant-scoped defaults intact.",
+				},
+				Confidence: &analysis.DriftConfidence{
+					Level: "medium",
+					Score: 0.744,
+					Basis: "nearest accepted spec and doc sections agree semantically, but no explicit contradiction was detected",
+				},
+			},
+		},
+		DriftItems: []analysis.DriftItem{
+			{
+				DocRef:    "doc://guides/api-rate-limits",
+				Title:     "API Rate Limits",
+				SourceRef: "docs/guides/api-rate-limits.md",
+				SpecRefs:  []string{"SPEC-042"},
+				Findings: []analysis.DriftFinding{
+					{
+						SpecRef:   "SPEC-042",
+						Code:      "default_limit_mismatch",
+						Message:   "document reports a different default limit",
+						Rationale: "accepted spec sets 200 requests per minute, but the doc still states 100 requests per minute",
+						Expected:  "200",
+						Observed:  "100",
+						Evidence: &analysis.DriftEvidence{
+							SpecRef:     "SPEC-042",
+							SpecSection: "Defaults",
+							SpecExcerpt: "The default rate limit is 200 requests per minute.",
+							DocSection:  "Quickstart",
+							DocExcerpt:  "The default rate limit is 100 requests per minute.",
+						},
+						Confidence: &analysis.DriftConfidence{
+							Level: "high",
+							Score: 0.911,
+							Basis: "finding is backed by explicit doc/spec excerpts that also align semantically",
+						},
+					},
+				},
+			},
+		},
+		Remediation: &analysis.DocRemediationResult{
+			Items: []analysis.DocRemediationItem{
+				{
+					DocRef:    "doc://guides/api-rate-limits",
+					Title:     "API Rate Limits",
+					SourceRef: "docs/guides/api-rate-limits.md",
+					Suggestions: []analysis.DocRemediationSuggestion{
+						{
+							SpecRef: "SPEC-042",
+							Code:    "default_limit_mismatch",
+							Summary: "update the documented default rate limit to the accepted value",
+							SuggestedEdit: analysis.DocSuggestedEdit{
+								Action:  "replace_claim",
+								Replace: "100 requests per minute",
+								With:    "200 requests per minute",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"status: drift | confidence: high (0.911)",
+		"status: aligned | confidence: medium (0.744)",
+		"rationale:",
+		"spec evidence: SPEC-042 | Defaults",
+		"doc evidence: Quickstart",
+		"finding: default_limit_mismatch | confidence: high",
+		"confidence basis:",
+		"suggested edit: replace \"100 requests per minute\" with \"200 requests per minute\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderDocDriftResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	t.Parallel()
 

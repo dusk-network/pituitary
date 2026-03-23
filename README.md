@@ -183,7 +183,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-terminology --term repo --canonical-term locality --spec-ref SPEC-042` | Audit docs and specs for displaced terminology after a conceptual migration |
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
-| `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs |
+| `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs, with evidence and confidence |
 | `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
 
 `canonicalize` is optional high-rigor mode. It does not replace inferred-contract indexing; it helps you promote one Markdown contract into an explicit bundle when you want stronger structure without converting the whole repo at once.
@@ -199,7 +199,7 @@ $ ./pituitary review-spec --path specs/rate-limit-v2
 #   - Overlapping specs (SPEC-008 detected as significant overlap)
 #   - Comparison (SPEC-042 supersedes SPEC-008, adds per-tenant support)
 #   - Impact (SPEC-055 depends on SPEC-042, 1 doc affected)
-#   - Doc drift (docs/guides/api-rate-limits.md has stale rate values)
+#   - Doc drift (docs/guides/api-rate-limits.md has stale rate values with cited doc/spec evidence)
 ```
 
 ### JSON output

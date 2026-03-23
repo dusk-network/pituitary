@@ -595,7 +595,7 @@ CLI exit codes should stay simple:
   - Result: `{ "scope": { "mode": "workspace" | "spec_ref", "artifact_kinds": ["doc", "spec"], "spec_ref": "SPEC-LOCALITY" }, "terms": [...], "canonical_terms": [...], "anchor_specs": [...], "findings": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [{ "section": "...", "terms": [...], "excerpt": "...", "evidence": { "spec_ref": "SPEC-LOCALITY", "section": "...", "score": 0.0 } | null }] }] }`
 - `check_doc_drift` (`pituitary check-doc-drift`)
   - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
-  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [...] }`
+  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
 - `review_spec` (`pituitary review-spec`)
   - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
   - Result: `{ "spec_ref": "SPEC-042", "overlap": { ... }, "comparison": { ... } | null, "impact": { ... }, "doc_drift": { ... } }`

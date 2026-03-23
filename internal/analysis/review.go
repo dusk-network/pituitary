@@ -115,7 +115,11 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 		if err != nil {
 			return nil, err
 		}
-		docDrift, err = buildDocDriftResult(ctx, analyzer, DocDriftScope{Mode: "doc_refs", DocRefs: uniqueStrings(impactDocRefs)}, impactDocs, docDriftSpecs)
+		allDocDriftSpecs, err := repo.loadAllSpecs()
+		if err != nil {
+			return nil, err
+		}
+		docDrift, err = buildDocDriftResult(ctx, analyzer, DocDriftScope{Mode: "doc_refs", DocRefs: uniqueStrings(impactDocRefs)}, impactDocs, docDriftSpecs, allDocDriftSpecs)
 		if err != nil {
 			return nil, err
 		}
