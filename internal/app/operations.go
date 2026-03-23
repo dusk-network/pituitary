@@ -244,28 +244,124 @@ func missingIndexMessage(err error) string {
 }
 
 func improveDependencyUnavailableMessage(cfg *config.Config, err error) string {
-	message := err.Error()
-	envVar := configuredAPIKeyEnv(cfg)
-	if envVar == "" {
+	message := strings.TrimSpace(err.Error())
+	runtimeName, provider, ok := dependencyUnavailableRuntimeContext(cfg, err, message)
+	if !ok {
 		return message
 	}
 
+	if improved := improveOpenAICompatibleDependencyMessage(runtimeName, provider, message); improved != "" {
+		return improved
+	}
+	return message
+}
+
+func dependencyUnavailableRuntimeContext(cfg *config.Config, err error, message string) (string, config.RuntimeProvider, bool) {
+	if cfg == nil {
+		return "", config.RuntimeProvider{}, false
+	}
+
+	switch index.DependencyUnavailableRuntime(err) {
+	case "runtime.analysis":
+		return "runtime.analysis", cfg.Runtime.Analysis, true
+	case "runtime.embedder":
+		return "runtime.embedder", cfg.Runtime.Embedder, true
+	}
+
 	lower := strings.ToLower(message)
-	if !strings.Contains(lower, "api key") && !strings.Contains(lower, "apikey") {
+	switch {
+	case strings.Contains(lower, "runtime.analysis"):
+		return "runtime.analysis", cfg.Runtime.Analysis, true
+	case strings.Contains(lower, "runtime.embedder"):
+		return "runtime.embedder", cfg.Runtime.Embedder, true
+	default:
+		return "", config.RuntimeProvider{}, false
+	}
+}
+
+func improveOpenAICompatibleDependencyMessage(runtimeName string, provider config.RuntimeProvider, rawMessage string) string {
+	if strings.TrimSpace(provider.Provider) != config.RuntimeProviderOpenAI {
+		return maybeAddAPIKeyEnv(rawMessage, strings.TrimSpace(provider.APIKeyEnv))
+	}
+
+	details := runtimeDescriptor(runtimeName, provider)
+	lower := strings.ToLower(rawMessage)
+
+	switch {
+	case mentionsMissingAPIKey(lower):
+		message := fmt.Sprintf("%s is missing credentials", details)
+		if envVar := strings.TrimSpace(provider.APIKeyEnv); envVar != "" && !strings.Contains(rawMessage, envVar) {
+			message = fmt.Sprintf("%s; set %s in the environment", message, envVar)
+		}
+		return fmt.Sprintf("%s. Raw provider error: %s", message, rawMessage)
+	case mentionsModelUnloaded(lower):
+		return fmt.Sprintf(
+			"%s is unavailable because the configured model appears to be unloaded. If you are using LM Studio, load or pin model %q and retry. Raw provider error: %s",
+			details,
+			strings.TrimSpace(provider.Model),
+			rawMessage,
+		)
+	case mentionsEndpointTimeout(lower):
+		return fmt.Sprintf(
+			"%s timed out while waiting for the provider. Check that the endpoint is reachable, that the provider is responsive, and that model %q is loaded. Raw provider error: %s",
+			details,
+			strings.TrimSpace(provider.Model),
+			rawMessage,
+		)
+	case mentionsEndpointReachabilityFailure(lower):
+		return fmt.Sprintf(
+			"%s is unreachable. Check that the endpoint is correct, that the provider is running, and that it is bound to an address reachable from this machine. If you are using LM Studio, start the local server or fix the server binding. Raw provider error: %s",
+			details,
+			rawMessage,
+		)
+	default:
+		return maybeAddAPIKeyEnv(rawMessage, strings.TrimSpace(provider.APIKeyEnv))
+	}
+}
+
+func runtimeDescriptor(runtimeName string, provider config.RuntimeProvider) string {
+	return fmt.Sprintf(
+		"%s (provider %q, model %q, endpoint %q)",
+		runtimeName,
+		strings.TrimSpace(provider.Provider),
+		strings.TrimSpace(provider.Model),
+		strings.TrimSpace(provider.Endpoint),
+	)
+}
+
+func maybeAddAPIKeyEnv(message, envVar string) string {
+	if envVar == "" {
 		return message
 	}
-	if strings.Contains(message, envVar) {
+	lower := strings.ToLower(message)
+	if !mentionsMissingAPIKey(lower) || strings.Contains(message, envVar) {
 		return message
 	}
 	return fmt.Sprintf("%s; set %s in the environment", message, envVar)
 }
 
-func configuredAPIKeyEnv(cfg *config.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	if envVar := strings.TrimSpace(cfg.Runtime.Embedder.APIKeyEnv); envVar != "" {
-		return envVar
-	}
-	return strings.TrimSpace(cfg.Runtime.Analysis.APIKeyEnv)
+func mentionsMissingAPIKey(message string) bool {
+	return strings.Contains(message, "api key") || strings.Contains(message, "apikey")
+}
+
+func mentionsModelUnloaded(message string) bool {
+	return strings.Contains(message, "model unloaded")
+}
+
+func mentionsEndpointTimeout(message string) bool {
+	return strings.Contains(message, "context deadline exceeded") ||
+		strings.Contains(message, "client.timeout exceeded") ||
+		strings.Contains(message, "timeout awaiting response headers") ||
+		strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "timed out")
+}
+
+func mentionsEndpointReachabilityFailure(message string) bool {
+	return strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "couldn't connect to server") ||
+		strings.Contains(message, "failed to connect") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "network is unreachable")
 }

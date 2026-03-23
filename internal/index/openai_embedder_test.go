@@ -112,3 +112,42 @@ func TestOpenAICompatibleEmbedderRequiresConfiguredAPIKey(t *testing.T) {
 		t.Fatalf("NewEmbedder() error = %q, want missing-API-key detail", err)
 	}
 }
+
+func TestOpenAICompatibleEmbedderParsesStringErrorBodies(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"error": "Model unloaded..",
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	embedder, err := NewEmbedder(config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "pituitary-embed",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder() error = %v", err)
+	}
+
+	_, err = embedder.EmbedQueries(context.Background(), []string{"ping"})
+	if err == nil {
+		t.Fatal("EmbedQueries() error = nil, want dependency-unavailable failure")
+	}
+	if !IsDependencyUnavailable(err) {
+		t.Fatalf("EmbedQueries() error = %v, want dependency-unavailable classification", err)
+	}
+	if !strings.Contains(err.Error(), "Model unloaded..") {
+		t.Fatalf("EmbedQueries() error = %q, want parsed model-unloaded detail", err)
+	}
+	if strings.Contains(err.Error(), `{"error":"Model unloaded.."}`) {
+		t.Fatalf("EmbedQueries() error = %q, want parsed message instead of raw JSON", err)
+	}
+}
