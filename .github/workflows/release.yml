@@ -51,6 +51,7 @@ jobs:
           update: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-sqlite3
 
       - name: Run GoReleaser packaging
         if: runner.os != 'Windows'
@@ -74,7 +75,7 @@ jobs:
           CC: ${{ runner.os == 'Windows' && format('{0}/ucrt64/bin/gcc.exe', steps.msys2.outputs.msys2-location) || '' }}
 
       - name: Upload packaged artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -87,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: release-*
           merge-multiple: true
