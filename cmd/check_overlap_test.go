@@ -110,6 +110,58 @@ func TestRunCheckOverlapWithPathJSON(t *testing.T) {
 	}
 }
 
+func TestRunCheckOverlapReportsBoundaryReviewForMatureAcceptedSpecs(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--path", "specs/burst-handling", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Candidate struct {
+				Ref string `json:"ref"`
+			} `json:"candidate"`
+			Overlaps []struct {
+				Ref          string `json:"ref"`
+				Relationship string `json:"relationship"`
+				Guidance     string `json:"guidance"`
+			} `json:"overlaps"`
+			Recommendation string `json:"recommendation"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap payload: %v", err)
+	}
+	if got, want := payload.Result.Candidate.Ref, "SPEC-055"; got != want {
+		t.Fatalf("candidate ref = %q, want %q", got, want)
+	}
+	if len(payload.Result.Overlaps) == 0 || payload.Result.Overlaps[0].Ref != "SPEC-042" {
+		t.Fatalf("overlaps = %+v, want SPEC-042 first", payload.Result.Overlaps)
+	}
+	if got, want := payload.Result.Overlaps[0].Relationship, "adjacent"; got != want {
+		t.Fatalf("relationship = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Overlaps[0].Guidance, "boundary_review"; got != want {
+		t.Fatalf("guidance = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Recommendation, "review_boundaries"; got != want {
+		t.Fatalf("recommendation = %q, want %q", got, want)
+	}
+}
+
 func TestRunCheckOverlapWithSpecRecordFileJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

@@ -15,7 +15,11 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
-const overlapThreshold = 0.45
+const (
+	overlapThreshold           = 0.45
+	overlapDraftMergeThreshold = 0.8
+	overlapDuplicateThreshold  = 0.82
+)
 
 // OverlapRequest is the normalized input for overlap detection.
 type OverlapRequest struct {
@@ -41,6 +45,7 @@ type OverlapItem struct {
 	Score           float64                    `json:"score"`
 	OverlapDegree   string                     `json:"overlap_degree"`
 	Relationship    string                     `json:"relationship"`
+	Guidance        string                     `json:"guidance"`
 	SharedAppliesTo []string                   `json:"shared_applies_to,omitempty"`
 	Inference       *model.InferenceConfidence `json:"inference,omitempty"`
 }
@@ -125,6 +130,7 @@ func buildOverlapResult(candidate *specDocument, targets map[string]specDocument
 		}
 
 		sharedAppliesTo := sharedStrings(candidate.Record.AppliesTo, target.Record.AppliesTo)
+		relationship := overlapRelationship(candidate.Record, target.Record, score)
 		overlaps = append(overlaps, OverlapItem{
 			Ref:             target.Record.Ref,
 			Title:           target.Record.Title,
@@ -132,7 +138,8 @@ func buildOverlapResult(candidate *specDocument, targets map[string]specDocument
 			Domain:          target.Record.Domain,
 			Score:           roundScore(score),
 			OverlapDegree:   overlapDegree(score),
-			Relationship:    overlapRelationship(candidate.Record, target.Record, score),
+			Relationship:    relationship,
+			Guidance:        overlapGuidance(candidate.Record, score, relationship),
 			SharedAppliesTo: sharedAppliesTo,
 			Inference:       target.Record.Inference,
 		})
@@ -142,6 +149,8 @@ func buildOverlapResult(candidate *specDocument, targets map[string]specDocument
 		switch {
 		case overlaps[i].Score != overlaps[j].Score:
 			return overlaps[i].Score > overlaps[j].Score
+		case overlaps[i].Guidance != overlaps[j].Guidance:
+			return overlapGuidancePriority(overlaps[i].Guidance) < overlapGuidancePriority(overlaps[j].Guidance)
 		default:
 			return overlaps[i].Ref < overlaps[j].Ref
 		}
@@ -611,10 +620,44 @@ func overlapRelationship(candidate, target model.SpecRecord, score float64) stri
 	case relationExists(candidate.Relations, model.RelationSupersedes, target.Ref),
 		relationExists(target.Relations, model.RelationSupersedes, candidate.Ref):
 		return "extends"
-	case sharedSet(candidate.AppliesTo, target.AppliesTo) && score >= 0.82:
+	case relationExists(candidate.Relations, model.RelationDependsOn, target.Ref),
+		relationExists(target.Relations, model.RelationDependsOn, candidate.Ref):
+		return "adjacent"
+	case sharedSet(candidate.AppliesTo, target.AppliesTo) && score >= overlapDuplicateThreshold:
 		return "duplicates"
 	default:
-		return "extends"
+		return "adjacent"
+	}
+}
+
+func overlapGuidance(candidate model.SpecRecord, score float64, relationship string) string {
+	switch {
+	case relationship == "duplicates" && score >= overlapDuplicateThreshold:
+		return "merge_candidate"
+	case overlapCandidateStillMutable(candidate) && relationship == "extends" && score >= overlapDraftMergeThreshold:
+		return "merge_candidate"
+	default:
+		return "boundary_review"
+	}
+}
+
+func overlapCandidateStillMutable(candidate model.SpecRecord) bool {
+	switch candidate.Status {
+	case model.StatusDraft, model.StatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+func overlapGuidancePriority(guidance string) int {
+	switch guidance {
+	case "merge_candidate":
+		return 0
+	case "boundary_review":
+		return 1
+	default:
+		return 2
 	}
 }
 
@@ -627,10 +670,10 @@ func overlapRecommendation(candidate model.SpecRecord, overlaps []OverlapItem) s
 			return "proceed_with_supersedes"
 		}
 	}
-	if overlaps[0].OverlapDegree == "high" {
+	if overlaps[0].Guidance == "merge_candidate" {
 		return "merge_into_existing"
 	}
-	return "merge_into_existing"
+	return "review_boundaries"
 }
 
 func roundScore(score float64) float64 {

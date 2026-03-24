@@ -190,6 +190,8 @@ Every command supports `--format json` for machine-readable output. `search-spec
 
 By default, `search-specs` down-ranks sections that look like historical provenance or history so active normative content wins first. If your query explicitly asks for historical context, those sections stay fully accessible.
 
+`check-overlap` keeps weaker structural matches visible, but it now reserves `merge_into_existing` for strong merge candidates. Mature accepted specs usually surface `review_boundaries` instead, so overlap stays visible without implying that every adjacency should collapse into one spec.
+
 ### Example: full spec review
 
 Path-first commands accept workspace-relative paths, absolute paths, bundle directories, `spec.toml` files, `body.md` files, and inferred `markdown_contract` files. Internally they still normalize to canonical indexed refs.

@@ -394,13 +394,13 @@ func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {
 	fmt.Fprintf(w, "candidate: %s | %s\n", result.Candidate.Ref, result.Candidate.Title)
 	if len(result.Overlaps) == 0 {
 		fmt.Fprintln(w, "no overlaps")
-		fmt.Fprintf(w, "recommendation: %s\n", result.Recommendation)
+		renderOverlapRecommendation(w, result.Recommendation)
 		return
 	}
 	for i, overlap := range result.Overlaps {
-		fmt.Fprintf(w, "%d. %s | %s | %.3f | %s | %s\n", i+1, overlap.Ref, overlap.Title, overlap.Score, overlap.OverlapDegree, overlap.Relationship)
+		fmt.Fprintf(w, "%d. %s | %s | %.3f | %s | %s | %s\n", i+1, overlap.Ref, overlap.Title, overlap.Score, overlap.OverlapDegree, overlap.Relationship, humanizeOverlapGuidance(overlap.Guidance))
 	}
-	fmt.Fprintf(w, "recommendation: %s\n", result.Recommendation)
+	renderOverlapRecommendation(w, result.Recommendation)
 }
 
 func renderCompareResult(w io.Writer, result *analysis.CompareResult) {
@@ -588,10 +588,14 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 	fmt.Fprintf(w, "spec: %s\n", result.SpecRef)
 
 	if result.Overlap != nil {
-		fmt.Fprintf(w, "overlaps: %d | recommendation: %s\n", len(result.Overlap.Overlaps), result.Overlap.Recommendation)
+		fmt.Fprintf(w, "overlaps: %d | recommendation: %s", len(result.Overlap.Overlaps), result.Overlap.Recommendation)
+		if detail := humanizeOverlapRecommendation(result.Overlap.Recommendation); detail != "" {
+			fmt.Fprintf(w, " | %s", detail)
+		}
+		fmt.Fprintln(w)
 		if len(result.Overlap.Overlaps) > 0 {
 			top := result.Overlap.Overlaps[0]
-			fmt.Fprintf(w, "top overlap: %s | %s | %.3f\n", top.Ref, top.Relationship, top.Score)
+			fmt.Fprintf(w, "top overlap: %s | %s | %.3f | %s\n", top.Ref, top.Relationship, top.Score, humanizeOverlapGuidance(top.Guidance))
 		}
 	}
 	if result.Comparison != nil {
@@ -626,12 +630,16 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 	if result.Overlap == nil {
 		fmt.Fprintln(w, "No overlap analysis.")
 	} else {
-		fmt.Fprintf(w, "- Recommendation: `%s`\n", result.Overlap.Recommendation)
+		fmt.Fprintf(w, "- Recommendation: `%s`", result.Overlap.Recommendation)
+		if detail := humanizeOverlapRecommendation(result.Overlap.Recommendation); detail != "" {
+			fmt.Fprintf(w, " (%s)", detail)
+		}
+		fmt.Fprintln(w)
 		if len(result.Overlap.Overlaps) == 0 {
 			fmt.Fprintln(w, "- No overlapping specs detected.")
 		} else {
 			for _, item := range result.Overlap.Overlaps {
-				fmt.Fprintf(w, "- `%s` %s (%s, %.3f)\n", item.Ref, item.Title, item.Relationship, item.Score)
+				fmt.Fprintf(w, "- `%s` %s (%s, %.3f, %s)\n", item.Ref, item.Title, item.Relationship, item.Score, humanizeOverlapGuidance(item.Guidance))
 			}
 		}
 	}
@@ -723,6 +731,38 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 			}
 		}
 		fmt.Fprintln(w)
+	}
+}
+
+func renderOverlapRecommendation(w io.Writer, recommendation string) {
+	fmt.Fprintf(w, "recommendation: %s", recommendation)
+	if detail := humanizeOverlapRecommendation(recommendation); detail != "" {
+		fmt.Fprintf(w, " | %s", detail)
+	}
+	fmt.Fprintln(w)
+}
+
+func humanizeOverlapRecommendation(recommendation string) string {
+	switch recommendation {
+	case "review_boundaries":
+		return "real overlap, but clarify boundaries before merging"
+	case "merge_into_existing":
+		return "strong merge candidate"
+	case "proceed_with_supersedes":
+		return "candidate already declares the replacement path"
+	default:
+		return ""
+	}
+}
+
+func humanizeOverlapGuidance(guidance string) string {
+	switch guidance {
+	case "merge_candidate":
+		return "merge candidate"
+	case "boundary_review":
+		return "boundary review"
+	default:
+		return guidance
 	}
 }
 
