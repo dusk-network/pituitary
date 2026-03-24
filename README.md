@@ -51,6 +51,8 @@ If your repo already has a config, skip `init` and go straight to `status`, `ind
 
 The shipped default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the recommended retrieval runtime for a real spec corpus.
 
+When `init` or `status` sees a larger indexed corpus still using `fixture`, Pituitary now emits a guidance note instead of silently treating that setup as production-quality retrieval.
+
 If you are evaluating search quality, overlap ranking, doc drift, or terminology audits on your own repo:
 
 1. Follow the local runtime setup in [AI Runtime Configuration](#ai-runtime-configuration).

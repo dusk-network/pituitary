@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
@@ -22,6 +23,7 @@ type StatusResult struct {
 	Freshness     *index.FreshnessStatus
 	RelationGraph *index.RelationGraphStatus
 	Runtime       *runtimeprobe.Result
+	Guidance      []string
 }
 
 // Status loads config, inspects the current index, and optionally probes runtime dependencies.
@@ -56,8 +58,30 @@ func Status(ctx context.Context, configPath string, request StatusRequest) Respo
 			Freshness:     freshness,
 			RelationGraph: index.InspectRelationGraph(records.Specs),
 			Runtime:       runtimeResult,
+			Guidance:      fixtureEmbedderGuidance(cfg, status),
 		}, nil
 	}, classifyStatusError)
+}
+
+func fixtureEmbedderGuidance(cfg *config.Config, status *index.Status) []string {
+	if cfg == nil || status == nil {
+		return nil
+	}
+	if cfg.Runtime.Embedder.Provider != config.RuntimeProviderFixture {
+		return nil
+	}
+	totalArtifacts := status.SpecCount + status.DocCount
+	if totalArtifacts < 5 {
+		return nil
+	}
+	return []string{
+		fmt.Sprintf(
+			"runtime.embedder is still %q on %d indexed artifact(s); for better retrieval quality on a real corpus, switch to %q, rebuild the index, then run `pituitary status --check-runtime embedder`",
+			config.RuntimeProviderFixture,
+			totalArtifacts,
+			config.RuntimeProviderOpenAI,
+		),
+	}
 }
 
 func classifyStatusError(cfg *config.Config, err error) *Issue {

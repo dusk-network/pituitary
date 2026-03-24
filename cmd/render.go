@@ -184,6 +184,9 @@ func renderInitResult(w io.Writer, result *initResult) {
 			status = result.Status.Freshness.State
 		}
 		fmt.Fprintf(w, "status: %s | specs: %d | docs: %d | chunks: %d\n", status, result.Status.SpecCount, result.Status.DocCount, result.Status.ChunkCount)
+		for _, guidance := range result.Status.Guidance {
+			fmt.Fprintf(w, "guidance: %s\n", guidance)
+		}
 	}
 	if result.ConfigAction == "preview" {
 		fmt.Fprintln(w, "next: run `pituitary init` without --dry-run to write the config and build the index")
@@ -292,6 +295,9 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 				fmt.Fprintf(w, "runtime note: %s\n", check.Message)
 			}
 		}
+	}
+	for _, guidance := range result.Guidance {
+		fmt.Fprintf(w, "guidance: %s\n", guidance)
 	}
 }
 

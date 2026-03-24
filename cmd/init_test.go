@@ -104,6 +104,30 @@ func TestRunInitWritesConfigRebuildsAndSummarizes(t *testing.T) {
 	}
 }
 
+func TestRunInitReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
+	repo := writeDiscoveryWorkspace(t)
+	mustWriteFileCmd(t, filepath.Join(repo, "docs", "guides", "additional-guide.md"), `
+# Additional Guide
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runInit([]string{"--path", "."}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runInit() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, `guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+		t.Fatalf("runInit() output %q does not contain fixture guidance", output)
+	}
+	if !strings.Contains(output, "`pituitary status --check-runtime embedder`") {
+		t.Fatalf("runInit() output %q does not contain runtime probe guidance", output)
+	}
+}
+
 func TestRunInitRejectsExistingConfig(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 	mustMkdirAllCmd(t, filepath.Join(repo, ".pituitary"))
