@@ -134,6 +134,126 @@ func TestRunDiscoverWriteSupportsCustomConfigPath(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverWriteConfigWorksAcrossNestedIndexStatusAndAnalysis(t *testing.T) {
+	repo := writeDiscoveryWorkspace(t)
+	resolvedRepo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", repo, err)
+	}
+	nested := filepath.Join(repo, "pkg", "nested")
+	mustMkdirAllCmd(t, nested)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runDiscover([]string{"--path", ".", "--write"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runDiscover(--write) exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = withWorkingDir(t, nested, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex(--rebuild) from nested dir exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(resolvedRepo, ".pituitary", "pituitary.db")); err != nil {
+		t.Fatalf("rebuilt index missing: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = withWorkingDir(t, nested, func() int {
+		return runStatus([]string{}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() from nested dir exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() from nested dir wrote unexpected stderr: %q", stderr.String())
+	}
+	textOut := stdout.String()
+	if !strings.Contains(textOut, filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml")) {
+		t.Fatalf("status output %q does not contain discovered config path", textOut)
+	}
+	if !strings.Contains(textOut, filepath.Join(resolvedRepo, ".pituitary", "pituitary.db")) {
+		t.Fatalf("status output %q does not contain resolved index path", textOut)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = withWorkingDir(t, nested, func() int {
+		return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus(--format json) from nested dir exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus(--format json) from nested dir wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var statusPayload struct {
+		Result struct {
+			ConfigPath      string `json:"config_path"`
+			IndexPath       string `json:"index_path"`
+			IndexExists     bool   `json:"index_exists"`
+			ConfigResolution struct {
+				SelectedBy string `json:"selected_by"`
+			} `json:"config_resolution"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &statusPayload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if len(statusPayload.Errors) != 0 {
+		t.Fatalf("status errors = %+v, want none", statusPayload.Errors)
+	}
+	if got, want := statusPayload.Result.ConfigPath, filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml"); got != want {
+		t.Fatalf("status config_path = %q, want %q", got, want)
+	}
+	if got, want := statusPayload.Result.IndexPath, filepath.Join(resolvedRepo, ".pituitary", "pituitary.db"); got != want {
+		t.Fatalf("status index_path = %q, want %q", got, want)
+	}
+	if !statusPayload.Result.IndexExists {
+		t.Fatalf("status payload = %+v, want index_exists=true", statusPayload.Result)
+	}
+	if got, want := statusPayload.Result.ConfigResolution.SelectedBy, configSourceDiscovery; got != want {
+		t.Fatalf("status selected_by = %q, want %q", got, want)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = withWorkingDir(t, nested, func() int {
+		return runAnalyzeImpact([]string{"--spec-ref", "SPEC-042", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() from nested dir exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() from nested dir wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var impactPayload struct {
+		Result struct {
+			SpecRef string `json:"spec_ref"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &impactPayload); err != nil {
+		t.Fatalf("unmarshal impact payload: %v", err)
+	}
+	if len(impactPayload.Errors) != 0 {
+		t.Fatalf("impact errors = %+v, want none", impactPayload.Errors)
+	}
+	if got, want := impactPayload.Result.SpecRef, "SPEC-042"; got != want {
+		t.Fatalf("impact spec_ref = %q, want %q", got, want)
+	}
+}
+
 func TestRunDiscoverHelpDoesNotAdvertiseConfigResolution(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
