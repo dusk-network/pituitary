@@ -575,6 +575,9 @@ CLI exit codes should stay simple:
 
 #### V1 JSON command contracts
 
+- `status` (`pituitary status`)
+  - Request: `{ "check_runtime": "none" | "embedder" | "analysis" | "all" }`
+  - Result: `{ "workspace_root": "...", "config_path": "...", "config_resolution": { "selected_by": "command_flag" | "global_flag" | "env" | "discovered_local", "reason": "...", "candidates": [{ "precedence": 1, "source": "...", "path": "...", "status": "selected" | "shadowed" | "not_set" | "missing", "detail": "..." }] }, "index_path": "...", "index_exists": true, "spec_count": N, "doc_count": N, "chunk_count": N, "artifact_locations": { "index_dir": "...", "discover_config_path": "...", "canonicalize_bundle_root": "...", "ignore_patterns": [".pituitary/"], "relocation_hints": ["..."] }, "runtime": { ... } | null }`
 - `index` (`pituitary index --rebuild`)
   - Request: `{ "rebuild": true }`
   - Result: `{ "workspace_root": ".", "index_path": ".pituitary/pituitary.db", "artifact_counts": { "spec": N, "doc": N }, "chunk_count": N, "edge_count": N }`
@@ -595,7 +598,7 @@ CLI exit codes should stay simple:
   - Result: `{ "scope": { "mode": "workspace" | "spec_ref", "artifact_kinds": ["doc", "spec"], "spec_ref": "SPEC-LOCALITY" }, "terms": [...], "canonical_terms": [...], "anchor_specs": [...], "findings": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [{ "section": "...", "terms": [...], "excerpt": "...", "evidence": { "spec_ref": "SPEC-LOCALITY", "section": "...", "score": 0.0 } | null }] }] }`
 - `check_doc_drift` (`pituitary check-doc-drift`)
   - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
-  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
+  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "aligned" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
 - `review_spec` (`pituitary review-spec`)
   - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
   - Result: `{ "spec_ref": "SPEC-042", "overlap": { ... }, "comparison": { ... } | null, "impact": { ... }, "doc_drift": { ... } }`

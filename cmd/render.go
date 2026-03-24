@@ -165,7 +165,28 @@ func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary)
 }
 
 func renderStatusResult(w io.Writer, result *statusResult) {
+	if result.WorkspaceRoot != "" {
+		fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	}
 	fmt.Fprintf(w, "config: %s\n", result.ConfigPath)
+	if result.ConfigResolution != nil {
+		if result.ConfigResolution.Reason != "" {
+			fmt.Fprintf(w, "config resolution: %s\n", result.ConfigResolution.Reason)
+		}
+		if len(result.ConfigResolution.Candidates) > 0 {
+			fmt.Fprintln(w, "config candidates:")
+			for _, candidate := range result.ConfigResolution.Candidates {
+				fmt.Fprintf(w, "  %d. %s | %s", candidate.Precedence, configSourceLabel(candidate.Source), candidate.Status)
+				if candidate.Path != "" {
+					fmt.Fprintf(w, " | %s", candidate.Path)
+				}
+				fmt.Fprintln(w)
+				if candidate.Detail != "" {
+					fmt.Fprintf(w, "     %s\n", candidate.Detail)
+				}
+			}
+		}
+	}
 	fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
 	if result.IndexExists {
 		fmt.Fprintln(w, "index: present")
@@ -175,6 +196,17 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
 	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
 	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
+	if result.ArtifactLocations != nil {
+		fmt.Fprintf(w, "artifact index dir: %s\n", result.ArtifactLocations.IndexDir)
+		fmt.Fprintf(w, "artifact discover --write default: %s\n", result.ArtifactLocations.DiscoverConfigPath)
+		fmt.Fprintf(w, "artifact canonicalize default: %s\n", result.ArtifactLocations.CanonicalizeBundleRoot)
+		if len(result.ArtifactLocations.IgnorePatterns) > 0 {
+			fmt.Fprintf(w, "artifact ignore patterns: %s\n", strings.Join(result.ArtifactLocations.IgnorePatterns, ", "))
+		}
+		for _, hint := range result.ArtifactLocations.RelocationHints {
+			fmt.Fprintf(w, "artifact relocation: %s\n", hint)
+		}
+	}
 	if result.Runtime != nil {
 		fmt.Fprintf(w, "runtime probe: %s\n", result.Runtime.Scope)
 		for _, check := range result.Runtime.Checks {

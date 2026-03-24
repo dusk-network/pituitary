@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,5 +155,109 @@ path = "specs"
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
 		t.Fatalf("runIndex() did not create database via discovered local config: %v", err)
+	}
+}
+
+func TestResolveCommandConfigPathPrefersCommandFlagAndExplainsCandidates(t *testing.T) {
+	repo := t.TempDir()
+	commandConfigPath := filepath.Join(repo, "configs", "pituitary.local.toml")
+	globalConfigPath := filepath.Join(repo, "global", "pituitary.toml")
+	envConfigPath := filepath.Join(repo, "env", "pituitary.toml")
+
+	t.Setenv(configEnvVar, envConfigPath)
+
+	var (
+		resolvedPath string
+		resolution   *configResolution
+		err          error
+	)
+	withWorkingDir(t, repo, func() int {
+		resolvedPath, resolution, err = resolveCommandConfigPathWithResolution(
+			withCLIConfigPath(context.Background(), globalConfigPath),
+			commandConfigPath,
+		)
+		return 0
+	})
+	if err != nil {
+		t.Fatalf("resolveCommandConfigPathWithResolution() error = %v", err)
+	}
+	if got, want := resolvedPath, commandConfigPath; got != want {
+		t.Fatalf("resolved path = %q, want %q", got, want)
+	}
+	if resolution == nil {
+		t.Fatal("resolution = nil, want explanation payload")
+	}
+	if got, want := resolution.SelectedBy, configSourceCommandFlag; got != want {
+		t.Fatalf("selected_by = %q, want %q", got, want)
+	}
+	if len(resolution.Candidates) < 5 {
+		t.Fatalf("candidates = %+v, want explicit/env/discovery entries", resolution.Candidates)
+	}
+	if got, want := resolution.Candidates[0].Status, "selected"; got != want {
+		t.Fatalf("command candidate status = %q, want %q", got, want)
+	}
+	if got, want := resolution.Candidates[1].Status, "shadowed"; got != want {
+		t.Fatalf("global candidate status = %q, want %q", got, want)
+	}
+	if got, want := resolution.Candidates[2].Status, "shadowed"; got != want {
+		t.Fatalf("env candidate status = %q, want %q", got, want)
+	}
+	if got, want := resolution.Candidates[3].Status, "missing"; got != want {
+		t.Fatalf("first discovery candidate status = %q, want %q", got, want)
+	}
+	if !strings.Contains(resolution.Reason, "command-local --config") {
+		t.Fatalf("reason = %q, want command precedence detail", resolution.Reason)
+	}
+}
+
+func TestResolveCommandConfigPathExplainsDiscoveredShadowedConfig(t *testing.T) {
+	repo := t.TempDir()
+	resolvedRepo, resolveErr := filepath.EvalSymlinks(repo)
+	if resolveErr != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", repo, resolveErr)
+	}
+	mustMkdirAllCmd(t, filepath.Join(repo, ".pituitary"))
+	mustWriteFileCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), "[workspace]\nroot = \".\"\nindex_path = \".pituitary/pituitary.db\"\n")
+	mustWriteFileCmd(t, filepath.Join(repo, "pituitary.toml"), "[workspace]\nroot = \".\"\nindex_path = \".pituitary/pituitary.db\"\n")
+
+	nested := filepath.Join(repo, "pkg", "nested")
+	mustMkdirAllCmd(t, nested)
+
+	var (
+		resolvedPath string
+		resolution   *configResolution
+		err          error
+	)
+	withWorkingDir(t, nested, func() int {
+		resolvedPath, resolution, err = resolveCommandConfigPathWithResolution(context.Background(), "")
+		return 0
+	})
+	if err != nil {
+		t.Fatalf("resolveCommandConfigPathWithResolution() error = %v", err)
+	}
+	if got, want := resolvedPath, filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml"); got != want {
+		t.Fatalf("resolved path = %q, want %q", got, want)
+	}
+	if resolution == nil {
+		t.Fatal("resolution = nil, want explanation payload")
+	}
+	if got, want := resolution.SelectedBy, configSourceDiscovery; got != want {
+		t.Fatalf("selected_by = %q, want %q", got, want)
+	}
+	var foundSelected, foundShadowed bool
+	for _, candidate := range resolution.Candidates {
+		switch {
+		case candidate.Path == filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml") && candidate.Status == "selected":
+			foundSelected = true
+		case candidate.Path == filepath.Join(resolvedRepo, "pituitary.toml") && candidate.Status == "shadowed":
+			foundShadowed = true
+		}
+	}
+	if !foundSelected || !foundShadowed {
+		t.Fatalf("candidates = %+v, want selected local config and shadowed root config", resolution.Candidates)
+	}
+	if !strings.Contains(resolution.Reason, filepath.ToSlash(filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml"))) ||
+		!strings.Contains(resolution.Reason, filepath.ToSlash(filepath.Join(resolvedRepo, "pituitary.toml"))) {
+		t.Fatalf("reason = %q, want selected and shadowed discovered paths", resolution.Reason)
 	}
 }

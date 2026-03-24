@@ -74,3 +74,45 @@ Applies To:
 		t.Fatal("generated config = empty, want TOML")
 	}
 }
+
+func TestDiscoverWorkspaceSupportsCustomConfigPath(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "specs", "rate-limit-v2", "spec.toml"), `
+id = "SPEC-042"
+title = "Per-Tenant API Rate Limits"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(repo, "specs", "rate-limit-v2", "body.md"), `
+# Per-Tenant API Rate Limits
+`)
+	customConfigPath := filepath.Join(repo, "tools", "pituitary.local.toml")
+
+	result, err := DiscoverWorkspace(DiscoverOptions{
+		RootPath:   repo,
+		ConfigPath: filepath.ToSlash(filepath.Join("tools", "pituitary.local.toml")),
+		Write:      true,
+	})
+	if err != nil {
+		t.Fatalf("DiscoverWorkspace() error = %v", err)
+	}
+
+	if got, want := result.ConfigPath, customConfigPath; got != want {
+		t.Fatalf("config path = %q, want %q", got, want)
+	}
+	if !result.WroteConfig {
+		t.Fatalf("result = %+v, want wrote_config=true", result)
+	}
+
+	cfg, err := config.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load(custom discovered config) error = %v", err)
+	}
+	if got, want := cfg.Workspace.RootPath, repo; got != want {
+		t.Fatalf("workspace root path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Workspace.ResolvedIndexPath, filepath.Join(repo, ".pituitary", "pituitary.db"); got != want {
+		t.Fatalf("resolved index path = %q, want %q", got, want)
+	}
+}

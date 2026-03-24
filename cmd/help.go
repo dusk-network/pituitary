@@ -48,8 +48,8 @@ func printCommandHelp(w io.Writer, fs *flag.FlagSet, help commandHelp) {
 func printSharedConfigResolution(w io.Writer) {
 	fmt.Fprintln(w, "shared config resolution:")
 	fmt.Fprintln(w, "  the first match wins:")
-	fmt.Fprintln(w, "  - global --config PATH before the command")
 	fmt.Fprintln(w, "  - command-local --config PATH")
+	fmt.Fprintln(w, "  - global --config PATH before the command")
 	fmt.Fprintf(w, "  - %s\n", configEnvVar)
 	fmt.Fprintf(w, "  - %s or %s in the working directory or a parent directory\n", pathpkg.Join(localConfigDirName, defaultConfigName), defaultConfigName)
 }

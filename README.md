@@ -174,7 +174,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
-| `status [--check-runtime all]` | Report index counts and optionally probe embedder and analysis runtime readiness |
+| `status [--check-runtime all]` | Report index counts, config resolution, artifact locations, and optionally probe embedder and analysis runtime readiness |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
@@ -216,6 +216,18 @@ All commands share a consistent JSON envelope:
 ```
 
 Pass `--format json` to any command to get this format, suitable for piping into `jq`, CI scripts, or other tools.
+
+### Config Resolution And Artifact Hygiene
+
+`pituitary status` now explains why the active config won and where Pituitary writes generated state.
+
+- Config precedence is explicit: command-local `--config`, then global `--config`, then `PITUITARY_CONFIG`, then discovered `.pituitary/pituitary.toml` or `pituitary.toml` in the working directory or a parent directory.
+- Artifact locations are surfaced directly: active index path, index directory, `discover --write` default config path, and the default `canonicalize` bundle root.
+- Relocation knobs stay simple:
+  - set `[workspace].index_path` to move the SQLite index
+  - use `pituitary discover --config-path PATH --write` to place generated config elsewhere
+  - use `pituitary canonicalize --bundle-dir PATH` to place generated bundles elsewhere
+- If you keep the defaults, ignore `.pituitary/` in your workspace.
 
 ### Example: terminology audit
 
