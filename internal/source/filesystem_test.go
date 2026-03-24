@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
@@ -239,6 +240,51 @@ body = "body.md"
 	if got, want := preview.Sources[0].Items[0].Path, "specs/parent/spec.toml"; got != want {
 		t.Fatalf("preview item path = %q, want %q", got, want)
 	}
+}
+
+func TestParseSpecBundleRejectsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	t.Run("scalar", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := parseSpecBundle([]byte(`
+id = "SPEC-100"
+title = "First"
+title = "Second"
+status = "draft"
+domain = "api"
+body = "body.md"
+`))
+		if err == nil {
+			t.Fatal("parseSpecBundle() error = nil, want duplicate scalar field error")
+		}
+		if !strings.Contains(err.Error(), "duplicate title; first defined at line 3") {
+			t.Fatalf("parseSpecBundle() error = %q, want duplicate title details", err)
+		}
+	})
+
+	t.Run("array", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := parseSpecBundle(bytes.TrimSpace([]byte(`
+id = "SPEC-100"
+title = "Example"
+status = "draft"
+domain = "api"
+body = "body.md"
+authors = ["one"]
+authors = [
+  "two",
+]
+`)))
+		if err == nil {
+			t.Fatal("parseSpecBundle() error = nil, want duplicate array field error")
+		}
+		if !strings.Contains(err.Error(), "duplicate authors; first defined at line 6") {
+			t.Fatalf("parseSpecBundle() error = %q, want duplicate authors details", err)
+		}
+	})
 }
 
 func TestLoadFromConfigRejectsMalformedSpecArrays(t *testing.T) {

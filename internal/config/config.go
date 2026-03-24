@@ -223,6 +223,11 @@ func parse(file io.Reader) (rawConfig, error) {
 	var currentSource *rawSource
 	var activeSourceArrayKey string
 	var activeSourceArrayLine int
+	seenRoot := map[string]int{}
+	seenWorkspace := map[string]int{}
+	seenRuntimeEmbedder := map[string]int{}
+	seenRuntimeAnalysis := map[string]int{}
+	var seenCurrentSource map[string]int
 
 	scanner := bufio.NewScanner(file)
 	for lineNo := 1; scanner.Scan(); lineNo++ {
@@ -266,6 +271,7 @@ func parse(file io.Reader) (rawConfig, error) {
 			}
 			cfg.sources = append(cfg.sources, rawSource{})
 			currentSource = &cfg.sources[len(cfg.sources)-1]
+			seenCurrentSource = map[string]int{}
 			section = name
 			continue
 		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
@@ -292,20 +298,32 @@ func parse(file io.Reader) (rawConfig, error) {
 			if key != "schema_version" {
 				return rawConfig{}, fmt.Errorf("line %d: key %q is outside a supported section", lineNo, key)
 			}
+			if err := markDuplicateKey(seenRoot, "schema_version", lineNo); err != nil {
+				return rawConfig{}, err
+			}
 			parsed, err := strconv.Atoi(value)
 			if err != nil {
 				return rawConfig{}, fmt.Errorf("line %d: schema_version: expected integer", lineNo)
 			}
 			cfg.schemaVersion = parsed
 		case "workspace":
+			if err := markDuplicateKey(seenWorkspace, "workspace."+key, lineNo); err != nil {
+				return rawConfig{}, err
+			}
 			if err := parseWorkspaceField(&cfg.workspace, key, value, lineNo); err != nil {
 				return rawConfig{}, err
 			}
 		case "runtime.embedder":
+			if err := markDuplicateKey(seenRuntimeEmbedder, "runtime.embedder."+key, lineNo); err != nil {
+				return rawConfig{}, err
+			}
 			if err := parseRuntimeField(&cfg.runtimeEmbedder, key, value, lineNo, section); err != nil {
 				return rawConfig{}, err
 			}
 		case "runtime.analysis":
+			if err := markDuplicateKey(seenRuntimeAnalysis, "runtime.analysis."+key, lineNo); err != nil {
+				return rawConfig{}, err
+			}
 			if err := parseRuntimeField(&cfg.runtimeAnalysis, key, value, lineNo, section); err != nil {
 				return rawConfig{}, err
 			}
@@ -313,9 +331,15 @@ func parse(file io.Reader) (rawConfig, error) {
 			if currentSource == nil {
 				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
 			}
+			if seenCurrentSource == nil {
+				seenCurrentSource = map[string]int{}
+			}
 			if value == "[" {
 				if !isSourceArrayField(key) {
 					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
+				}
+				if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
+					return rawConfig{}, err
 				}
 				activeSourceArrayKey = key
 				activeSourceArrayLine = lineNo
@@ -328,6 +352,9 @@ func parse(file io.Reader) (rawConfig, error) {
 				if !isSourceArrayField(key) {
 					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
 				}
+				if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
+					return rawConfig{}, err
+				}
 				values, err := parseQuotedValues(value)
 				if err != nil {
 					return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, key, err)
@@ -336,6 +363,9 @@ func parse(file io.Reader) (rawConfig, error) {
 					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
 				}
 				continue
+			}
+			if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
+				return rawConfig{}, err
 			}
 			if err := parseSourceField(currentSource, key, value, lineNo); err != nil {
 				return rawConfig{}, err
@@ -354,6 +384,14 @@ func parse(file io.Reader) (rawConfig, error) {
 		)
 	}
 	return cfg, nil
+}
+
+func markDuplicateKey(seen map[string]int, key string, lineNo int) error {
+	if firstLine, ok := seen[key]; ok {
+		return fmt.Errorf("line %d: duplicate %s; first defined at line %d", lineNo, key, firstLine)
+	}
+	seen[key] = lineNo
+	return nil
 }
 
 func parseWorkspaceField(workspace *rawWorkspace, key, value string, lineNo int) error {
