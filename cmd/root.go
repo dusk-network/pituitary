@@ -8,25 +8,71 @@ import (
 	"sort"
 )
 
-var commands = map[string]string{
-	"canonicalize":      "promote an inferred contract into a spec bundle",
-	"discover":          "scan a repo and propose a local config",
-	"migrate-config":    "rewrite a legacy config into the current schema",
-	"index":             "rebuild or validate the local Pituitary index",
-	"status":            "show current index status",
-	"version":           "show Pituitary and Go runtime versions",
-	"preview-sources":   "show which files each source will index",
-	"explain-file":      "explain how one file is treated by configured sources",
-	"search-specs":      "search spec sections semantically",
-	"check-overlap":     "find overlapping specs",
-	"compare-specs":     "compare design tradeoffs across specs",
-	"analyze-impact":    "report affected specs and docs",
-	"check-terminology": "audit terminology consistency after conceptual changes",
-	"check-compliance":  "check code paths and diffs against accepted specs",
-	"check-doc-drift":   "find docs that drift from specs",
-	"review-spec":       "run the common spec-review workflow",
-	"serve":             "run the optional MCP server transport",
-	"help":              "show available commands",
+type commandSpec struct {
+	Run func(context.Context, []string, io.Writer, io.Writer) int
+}
+
+var commands = map[string]commandSpec{
+	"canonicalize":      {Run: runCanonicalizeContext},
+	"discover":          {Run: runDiscoverContext},
+	"migrate-config":    {Run: runMigrateConfigContext},
+	"index":             {Run: runIndexContext},
+	"status":            {Run: runStatusContext},
+	"version":           {Run: runVersionContext},
+	"preview-sources":   {Run: runPreviewSourcesContext},
+	"explain-file":      {Run: runExplainFileContext},
+	"search-specs":      {Run: runSearchSpecsContext},
+	"check-overlap":     {Run: runCheckOverlapContext},
+	"compare-specs":     {Run: runCompareSpecsContext},
+	"analyze-impact":    {Run: runAnalyzeImpactContext},
+	"check-terminology": {Run: runCheckTerminologyContext},
+	"check-compliance":  {Run: runCheckComplianceContext},
+	"check-doc-drift":   {Run: runCheckDocDriftContext},
+	"review-spec":       {Run: runReviewSpecContext},
+	"serve":             {Run: runServeContext},
+}
+
+func commandDescription(name string) string {
+	switch name {
+	case "canonicalize":
+		return "promote an inferred contract into a spec bundle"
+	case "discover":
+		return "scan a repo and propose a local config"
+	case "migrate-config":
+		return "rewrite a legacy config into the current schema"
+	case "index":
+		return "rebuild or validate the local Pituitary index"
+	case "status":
+		return "show current index status"
+	case "version":
+		return "show Pituitary and Go runtime versions"
+	case "preview-sources":
+		return "show which files each source will index"
+	case "explain-file":
+		return "explain how one file is treated by configured sources"
+	case "search-specs":
+		return "search spec sections semantically"
+	case "check-overlap":
+		return "find overlapping specs"
+	case "compare-specs":
+		return "compare design tradeoffs across specs"
+	case "analyze-impact":
+		return "report affected specs and docs"
+	case "check-terminology":
+		return "audit terminology consistency after conceptual changes"
+	case "check-compliance":
+		return "check code paths and diffs against accepted specs"
+	case "check-doc-drift":
+		return "find docs that drift from specs"
+	case "review-spec":
+		return "run the common spec-review workflow"
+	case "serve":
+		return "run the optional MCP server transport"
+	case "help":
+		return "show available commands"
+	default:
+		return ""
+	}
 }
 
 // Run executes the bootstrap CLI transport and returns the desired process exit code.
@@ -64,68 +110,14 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 
-	if name == "index" {
-		return runIndexContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "discover" {
-		return runDiscoverContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "canonicalize" {
-		return runCanonicalizeContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "migrate-config" {
-		return runMigrateConfigContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "status" {
-		return runStatusContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "version" {
-		return runVersionContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "preview-sources" {
-		return runPreviewSourcesContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "explain-file" {
-		return runExplainFileContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "search-specs" {
-		return runSearchSpecsContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "check-overlap" {
-		return runCheckOverlapContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "compare-specs" {
-		return runCompareSpecsContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "analyze-impact" {
-		return runAnalyzeImpactContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "check-terminology" {
-		return runCheckTerminologyContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "check-compliance" {
-		return runCheckComplianceContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "check-doc-drift" {
-		return runCheckDocDriftContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "review-spec" {
-		return runReviewSpecContext(ctx, remainingArgs[1:], stdout, stderr)
-	}
-	if name == "serve" {
-		return runServeWithConfig(options.ConfigPath, remainingArgs[1:], stdout, stderr)
-	}
-
-	description, ok := commands[name]
+	command, ok := commands[name]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown command %q\n\n", name)
 		printHelp(stderr)
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "pituitary %s: %s\n", name, description)
-	fmt.Fprintln(stdout, "status: bootstrap only, not implemented yet")
-	return 0
+	return command.Run(ctx, remainingArgs[1:], stdout, stderr)
 }
 
 func printHelp(w io.Writer) {
@@ -138,17 +130,14 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "available commands:")
 
-	names := make([]string, 0, len(commands)-1)
+	names := make([]string, 0, len(commands))
 	for name := range commands {
-		if name == "help" {
-			continue
-		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	for _, name := range names {
-		fmt.Fprintf(w, "  %-16s %s\n", name, commands[name])
+		fmt.Fprintf(w, "  %-16s %s\n", name, commandDescription(name))
 	}
 
 	fmt.Fprintln(w)

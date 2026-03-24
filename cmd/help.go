@@ -34,7 +34,12 @@ func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer, help c
 }
 
 func printCommandHelp(w io.Writer, fs *flag.FlagSet, help commandHelp) {
-	fmt.Fprintf(w, "pituitary %s: %s\n", help.Name, commands[help.Name])
+	description := commandDescription(help.Name)
+	if description == "" {
+		fmt.Fprintf(w, "pituitary %s\n", help.Name)
+	} else {
+		fmt.Fprintf(w, "pituitary %s: %s\n", help.Name, description)
+	}
 	fmt.Fprintf(w, "usage: %s\n", help.Usage)
 	if help.UsesConfig {
 		fmt.Fprintln(w)

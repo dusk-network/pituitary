@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -10,10 +11,10 @@ import (
 )
 
 func runServe(args []string, stdout, stderr io.Writer) int {
-	return runServeWithConfig("", args, stdout, stderr)
+	return runServeContext(context.Background(), args, stdout, stderr)
 }
 
-func runServeWithConfig(globalConfigPath string, args []string, stdout, stderr io.Writer) int {
+func runServeContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	help := newCommandHelp("serve", "pituitary [--config PATH] serve [--transport stdio]")
@@ -40,7 +41,7 @@ func runServeWithConfig(globalConfigPath string, args []string, stdout, stderr i
 		return 2
 	}
 
-	resolvedConfigPath, err := resolveCLIConfigPath(strings.TrimSpace(configPath), globalConfigPath)
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, strings.TrimSpace(configPath))
 	if err != nil {
 		fmt.Fprintf(stderr, "pituitary serve: %s\n", err)
 		return 2
