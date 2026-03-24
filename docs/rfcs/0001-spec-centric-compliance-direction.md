@@ -63,12 +63,12 @@ This keeps the existing `check-compliance` surface valid, but constrains future 
 
 If compliance evolves further, all of the following remain true:
 
-- specs remain the primary source of truth
-- every stronger compliance check must trace back to an explicit accepted spec requirement
-- the product must abstain when coverage is insufficient
-- passing compliance checks must not imply full semantic correctness
-- messaging must not position Pituitary as a general code-analysis tool
-- implementation choices must work for the languages that matter to active users, not just the language Pituitary is written in
+- Specs remain the primary source of truth.
+- Every stronger compliance check must trace back to an explicit accepted spec requirement.
+- The product must abstain when coverage is insufficient.
+- Passing compliance checks must not imply full semantic correctness.
+- Messaging must not position Pituitary as a general code-analysis tool.
+- Implementation choices must work for the languages that matter to active users, not just the language Pituitary is written in.
 
 ## Implications
 
