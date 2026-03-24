@@ -95,6 +95,36 @@ func TestReviewSpecSupportsDraftSpecRecord(t *testing.T) {
 	}
 }
 
+func TestReviewSpecCarriesBoundaryReviewOverlapGuidance(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := ReviewSpec(cfg, ReviewRequest{SpecRef: "SPEC-055"})
+	if err != nil {
+		t.Fatalf("ReviewSpec() error = %v", err)
+	}
+	if result.Overlap == nil || len(result.Overlap.Overlaps) == 0 {
+		t.Fatalf("overlap = %+v, want composed overlap", result.Overlap)
+	}
+	if got, want := result.Overlap.Overlaps[0].Ref, "SPEC-042"; got != want {
+		t.Fatalf("top overlap ref = %q, want %q", got, want)
+	}
+	if got, want := result.Overlap.Overlaps[0].Guidance, "boundary_review"; got != want {
+		t.Fatalf("top overlap guidance = %q, want %q", got, want)
+	}
+	if got, want := result.Overlap.Recommendation, "review_boundaries"; got != want {
+		t.Fatalf("recommendation = %q, want %q", got, want)
+	}
+}
+
 func TestReviewSpecSurfacesStaleNamedArtifacts(t *testing.T) {
 	t.Parallel()
 

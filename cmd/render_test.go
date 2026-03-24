@@ -403,6 +403,62 @@ func TestRenderReviewResultIncludesTopImpactSummaries(t *testing.T) {
 	}
 }
 
+func TestRenderOverlapResultShowsBoundaryReviewGuidance(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderOverlapResult(&stdout, &analysis.OverlapResult{
+		Candidate: analysis.OverlapCandidate{Ref: "SPEC-055", Title: "Burst Handling"},
+		Overlaps: []analysis.OverlapItem{
+			{
+				Ref:           "SPEC-042",
+				Title:         "Per-Tenant Rate Limiting",
+				Score:         0.811,
+				OverlapDegree: "high",
+				Relationship:  "adjacent",
+				Guidance:      "boundary_review",
+			},
+		},
+		Recommendation: "review_boundaries",
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"candidate: SPEC-055 | Burst Handling",
+		"SPEC-042 | Per-Tenant Rate Limiting | 0.811 | high | adjacent | boundary review",
+		"recommendation: review_boundaries | real overlap, but clarify boundaries before merging",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderOverlapResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
+func TestRenderReviewResultShowsOverlapGuidance(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderReviewResult(&stdout, &analysis.ReviewResult{
+		SpecRef: "SPEC-055",
+		Overlap: &analysis.OverlapResult{
+			Recommendation: "review_boundaries",
+			Overlaps: []analysis.OverlapItem{
+				{Ref: "SPEC-042", Relationship: "adjacent", Score: 0.811, Guidance: "boundary_review"},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"overlaps: 1 | recommendation: review_boundaries | real overlap, but clarify boundaries before merging",
+		"top overlap: SPEC-042 | adjacent | 0.811 | boundary review",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderReviewResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	t.Parallel()
 
@@ -413,7 +469,7 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 		Overlap: &analysis.OverlapResult{
 			Recommendation: "proceed_with_supersedes",
 			Overlaps: []analysis.OverlapItem{
-				{Ref: "SPEC-008", Title: "Legacy Rate Limiting", Relationship: "extends", Score: 0.922},
+				{Ref: "SPEC-008", Title: "Legacy Rate Limiting", Relationship: "extends", Score: 0.922, Guidance: "merge_candidate"},
 			},
 		},
 		Comparison: &analysis.CompareResult{
@@ -470,7 +526,7 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	for _, want := range []string{
 		"# Review Spec Report",
 		"## Overlap",
-		"`SPEC-008`",
+		"`SPEC-008` Legacy Rate Limiting (extends, 0.922, merge candidate)",
 		"## Comparison",
 		"## Impact",
 		"Top impacted specs",

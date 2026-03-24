@@ -586,7 +586,7 @@ CLI exit codes should stay simple:
   - Result: `{ "matches": [{ "ref": "SPEC-042", "title": "...", "section_heading": "...", "score": 0.0, "excerpt": "...", "source_ref": "file://..." }] }`
 - `check_overlap` (`pituitary check-overlap`)
   - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
-  - Result: `{ "candidate": { "ref": "SPEC-042", "title": "..." }, "overlaps": [{ "ref": "SPEC-008", "score": 0.0, "overlap_degree": "high", "relationship": "extends" }], "recommendation": "proceed_with_supersedes" }`
+  - Result: `{ "candidate": { "ref": "SPEC-042", "title": "..." }, "overlaps": [{ "ref": "SPEC-008", "score": 0.0, "overlap_degree": "high", "relationship": "extends", "guidance": "merge_candidate" }], "recommendation": "proceed_with_supersedes" }`
 - `compare_specs` (`pituitary compare-specs`)
   - Request: `{ "spec_refs": ["SPEC-008", "SPEC-042"] }`
   - Result: `{ "spec_refs": ["SPEC-008", "SPEC-042"], "comparison": { "shared_scope": [...], "differences": [...], "tradeoffs": [...], "recommendation": "..." } }`
@@ -647,7 +647,8 @@ Process:
 
 Output:
   overlaps[]
-  recommendation = proceed_with_supersedes | merge_into_existing | no_overlap
+  overlaps[].guidance = merge_candidate | boundary_review
+  recommendation = proceed_with_supersedes | merge_into_existing | review_boundaries | no_overlap
 ```
 
 #### Tool: `compare_specs`

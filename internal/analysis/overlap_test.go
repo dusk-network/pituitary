@@ -69,6 +69,7 @@ func TestCheckOverlapSupportsDraftSpecRecord(t *testing.T) {
 	base.Ref = "SPEC-900"
 	base.Title = "Draft Rate Limiting Update"
 	base.Status = model.StatusDraft
+	base.Relations = nil
 
 	result, err := CheckOverlap(cfg, OverlapRequest{SpecRecord: &base})
 	if err != nil {
@@ -79,6 +80,45 @@ func TestCheckOverlapSupportsDraftSpecRecord(t *testing.T) {
 	}
 	if result.Overlaps[0].Ref != "SPEC-042" {
 		t.Fatalf("top draft overlap = %+v, want SPEC-042", result.Overlaps[0])
+	}
+	if got, want := result.Overlaps[0].Guidance, "merge_candidate"; got != want {
+		t.Fatalf("top draft guidance = %q, want %q", got, want)
+	}
+	if got, want := result.Recommendation, "merge_into_existing"; got != want {
+		t.Fatalf("draft recommendation = %q, want %q", got, want)
+	}
+}
+
+func TestCheckOverlapTreatsDependentAcceptedSpecsAsBoundaryReview(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckOverlap(cfg, OverlapRequest{SpecRef: "SPEC-055"})
+	if err != nil {
+		t.Fatalf("CheckOverlap() error = %v", err)
+	}
+	if len(result.Overlaps) == 0 {
+		t.Fatal("CheckOverlap() returned no overlaps")
+	}
+	if got, want := result.Overlaps[0].Ref, "SPEC-042"; got != want {
+		t.Fatalf("top overlap ref = %q, want %q", got, want)
+	}
+	if got, want := result.Overlaps[0].Relationship, "adjacent"; got != want {
+		t.Fatalf("top overlap relationship = %q, want %q", got, want)
+	}
+	if got, want := result.Overlaps[0].Guidance, "boundary_review"; got != want {
+		t.Fatalf("top overlap guidance = %q, want %q", got, want)
+	}
+	if got, want := result.Recommendation, "review_boundaries"; got != want {
+		t.Fatalf("recommendation = %q, want %q", got, want)
 	}
 }
 
