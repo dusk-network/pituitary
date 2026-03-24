@@ -584,6 +584,9 @@ CLI exit codes should stay simple:
 
 #### V1 JSON command contracts
 
+- `init` (`pituitary init`)
+  - Request: `{ "path": ".", "config_path": "...", "dry_run": false }`
+  - Result: `{ "workspace_root": "...", "config_path": "...", "config_action": "preview" | "wrote", "discover": { ... discovered config proposal ... }, "index": { ... } | null, "status": { ... } | null }`
 - `status` (`pituitary status`)
   - Request: `{ "check_runtime": "none" | "embedder" | "analysis" | "all" }`
   - Result: `{ "workspace_root": "...", "config_path": "...", "config_resolution": { "selected_by": "command_flag" | "global_flag" | "env" | "discovered_local", "reason": "...", "candidates": [{ "precedence": 1, "source": "...", "path": "...", "status": "selected" | "shadowed" | "not_set" | "missing", "detail": "..." }] }, "index_path": "...", "index_exists": true, "freshness": { "state": "missing" | "fresh" | "stale" | "incompatible", "action": "run `pituitary index --rebuild`", "issues": [{ "kind": "...", "message": "...", "indexed": "...", "current": "..." }] }, "spec_count": N, "doc_count": N, "chunk_count": N, "artifact_locations": { "index_dir": "...", "discover_config_path": "...", "canonicalize_bundle_root": "...", "ignore_patterns": [".pituitary/"], "relocation_hints": ["..."] }, "runtime": { ... } | null }`

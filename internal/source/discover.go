@@ -134,6 +134,11 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	return result, nil
 }
 
+// WriteDiscoveredConfig writes a rendered discovery config to disk.
+func WriteDiscoveredConfig(path, content string) error {
+	return writeDiscoveredConfig(path, content)
+}
+
 func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, map[string]struct{}, error) {
 	var candidates []discoveredCandidate
 	bundleDirs := make(map[string]struct{})

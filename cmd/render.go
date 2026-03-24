@@ -24,6 +24,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCanonicalizeResult(w, typed)
 	case *source.DiscoverResult:
 		renderDiscoverResult(w, typed)
+	case *initResult:
+		renderInitResult(w, typed)
 	case *migrateConfigResult:
 		renderMigrateConfigResult(w, typed)
 	case *index.RebuildResult:
@@ -163,6 +165,28 @@ func renderCanonicalizeResult(w io.Writer, result *source.CanonicalizeResult) {
 		if !strings.HasSuffix(file.Content, "\n") {
 			fmt.Fprintln(w)
 		}
+	}
+}
+
+func renderInitResult(w io.Writer, result *initResult) {
+	fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	fmt.Fprintf(w, "config path: %s\n", result.ConfigPath)
+	fmt.Fprintf(w, "config action: %s\n", result.ConfigAction)
+	if result.Discover != nil {
+		fmt.Fprintf(w, "discovered sources: %d\n", len(result.Discover.Sources))
+	}
+	if result.Index != nil {
+		fmt.Fprintf(w, "index: %d artifact(s), %d chunk(s), %d edge(s)\n", result.Index.ArtifactCount, result.Index.ChunkCount, result.Index.EdgeCount)
+	}
+	if result.Status != nil {
+		status := "unknown"
+		if result.Status.Freshness != nil && result.Status.Freshness.State != "" {
+			status = result.Status.Freshness.State
+		}
+		fmt.Fprintf(w, "status: %s | specs: %d | docs: %d | chunks: %d\n", status, result.Status.SpecCount, result.Status.DocCount, result.Status.ChunkCount)
+	}
+	if result.ConfigAction == "preview" {
+		fmt.Fprintln(w, "next: run `pituitary init` without --dry-run to write the config and build the index")
 	}
 }
 
