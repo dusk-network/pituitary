@@ -99,6 +99,12 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	if dryRun {
 		result, err := index.PrepareRebuildContext(ctx, cfg, records)
 		if err != nil {
+			if index.IsGraphValidationError(err) {
+				return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+					Code:    "validation_error",
+					Message: "relation graph invalid:\n" + err.Error(),
+				}, 2)
+			}
 			if index.IsDependencyUnavailable(err) {
 				return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 					Code:    "dependency_unavailable",
@@ -125,6 +131,12 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		result, err = index.RebuildContext(ctx, cfg, records)
 	}
 	if err != nil {
+		if index.IsGraphValidationError(err) {
+			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+				Code:    "validation_error",
+				Message: "relation graph invalid:\n" + err.Error(),
+			}, 2)
+		}
 		if index.IsDependencyUnavailable(err) {
 			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 				Code:    "dependency_unavailable",

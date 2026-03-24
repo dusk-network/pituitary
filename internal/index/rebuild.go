@@ -164,6 +164,9 @@ func prepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	if records == nil {
 		return nil, fmt.Errorf("records are required")
 	}
+	if err := ValidateRelationGraph(records.Specs); err != nil {
+		return nil, err
+	}
 
 	embedder, err := newEmbedder(cfg.Runtime.Embedder)
 	if err != nil {

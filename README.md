@@ -185,7 +185,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
-| `status [--check-runtime all]` | Report index counts, config resolution, freshness, artifact locations, and optionally probe embedder and analysis runtime readiness |
+| `status [--check-runtime all]` | Report index counts, config resolution, freshness, relation-graph health, artifact locations, and optionally probe embedder and analysis runtime readiness |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
@@ -202,6 +202,8 @@ Every command supports `--format json` for machine-readable output. `search-spec
 By default, `search-specs` down-ranks sections that look like historical provenance or history so active normative content wins first. If your query explicitly asks for historical context, those sections stay fully accessible.
 
 `check-overlap` keeps weaker structural matches visible, but it now reserves `merge_into_existing` for strong merge candidates. Mature accepted specs usually surface `review_boundaries` instead, so overlap stays visible without implying that every adjacency should collapse into one spec.
+
+`index --rebuild` and `index --dry-run` now validate the spec relation graph before touching SQLite. Cycles in `depends_on` or `supersedes`, plus contradictory `depends_on`/`supersedes` combinations, fail fast with the exact refs involved. `pituitary status` reports the same graph-health findings without requiring a rebuild.
 
 ### Example: full spec review
 

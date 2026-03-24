@@ -223,6 +223,12 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
 	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
 	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
+	if result.RelationGraph != nil {
+		fmt.Fprintf(w, "relation graph: %s\n", result.RelationGraph.State)
+		for _, finding := range result.RelationGraph.Findings {
+			fmt.Fprintf(w, "relation issue: %s\n", finding.Message)
+		}
+	}
 	if result.ArtifactLocations != nil {
 		fmt.Fprintf(w, "artifact index dir: %s\n", result.ArtifactLocations.IndexDir)
 		fmt.Fprintf(w, "artifact discover --write default: %s\n", result.ArtifactLocations.DiscoverConfigPath)
