@@ -449,7 +449,9 @@ Pituitary is in active development. The v1 shipping slice is functional: all cor
 
 **What works today:** indexing, incremental rebuild reuse, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
 
-**Coming next:** non-filesystem source adapters, CI vendor integrations, deeper compliance-direction RFC follow-up.
+**Product boundary:** Pituitary remains specification-first; compliance is a supporting bridge feature rather than a general code-analysis pivot. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+
+**Coming next:** non-filesystem source adapters and CI vendor integrations.
 
 ## Development
 
