@@ -10,6 +10,7 @@ func TestRunCommandHelpAcrossSurface(t *testing.T) {
 	t.Parallel()
 
 	testCases := map[string][]string{
+		"init":              {"usage: pituitary init [--path PATH] [--config-path PATH] [--dry-run] [--format FORMAT]", "--path VALUE", "--config-path VALUE", "--dry-run"},
 		"index":             {"usage: pituitary [--config PATH] index (--rebuild | --dry-run) [--full] [--format FORMAT]", "shared config resolution:", "PITUITARY_CONFIG", "--rebuild", "--dry-run", "--full", "--verbose"},
 		"migrate-config":    {"usage: pituitary migrate-config [--path PATH] [--write] [--format FORMAT]", "--path VALUE", "--write"},
 		"status":            {"usage: pituitary [--config PATH] status [--format FORMAT] [--check-runtime SCOPE]", "shared config resolution:", "--format VALUE", "--check-runtime VALUE"},

@@ -52,17 +52,23 @@ The repo ships with a small example workspace under `specs/` and curated fixture
 
 ### Existing repo onboarding
 
-For a repo that does not already have a hand-written `pituitary.toml`, start with discovery before you index:
+For a repo that does not already have a hand-written `pituitary.toml`, the fastest onboarding path is:
 
 ```sh
-./pituitary discover --path .
-./pituitary discover --path . --write
-./pituitary preview-sources
-./pituitary explain-file README.md
-./pituitary index --rebuild
+./pituitary init --path .
 ```
 
-`discover` proposes a conservative local config, `preview-sources` shows exactly what will be indexed, and `explain-file` helps you diagnose why an important file is or is not in scope before you pay for a rebuild.
+`init` discovers conservative sources, writes a local config, rebuilds the index, and finishes with a status summary so you get useful feedback on the first run.
+
+If you want to preview before writing or indexing, use:
+
+```sh
+./pituitary init --path . --dry-run
+./pituitary preview-sources
+./pituitary explain-file README.md
+```
+
+`discover` remains the lower-level building block when you want to inspect or hand-edit the generated config before committing to a rebuild.
 
 ### Retrieval mode matters
 
@@ -184,11 +190,10 @@ Selectors narrow what gets indexed; they do not rewrite refs. For example, a doc
 For an existing repo without a hand-written config yet, the default onboarding flow is:
 
 ```sh
-./pituitary discover --path .
-./pituitary discover --path . --write
-./pituitary preview-sources
-./pituitary index --rebuild
+./pituitary init --path .
 ```
+
+Use `pituitary init --dry-run` when you want to preview the generated config and discovered sources before writing anything.
 
 If you still have a legacy config shaped like `[project]` with `specs_dir = "specs"`, migrate it with:
 
@@ -202,6 +207,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 
 | Command | What it does |
 |---|---|
+| `init --path .` | One-shot onboarding: discover sources, write a local config, rebuild the index, and report status |
 | `discover --path .` | Scan a repo, propose conservative sources for specs, contracts, guides, runbooks, and reference docs, and show the generated local config |
 | `migrate-config --path pituitary.toml --write` | Rewrite a legacy or unversioned config into the current schema |
 | `preview-sources` | Show which files each configured source will index |

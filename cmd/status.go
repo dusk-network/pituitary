@@ -110,7 +110,14 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	result := response.Result
 
-	return writeCLISuccess(stdout, stderr, format, "status", request, &statusResult{
+	return writeCLISuccess(stdout, stderr, format, "status", request, newStatusResult(result, resolution), nil)
+}
+
+func newStatusResult(result *app.StatusResult, resolution *configResolution) *statusResult {
+	if result == nil || result.Index == nil {
+		return nil
+	}
+	return &statusResult{
 		WorkspaceRoot:     result.WorkspaceRoot,
 		ConfigPath:        result.ConfigPath,
 		ConfigResolution:  resolution,
@@ -123,7 +130,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.Index.IndexPath),
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,
-	}, nil)
+	}
 }
 
 func buildStatusArtifactLocations(workspaceRoot, indexPath string) *statusArtifactLocation {

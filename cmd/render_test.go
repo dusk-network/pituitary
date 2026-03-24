@@ -201,6 +201,44 @@ func TestRenderCommandTableSearchSpecs(t *testing.T) {
 	}
 }
 
+func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderInitResult(&stdout, &initResult{
+		WorkspaceRoot: "/tmp/repo",
+		ConfigPath:    "/tmp/repo/.pituitary/pituitary.toml",
+		ConfigAction:  "wrote",
+		Discover: &source.DiscoverResult{
+			Sources: []source.DiscoveredSource{{}, {}, {}},
+		},
+		Index: &index.RebuildResult{
+			ArtifactCount: 5,
+			ChunkCount:    17,
+			EdgeCount:     8,
+		},
+		Status: &statusResult{
+			Freshness:  &index.FreshnessStatus{State: "fresh"},
+			SpecCount:  3,
+			DocCount:   2,
+			ChunkCount: 17,
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"workspace: /tmp/repo",
+		"config action: wrote",
+		"discovered sources: 3",
+		"index: 5 artifact(s), 17 chunk(s), 8 edge(s)",
+		"status: fresh | specs: 3 | docs: 2 | chunks: 17",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderInitResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 	t.Parallel()
 

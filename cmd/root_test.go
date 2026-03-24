@@ -32,9 +32,9 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "canonicalize" || name == "discover" || name == "init" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
-				if name == "discover" || name == "canonicalize" {
+				if name == "discover" || name == "init" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
 				}
 				if name == "canonicalize" {
@@ -45,6 +45,13 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 					return
 				}
 				if name == "discover" {
+					args = []string{name, "--path", "."}
+					expectBootstrapStatus = false
+					exitCode := withWorkingDir(t, repoRoot, run)
+					assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					return
+				}
+				if name == "init" {
 					args = []string{name, "--path", "."}
 					expectBootstrapStatus = false
 					exitCode := withWorkingDir(t, repoRoot, run)
@@ -161,11 +168,14 @@ func assertKnownCommandResult(t *testing.T, name, description string, exitCode i
 	if exitCode != 0 {
 		t.Fatalf("Run(%q) exit code = %d, want 0", name, exitCode)
 	}
-	if stderr != "" && name != "index" {
+	if stderr != "" && name != "index" && name != "init" {
 		t.Fatalf("Run(%q) wrote unexpected stderr: %q", name, stderr)
 	}
 	if name == "index" && stderr != "" && !strings.Contains(stderr, "pituitary index: chunking") {
 		t.Fatalf("Run(%q) stderr %q does not contain rebuild progress", name, stderr)
+	}
+	if name == "init" && stderr != "" && !strings.Contains(stderr, "pituitary init: chunking") {
+		t.Fatalf("Run(%q) stderr %q does not contain init progress", name, stderr)
 	}
 
 	if !strings.Contains(stdout, description) {
