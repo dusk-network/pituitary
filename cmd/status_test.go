@@ -42,6 +42,39 @@ func TestRunStatusReportsMissingIndex(t *testing.T) {
 	}
 }
 
+func TestRunStatusReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var rebuildStdout bytes.Buffer
+	var rebuildStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &rebuildStdout, &rebuildStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, rebuildStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runStatus(nil, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+		t.Fatalf("runStatus() output %q does not contain fixture guidance", out)
+	}
+	if !strings.Contains(out, "`pituitary status --check-runtime embedder`") {
+		t.Fatalf("runStatus() output %q does not contain runtime probe guidance", out)
+	}
+}
+
 func TestRunStatusJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
@@ -95,6 +128,7 @@ func TestRunStatusJSON(t *testing.T) {
 				IgnorePatterns         []string `json:"ignore_patterns"`
 				RelocationHints        []string `json:"relocation_hints"`
 			} `json:"artifact_locations"`
+			Guidance []string `json:"guidance"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -129,6 +163,9 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 	if len(payload.Result.ArtifactLocations.RelocationHints) < 3 {
 		t.Fatalf("artifact_locations.relocation_hints = %v, want relocation guidance", payload.Result.ArtifactLocations.RelocationHints)
+	}
+	if len(payload.Result.Guidance) != 1 || !strings.Contains(payload.Result.Guidance[0], `runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+		t.Fatalf("result.guidance = %v, want fixture guidance", payload.Result.Guidance)
 	}
 	if payload.Result.SpecCount != 3 || payload.Result.DocCount != 2 || payload.Result.ChunkCount != 17 {
 		t.Fatalf("result = %+v, want 3 specs, 2 docs, 17 chunks", payload.Result)

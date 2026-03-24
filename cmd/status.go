@@ -31,6 +31,7 @@ type statusResult struct {
 	ArtifactLocations *statusArtifactLocation    `json:"artifact_locations,omitempty"`
 	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
 	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
+	Guidance          []string                   `json:"guidance,omitempty"`
 }
 
 type statusArtifactLocation struct {
@@ -130,6 +131,7 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.Index.IndexPath),
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,
+		Guidance:          append([]string(nil), result.Guidance...),
 	}
 }
 

@@ -137,6 +137,9 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 				},
 			},
 		},
+		Guidance: []string{
+			`runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
+		},
 	})
 
 	output := stdout.String()
@@ -157,6 +160,7 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 		"runtime: runtime.embedder | ready | provider: openai_compatible | model: pituitary-embed | endpoint: http://localhost:1234/v1",
 		"runtime: runtime.analysis | disabled | provider: disabled",
 		"runtime note: runtime.analysis is disabled in config",
+		`guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderStatusResult() output %q does not contain %q", output, want)
@@ -222,6 +226,9 @@ func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
 			SpecCount:  3,
 			DocCount:   2,
 			ChunkCount: 17,
+			Guidance: []string{
+				`runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
+			},
 		},
 	})
 
@@ -232,6 +239,7 @@ func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
 		"discovered sources: 3",
 		"index: 5 artifact(s), 17 chunk(s), 8 edge(s)",
 		"status: fresh | specs: 3 | docs: 2 | chunks: 17",
+		`guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderInitResult() output %q does not contain %q", output, want)
