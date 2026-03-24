@@ -28,10 +28,47 @@ Pituitary catches these problems automatically, either from the CLI, via an MCP 
 
 ## Quickstart
 
+### Evaluate on an existing repo
+
+The recommended first-run path is the released binary, not a source build.
+
+1. Download the archive for your platform from [GitHub Releases](https://github.com/dusk-network/pituitary/releases).
+2. Put the extracted `pituitary` binary on your `PATH`.
+3. Run Pituitary from the root of your repo:
+
+```sh
+pituitary init --path .
+pituitary status
+pituitary check-doc-drift --scope all
+
+# Optional pre-merge guardrail
+git diff --cached | pituitary check-compliance --diff-file -
+```
+
+If your repo already has a config, skip `init` and go straight to `status`, `index --rebuild`, or the analysis commands.
+
+### Use a real embedder for real corpora
+
+The shipped default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the recommended retrieval runtime for a real spec corpus.
+
+If you are evaluating search quality, overlap ranking, doc drift, or terminology audits on your own repo:
+
+1. Follow the local runtime setup in [AI Runtime Configuration](#ai-runtime-configuration).
+2. Use a real local embedding model such as `nomic-embed-text-v1.5`.
+3. Validate the runtime:
+
+```sh
+pituitary status --check-runtime embedder
+pituitary index --rebuild
+```
+
+### Build from source when contributing
+
+If you are contributing to Pituitary itself or want to try the bundled example workspace in this repo, build from source:
+
 **Prerequisites:** Go 1.25+, a C toolchain (required for the sqlite-vec extension). For platform-specific setup, see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 
 ```sh
-# Clone and build
 git clone https://github.com/dusk-network/pituitary.git
 cd pituitary
 go build -o pituitary .
@@ -39,16 +76,13 @@ go build -o pituitary .
 # Build the index from the included example specs
 ./pituitary index --rebuild
 
-# Run a real spec workflow
+# Run a real spec workflow on the bundled example corpus
 ./pituitary review-spec --path specs/rate-limit-v2
 ./pituitary analyze-impact --path specs/rate-limit-v2/body.md
 ./pituitary check-doc-drift --scope all
-
-# Check a diff against accepted specs
-git diff --cached | ./pituitary check-compliance --diff-file -
 ```
 
-The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
+The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` so you can exercise the full command surface out of the box.
 
 ### Existing repo onboarding
 
@@ -72,7 +106,7 @@ If you want to preview before writing or indexing, use:
 
 ### Retrieval mode matters
 
-The default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the best retrieval runtime for real corpora. If you are evaluating search quality, overlap ranking, drift detection, or terminology audits on a real repo, switch to a real local embedding runtime first and then rebuild the index.
+The default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the best retrieval runtime for real corpora. If you are evaluating search quality, overlap ranking, drift detection, or terminology audits on a real repo, switch to a real local embedding runtime first and then rebuild the index. The recommended local path is documented in [AI Runtime Configuration](#ai-runtime-configuration).
 
 ## How It Works
 
@@ -248,6 +282,8 @@ git diff origin/main...HEAD | ./pituitary check-compliance --diff-file -
 ```
 
 Use the first form locally before you commit, and the second form in CI when you want to compare a branch against `main`.
+
+For copy-paste workflow examples that install the released binary in CI and run both compliance and spec-hygiene checks, see [docs/development/ci-recipes.md](docs/development/ci-recipes.md).
 
 ### Example: full spec review
 
