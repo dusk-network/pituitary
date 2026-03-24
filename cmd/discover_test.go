@@ -78,6 +78,9 @@ func TestRunDiscoverWriteProducesUsableLocalConfig(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("runDiscover(--write) exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runDiscover(--write) wrote unexpected stderr: %q", stderr.String())
+	}
 	configPath := filepath.Join(repo, ".pituitary", "pituitary.toml")
 	if _, err := os.Stat(configPath); err != nil {
 		t.Fatalf("discovered config %s missing: %v", configPath, err)
@@ -160,6 +163,15 @@ func TestRunDiscoverWriteConfigWorksAcrossNestedIndexStatusAndAnalysis(t *testin
 	if exitCode != 0 {
 		t.Fatalf("runIndex(--rebuild) from nested dir exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "pituitary index: ") {
+			t.Fatalf("runIndex(--rebuild) from nested dir wrote unexpected stderr line %q (full stderr: %q)", line, stderr.String())
+		}
+	}
 	if _, err := os.Stat(filepath.Join(resolvedRepo, ".pituitary", "pituitary.db")); err != nil {
 		t.Fatalf("rebuilt index missing: %v", err)
 	}
@@ -176,11 +188,24 @@ func TestRunDiscoverWriteConfigWorksAcrossNestedIndexStatusAndAnalysis(t *testin
 		t.Fatalf("runStatus() from nested dir wrote unexpected stderr: %q", stderr.String())
 	}
 	textOut := stdout.String()
-	if !strings.Contains(textOut, filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml")) {
-		t.Fatalf("status output %q does not contain discovered config path", textOut)
+	expectedConfigLine := "config: " + filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml")
+	expectedIndexLine := "index path: " + filepath.Join(resolvedRepo, ".pituitary", "pituitary.db")
+	var foundConfigLine bool
+	var foundIndexLine bool
+	for _, line := range strings.Split(textOut, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, expectedConfigLine) {
+			foundConfigLine = true
+		}
+		if strings.HasPrefix(line, expectedIndexLine) {
+			foundIndexLine = true
+		}
 	}
-	if !strings.Contains(textOut, filepath.Join(resolvedRepo, ".pituitary", "pituitary.db")) {
-		t.Fatalf("status output %q does not contain resolved index path", textOut)
+	if !foundConfigLine {
+		t.Fatalf("status output %q does not contain config line %q", textOut, expectedConfigLine)
+	}
+	if !foundIndexLine {
+		t.Fatalf("status output %q does not contain index path line %q", textOut, expectedIndexLine)
 	}
 
 	stdout.Reset()
