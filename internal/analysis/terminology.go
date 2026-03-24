@@ -13,6 +13,8 @@ import (
 
 const terminologyEvidenceThreshold = 0.15
 
+var terminologyCompatibilityPattern = regexp.MustCompile(`(?i)\b(compatibility|compatible|debug|projection|alias|shim|fallback|migration|migrating|transitional)\b`)
+
 // TerminologyAuditRequest is the normalized input for terminology audits.
 type TerminologyAuditRequest struct {
 	Terms          []string `json:"terms"`
@@ -47,10 +49,11 @@ type TerminologyEvidence struct {
 
 // TerminologySectionFinding reports one section that still uses displaced terms.
 type TerminologySectionFinding struct {
-	Section  string               `json:"section"`
-	Terms    []string             `json:"terms"`
-	Excerpt  string               `json:"excerpt"`
-	Evidence *TerminologyEvidence `json:"evidence,omitempty"`
+	Section    string               `json:"section"`
+	Terms      []string             `json:"terms"`
+	Excerpt    string               `json:"excerpt"`
+	Assessment string               `json:"assessment,omitempty"`
+	Evidence   *TerminologyEvidence `json:"evidence,omitempty"`
 }
 
 // TerminologyFinding reports one offending doc or spec.
@@ -95,6 +98,13 @@ type terminologyEvidenceSection struct {
 type terminologyMatcher struct {
 	Term    string
 	Pattern *regexp.Regexp
+}
+
+type terminologyTextMatch struct {
+	Terms      []string
+	Excerpt    string
+	Assessment string
+	Suppressed bool
 }
 
 // CheckTerminology audits indexed docs and specs for displaced terminology.
@@ -348,7 +358,7 @@ func terminologyEvidenceSections(spec specDocument, canonicalTerms []string) []t
 	matchers := compileTerminologyMatchers(canonicalTerms)
 	evidence := make([]terminologyEvidenceSection, 0, len(spec.Sections))
 	for _, section := range spec.Sections {
-		terms, excerpt := terminologySectionTerms(section, matchers)
+		terms, excerpt, _ := terminologySectionTerms(section, matchers)
 		if len(terms) == 0 {
 			continue
 		}
@@ -434,15 +444,16 @@ func auditTerminologyArtifact(artifact terminologyArtifact, matchers []terminolo
 	bestScore := 0.0
 
 	for _, section := range artifact.Sections {
-		terms, excerpt := terminologySectionTerms(section, matchers)
+		terms, excerpt, assessment := terminologySectionTerms(section, matchers)
 		if len(terms) == 0 {
 			continue
 		}
 
 		sectionFinding := TerminologySectionFinding{
-			Section: defaultString(stringsTrimSpace(section.Heading), "(body)"),
-			Terms:   terms,
-			Excerpt: excerpt,
+			Section:    defaultString(stringsTrimSpace(section.Heading), "(body)"),
+			Terms:      terms,
+			Excerpt:    excerpt,
+			Assessment: assessment,
 		}
 		if evidence := bestTerminologyEvidence(section, evidenceSections); evidence != nil {
 			sectionFinding.Evidence = evidence
@@ -470,41 +481,75 @@ func auditTerminologyArtifact(artifact terminologyArtifact, matchers []terminolo
 	}
 }
 
-func terminologySectionTerms(section embeddedSection, matchers []terminologyMatcher) ([]string, string) {
+func terminologySectionTerms(section embeddedSection, matchers []terminologyMatcher) ([]string, string, string) {
+	matches := terminologyExactMatches(section, matchers)
+	if len(matches) == 0 {
+		return nil, "", ""
+	}
+
 	terms := make([]string, 0, len(matchers))
-	for _, matcher := range matchers {
-		if matcher.Pattern.MatchString(section.Heading) || matcher.Pattern.MatchString(section.Content) {
-			terms = append(terms, matcher.Term)
+	excerpt := ""
+	assessment := ""
+	for _, match := range matches {
+		if match.Suppressed {
+			continue
+		}
+		terms = append(terms, match.Terms...)
+		if excerpt == "" {
+			excerpt = match.Excerpt
+			assessment = match.Assessment
 		}
 	}
 	terms = uniqueStrings(terms)
 	if len(terms) == 0 {
-		return nil, ""
+		return nil, "", ""
 	}
-	return terms, defaultString(sectionExcerptForMatchers(section, matchers), defaultString(stringsTrimSpace(section.Heading), sectionExcerpt(section)))
+	return terms, excerpt, assessment
 }
 
-func sectionExcerptForMatchers(section embeddedSection, matchers []terminologyMatcher) string {
-	if heading := stringsTrimSpace(section.Heading); heading != "" {
-		for _, matcher := range matchers {
-			if matcher.Pattern.MatchString(heading) {
-				return heading
-			}
-		}
-	}
-
+func terminologyExactMatches(section embeddedSection, matchers []terminologyMatcher) []terminologyTextMatch {
+	matches := make([]terminologyTextMatch, 0, len(matchers))
 	for _, line := range strings.Split(section.Content, "\n") {
 		trimmed := stringsTrimSpace(strings.TrimPrefix(line, "- "))
 		if trimmed == "" {
 			continue
 		}
-		for _, matcher := range matchers {
-			if matcher.Pattern.MatchString(trimmed) {
-				return trimmed
-			}
+		terms := matchedTerminologyTerms(trimmed, matchers)
+		if len(terms) == 0 {
+			continue
+		}
+		matches = append(matches, terminologyTextMatch{
+			Terms:      terms,
+			Excerpt:    trimmed,
+			Assessment: "exact match in body text without compatibility-only markers",
+			Suppressed: isCompatibilityOnlyTerminologyReference(trimmed),
+		})
+	}
+	if heading := stringsTrimSpace(section.Heading); heading != "" {
+		if terms := matchedTerminologyTerms(heading, matchers); len(terms) > 0 {
+			matches = append(matches, terminologyTextMatch{
+				Terms:      terms,
+				Excerpt:    heading,
+				Assessment: "exact match in section heading",
+				Suppressed: isCompatibilityOnlyTerminologyReference(heading),
+			})
 		}
 	}
-	return ""
+	return matches
+}
+
+func matchedTerminologyTerms(text string, matchers []terminologyMatcher) []string {
+	terms := make([]string, 0, len(matchers))
+	for _, matcher := range matchers {
+		if matcher.Pattern.MatchString(text) {
+			terms = append(terms, matcher.Term)
+		}
+	}
+	return uniqueStrings(terms)
+}
+
+func isCompatibilityOnlyTerminologyReference(text string) bool {
+	return terminologyCompatibilityPattern.MatchString(text)
 }
 
 func sectionExcerpt(section embeddedSection) string {
