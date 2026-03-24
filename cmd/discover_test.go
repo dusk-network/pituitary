@@ -197,9 +197,9 @@ func TestRunDiscoverWriteConfigWorksAcrossNestedIndexStatusAndAnalysis(t *testin
 
 	var statusPayload struct {
 		Result struct {
-			ConfigPath      string `json:"config_path"`
-			IndexPath       string `json:"index_path"`
-			IndexExists     bool   `json:"index_exists"`
+			ConfigPath       string `json:"config_path"`
+			IndexPath        string `json:"index_path"`
+			IndexExists      bool   `json:"index_exists"`
 			ConfigResolution struct {
 				SelectedBy string `json:"selected_by"`
 			} `json:"config_resolution"`
