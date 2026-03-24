@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How It Works</a> · <a href="#commands">Commands</a> · <a href="#mcp-server">MCP Server</a> · <a href="#contributing">Contributing</a>
+  <a href="#install">Install</a> · <a href="#quickstart">Quickstart</a> · <a href="#how-it-works">How It Works</a> · <a href="#commands">Commands</a> · <a href="#mcp-server">MCP Server</a> · <a href="#contributing">Contributing</a>
 </p>
 
 ---
@@ -14,6 +14,35 @@ Pituitary keeps your specifications, code, and documentation from drifting out o
 It ships as a single Go binary. Deterministic mode needs no Docker and no external services: just `pituitary` and one SQLite file. When you care about retrieval quality on a real repo, you can optionally point it at a local embedding server such as LM Studio.
 
 Prebuilt release archives are published on [GitHub Releases](https://github.com/dusk-network/pituitary/releases) for `linux/amd64`, `darwin/arm64`, and `windows/amd64` if you want to evaluate the CLI without building from source.
+
+## Install
+
+### Homebrew
+
+```sh
+export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"
+brew install dusk-network/tap/pituitary
+```
+
+### One-line installer
+
+```sh
+gh api repos/dusk-network/pituitary/contents/scripts/install.sh?ref=main \
+  -H 'Accept: application/vnd.github.raw' \
+  | sh
+```
+
+Because `dusk-network/pituitary` is currently private, both install paths require GitHub authentication with access to that repository. The installer downloads the latest released archive for the current platform through `gh release download`, verifies it against the published checksum manifest, and installs `pituitary` to `/usr/local/bin` when that path is writable or `~/.local/bin` otherwise.
+
+You can also pin the release or install directory:
+
+```sh
+gh api repos/dusk-network/pituitary/contents/scripts/install.sh?ref=main \
+  -H 'Accept: application/vnd.github.raw' \
+  | PITUITARY_VERSION=v0.4.0 PITUITARY_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+If you prefer manual extraction, the raw archives remain available on [GitHub Releases](https://github.com/dusk-network/pituitary/releases).
 
 ## Why
 
@@ -32,9 +61,8 @@ Pituitary catches these problems automatically, either from the CLI, via an MCP 
 
 The recommended first-run path is the released binary, not a source build.
 
-1. Download the archive for your platform from [GitHub Releases](https://github.com/dusk-network/pituitary/releases).
-2. Put the extracted `pituitary` binary on your `PATH`.
-3. Run Pituitary from the root of your repo:
+1. Install `pituitary` with Homebrew or the one-line installer above.
+2. Run Pituitary from the root of your repo:
 
 ```sh
 pituitary init --path .
