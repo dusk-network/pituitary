@@ -98,6 +98,32 @@ func TestInspectFreshnessReportsIncompatibleWhenSourceConfigChanges(t *testing.T
 	}
 }
 
+func TestInspectFreshnessIgnoresSourceOrderingChanges(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFreshnessFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Sources[0], cfg.Sources[1] = cfg.Sources[1], cfg.Sources[0]
+
+	status, err := InspectFreshnessContext(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if got, want := status.State, freshnessStateFresh; got != want {
+		t.Fatalf("freshness.state = %q, want %q", got, want)
+	}
+	if len(status.Issues) != 0 {
+		t.Fatalf("freshness.issues = %+v, want none", status.Issues)
+	}
+}
+
 func TestInspectFreshnessReportsIncompatibleWhenMetadataIsMissing(t *testing.T) {
 	t.Parallel()
 

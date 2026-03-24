@@ -287,6 +287,7 @@ func sourceFingerprint(cfg *config.Config) string {
 		}, "|")
 		parts = append(parts, part)
 	}
+	sort.Strings(parts)
 	return fingerprint(parts)
 }
 
