@@ -59,6 +59,7 @@ Contributor docs:
 
 - [docs/development/prerequisites.md](docs/development/prerequisites.md)
 - [docs/development/architecture-guide.md](docs/development/architecture-guide.md)
+- [docs/development/ci-recipes.md](docs/development/ci-recipes.md)
 - [docs/development/testing-guide.md](docs/development/testing-guide.md)
 - [docs/development/adding-a-command.md](docs/development/adding-a-command.md)
 - [docs/development/releasing.md](docs/development/releasing.md)
