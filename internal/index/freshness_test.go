@@ -179,7 +179,7 @@ func TestInspectFreshnessDoesNotRequireEmbedderCredentialsForFingerprintCheck(t 
 	}
 	t.Setenv("PITUITARY_TEST_EMBEDDER_API_KEY", "")
 
-	fingerprint, err := configuredEmbedderFingerprint(cfg.Runtime.Embedder)
+	fingerprint, err := ConfiguredEmbedderFingerprint(cfg.Runtime.Embedder)
 	if err != nil {
 		t.Fatalf("configuredEmbedderFingerprint() error = %v", err)
 	}

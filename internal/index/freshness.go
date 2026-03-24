@@ -94,7 +94,7 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		return nil, fmt.Errorf("index path %s is a directory", cfg.Workspace.ResolvedIndexPath)
 	}
 
-	configuredEmbedderFingerprint, err := configuredEmbedderFingerprint(cfg.Runtime.Embedder)
+	configuredEmbedderFingerprint, err := ConfiguredEmbedderFingerprint(cfg.Runtime.Embedder)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,8 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 	return status, nil
 }
 
-func configuredEmbedderFingerprint(provider config.RuntimeProvider) (string, error) {
+// ConfiguredEmbedderFingerprint derives the configured embedder fingerprint without contacting the provider.
+func ConfiguredEmbedderFingerprint(provider config.RuntimeProvider) (string, error) {
 	switch provider.Provider {
 	case "", config.RuntimeProviderFixture:
 		if _, err := fixtureDimension(provider.Model); err != nil {
