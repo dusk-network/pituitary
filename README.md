@@ -237,7 +237,7 @@ If you still have a legacy config shaped like `[project]` with `specs_dir = "spe
 
 ## Commands
 
-Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports.
+Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports with a summary, recommended next actions, and detailed evidence sections.
 
 | Command | What it does |
 |---|---|

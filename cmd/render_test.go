@@ -602,17 +602,66 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"# Review Spec Report",
+		"## Summary",
+		"Spec under review: `SPEC-042`.",
+		"Overlap posture: `proceed_with_supersedes",
+		"Comparison posture: `prefer_spec_042`.",
+		"Documentation posture: 1 doc(s) need follow-up with 1 suggested remediation edit(s).",
+		"## Recommended Next Actions",
+		"Proceed with the supersedes path against `SPEC-008`",
 		"## Overlap",
-		"`SPEC-008` Legacy Rate Limiting (extends, 0.922, merge candidate)",
+		"Posture: `proceed_with_supersedes`",
+		"Primary overlap: `SPEC-008` Legacy Rate Limiting (extends, 0.922, merge candidate)",
 		"## Comparison",
+		"Tradeoff `scope`: SPEC-042 uses tenant-scoped limits.",
 		"## Impact",
+		"Summary: 1 impacted spec(s), 0 governed ref(s), 1 impacted doc(s)",
 		"Top impacted specs",
 		"`SPEC-055` Tenant Overrides Rollout (depends_on)",
 		"Top impacted docs",
 		"`doc://guides/api-rate-limits` API Rate Limits (score 0.912, file://docs/guides/api-rate-limits.md)",
 		"## Doc Drift",
+		"Summary: 1 doc(s) need follow-up",
+		"Finding `default_limit_mismatch` from `SPEC-042`: document reports a different default limit (expected `200`, observed `100`)",
 		"## Doc Remediation",
+		"Summary: 1 suggested update(s)",
+		"Update `default_limit_mismatch` from `SPEC-042`",
 		"Suggested edit: replace",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderCommandMarkdown() output %q does not contain %q", output, want)
+		}
+	}
+}
+
+func TestRenderCommandMarkdownReviewSpecWithNoFollowUp(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+
+	err := renderCommandMarkdown(&stdout, "review-spec", &analysis.ReviewResult{
+		SpecRef: "SPEC-200",
+		DocDrift: &analysis.DocDriftResult{
+			Assessments: []analysis.DocDriftAssessment{
+				{DocRef: "doc://guides/aligned", Status: "aligned"},
+			},
+		},
+		DocRemediation: &analysis.DocRemediationResult{},
+	})
+	if err != nil {
+		t.Fatalf("renderCommandMarkdown() error = %v, want nil", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"## Summary",
+		"Overlap posture: no overlap analysis generated.",
+		"Comparison posture: no primary comparison target was generated.",
+		"Documentation posture: no drift follow-up identified.",
+		"## Recommended Next Actions",
+		"No immediate follow-up identified from the current review.",
+		"No drifting docs detected.",
+		"No remediation guidance.",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderCommandMarkdown() output %q does not contain %q", output, want)
