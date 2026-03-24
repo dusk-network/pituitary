@@ -114,6 +114,8 @@ Inferred `markdown_contract` records must preserve confidence metadata alongside
 
 The index must also carry enough metadata to reject stale reuse. At minimum, rebuilds should persist the configured embedder fingerprint, a normalized source fingerprint, and a content fingerprint of the indexed artifacts. Search and analysis commands should compare those values against the current workspace before returning results and fail fast with `pituitary index --rebuild` guidance when they no longer match.
 
+Before a rebuild or dry run touches SQLite, Pituitary should validate the explicit spec relation graph. Cycles in `depends_on` or `supersedes`, plus contradictory relation combinations, are repository-health failures and should be surfaced with the exact refs involved instead of silently entering the index.
+
 When teams want more rigor, Pituitary may optionally generate an explicit spec bundle from one inferred contract. That canonicalization flow must preserve the stable inferred ref, preserve source provenance, preview the generated `spec.toml` and `body.md` before write, and remain incremental rather than forcing whole-repo migration.
 
 ---

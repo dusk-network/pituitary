@@ -13,6 +13,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/runtimeprobe"
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 type statusRequest struct {
@@ -20,17 +21,18 @@ type statusRequest struct {
 }
 
 type statusResult struct {
-	WorkspaceRoot     string                  `json:"workspace_root"`
-	ConfigPath        string                  `json:"config_path"`
-	ConfigResolution  *configResolution       `json:"config_resolution,omitempty"`
-	IndexPath         string                  `json:"index_path"`
-	IndexExists       bool                    `json:"index_exists"`
-	Freshness         *index.FreshnessStatus  `json:"freshness,omitempty"`
-	SpecCount         int                     `json:"spec_count"`
-	DocCount          int                     `json:"doc_count"`
-	ChunkCount        int                     `json:"chunk_count"`
-	ArtifactLocations *statusArtifactLocation `json:"artifact_locations,omitempty"`
-	Runtime           *runtimeprobe.Result    `json:"runtime,omitempty"`
+	WorkspaceRoot     string                     `json:"workspace_root"`
+	ConfigPath        string                     `json:"config_path"`
+	ConfigResolution  *configResolution          `json:"config_resolution,omitempty"`
+	IndexPath         string                     `json:"index_path"`
+	IndexExists       bool                       `json:"index_exists"`
+	Freshness         *index.FreshnessStatus     `json:"freshness,omitempty"`
+	SpecCount         int                        `json:"spec_count"`
+	DocCount          int                        `json:"doc_count"`
+	ChunkCount        int                        `json:"chunk_count"`
+	ArtifactLocations *statusArtifactLocation    `json:"artifact_locations,omitempty"`
+	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
+	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
 }
 
 type statusArtifactLocation struct {
@@ -108,6 +110,13 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 			Message: "invalid config:\n" + err.Error(),
 		}, 2)
 	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
+			Code:    "source_error",
+			Message: "source load failed:\n" + err.Error(),
+		}, 2)
+	}
 
 	status, err := index.ReadStatusContext(ctx, cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
@@ -154,6 +163,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		DocCount:          status.DocCount,
 		ChunkCount:        status.ChunkCount,
 		ArtifactLocations: buildStatusArtifactLocations(cfg),
+		RelationGraph:     index.InspectRelationGraph(records.Specs),
 		Runtime:           runtimeResult,
 	}, nil)
 }
