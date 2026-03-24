@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/ranking"
 )
 
 const (
@@ -279,6 +281,7 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 	if err != nil {
 		return nil, fmt.Errorf("encode query embedding: %w", err)
 	}
+	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
 	sqlText, args := buildCandidateQuery(query, queryBlob)
 	rows, err := db.QueryContext(ctx, sqlText, args...)
@@ -321,7 +324,11 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 		}
 
 		candidate.Content = strings.TrimSpace(candidate.Content)
-		candidate.Score = cosineScoreFromDistance(distance)
+		candidate.Score = ranking.AdjustHistoricalSectionScore(
+			cosineScoreFromDistance(distance),
+			candidate.SectionHeading,
+			preferHistorical,
+		)
 		if candidate.Score <= 0 {
 			continue
 		}
@@ -329,6 +336,21 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate search candidates: %w", err)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		switch {
+		case candidates[i].Score != candidates[j].Score:
+			return candidates[i].Score > candidates[j].Score
+		case candidates[i].Ref != candidates[j].Ref:
+			return candidates[i].Ref < candidates[j].Ref
+		case candidates[i].SectionHeading != candidates[j].SectionHeading:
+			return candidates[i].SectionHeading < candidates[j].SectionHeading
+		default:
+			return candidates[i].ChunkID < candidates[j].ChunkID
+		}
+	})
+	if len(candidates) > query.Limit {
+		candidates = candidates[:query.Limit]
 	}
 	return candidates, nil
 }
@@ -382,7 +404,7 @@ WHERE a.kind = ?`)
 	builder.WriteString(`
 ORDER BY vh.distance ASC, a.ref ASC, c.section ASC, vh.chunk_id ASC
 LIMIT ?`)
-	args = append(args, query.Limit)
+	args = append(args, searchCandidateLimit(query.Limit))
 
 	return builder.String(), args
 }

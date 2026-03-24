@@ -7,6 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/ranking"
 )
 
 const (
@@ -174,12 +175,19 @@ func (r *analysisRepository) shortlistScoresForEmbedding(embedding []float64, qu
 	for rows.Next() {
 		var (
 			ref      string
+			heading  string
 			distance float64
 		)
-		if err := rows.Scan(&ref, &distance); err != nil {
+		if err := rows.Scan(&ref, &heading, &distance); err != nil {
 			return nil, fmt.Errorf("scan shortlisted artifact: %w", err)
 		}
-		scores[ref] = similarityScoreFromDistance(distance)
+		score := ranking.AdjustHistoricalSectionScore(similarityScoreFromDistance(distance), heading, false)
+		if score <= 0 {
+			continue
+		}
+		if score > scores[ref] {
+			scores[ref] = score
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate shortlisted artifacts: %w", err)
@@ -189,7 +197,6 @@ func (r *analysisRepository) shortlistScoresForEmbedding(embedding []float64, qu
 
 func buildArtifactShortlistQuery(query artifactShortlistQuery, queryBlob []byte) (string, []any) {
 	limit := normalizeArtifactShortlistLimit(query.Limit)
-	refLimit := shortlistRefProbeLimit(limit)
 
 	var builder strings.Builder
 	args := make([]any, 0, 4+len(query.Statuses)+len(query.ExcludeRefs))
@@ -203,7 +210,8 @@ WITH vector_hits AS (
 )
 SELECT
   a.ref,
-  MIN(vh.distance)
+  c.section,
+  vh.distance
 FROM vector_hits vh
 JOIN chunks c ON c.id = vh.chunk_id
 JOIN artifacts a ON a.ref = c.artifact_ref
@@ -235,10 +243,9 @@ WHERE a.kind = ?`)
 	}
 
 	builder.WriteString(`
-GROUP BY a.ref
-ORDER BY MIN(vh.distance) ASC, a.ref ASC
+ORDER BY vh.distance ASC, a.ref ASC, c.section ASC, vh.chunk_id ASC
 LIMIT ?`)
-	args = append(args, refLimit)
+	args = append(args, shortlistChunkProbeLimit(limit))
 
 	return builder.String(), args
 }

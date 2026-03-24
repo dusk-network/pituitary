@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -250,6 +251,80 @@ Interactive authentication sessions must use tenant-scoped policy checks and sli
 	}
 }
 
+func TestSearchSpecsDownranksHistoricalSectionsByDefault(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	mustWriteSearchFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustWriteSearchFile(t, filepath.Join(repo, "specs", "locality-kernel", "spec.toml"), `
+id = "SPEC-LOCALITY"
+title = "Locality Kernel Contract"
+status = "accepted"
+domain = "runtime"
+body = "body.md"
+`)
+	mustWriteSearchFile(t, filepath.Join(repo, "specs", "locality-kernel", "body.md"), `
+## Requirements
+
+Locality continuity semantics define the active runtime contract.
+
+## Historical provenance
+
+Locality continuity kernel semantics governed earlier drafts.
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	activeResult, err := SearchSpecs(cfg, SearchSpecQuery{Query: "locality continuity kernel semantics", Limit: 5})
+	if err != nil {
+		t.Fatalf("SearchSpecs() default error = %v", err)
+	}
+	if len(activeResult.Matches) == 0 {
+		t.Fatal("SearchSpecs() default returned no matches")
+	}
+	if strings.Contains(strings.ToLower(activeResult.Matches[0].SectionHeading), "historical provenance") {
+		t.Fatalf("default top match = %+v, want active section ahead of historical provenance", activeResult.Matches[0])
+	}
+
+	historicalResult, err := SearchSpecs(cfg, SearchSpecQuery{Query: "historical provenance locality continuity kernel semantics", Limit: 5})
+	if err != nil {
+		t.Fatalf("SearchSpecs() historical error = %v", err)
+	}
+	if len(historicalResult.Matches) == 0 {
+		t.Fatal("SearchSpecs() historical returned no matches")
+	}
+	if !strings.Contains(strings.ToLower(historicalResult.Matches[0].SectionHeading), "historical provenance") {
+		t.Fatalf("historical top match = %+v, want historical provenance section when query asks for history", historicalResult.Matches[0])
+	}
+}
+
 func TestSearchSpecsRejectsEmbedderFingerprintMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -279,5 +354,15 @@ func TestSearchSpecsRejectsEmbedderFingerprintMismatch(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "embedder fingerprint") || !strings.Contains(got, "pituitary index --rebuild") {
 		t.Fatalf("SearchSpecs() error = %q, want fingerprint rebuild guidance", got)
+	}
+}
+
+func mustWriteSearchFile(tb testing.TB, path, content string) {
+	tb.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		tb.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(content)+"\n"), 0o644); err != nil {
+		tb.Fatalf("write %s: %v", path, err)
 	}
 }
