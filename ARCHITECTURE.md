@@ -709,8 +709,12 @@ Process:
   3. Deterministically classify findings into:
      - compliant
      - conflicting
-     - unspecified / no-governing-spec
-  4. Cite spec refs, section headings, and changed paths
+     - unspecified with explicit traceability reasons:
+       - no_governing_spec
+       - weak_traceability
+       - traceability_gap
+       - insufficient_evidence
+  4. Cite spec refs, section headings, changed paths, and applies_to guidance when traceability is the limiting factor
 
 Output:
   compliant[]

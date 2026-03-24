@@ -469,6 +469,12 @@ func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis
 			fmt.Fprintf(w, " | %s", item.SectionHeading)
 		}
 		fmt.Fprintf(w, " | %s\n", item.Message)
+		if item.Traceability != "" {
+			fmt.Fprintf(w, "  traceability: %s\n", item.Traceability)
+		}
+		if item.Suggestion != "" {
+			fmt.Fprintf(w, "  suggestion: %s\n", item.Suggestion)
+		}
 	}
 }
 

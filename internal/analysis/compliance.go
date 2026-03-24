@@ -19,6 +19,7 @@ import (
 const (
 	complianceSemanticSuggestionLimit     = 4
 	complianceSemanticSuggestionThreshold = 0.45
+	complianceWeakSuggestionThreshold     = 0.25
 )
 
 var complianceRequestsPerMinutePattern = regexp.MustCompile(`(?i)\b(\d+)\s+requests?\s+per\s+minute\b`)
@@ -103,6 +104,8 @@ type ComplianceFinding struct {
 	SectionHeading string `json:"section_heading,omitempty"`
 	Code           string `json:"code"`
 	Message        string `json:"message"`
+	Traceability   string `json:"traceability,omitempty"`
+	Suggestion     string `json:"suggestion,omitempty"`
 	Expected       string `json:"expected,omitempty"`
 	Observed       string `json:"observed,omitempty"`
 }
@@ -562,11 +565,14 @@ func (r *analysisRepository) complianceSemanticSuggestions(embedding []float64) 
 
 func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, suggestions []scoredArtifactRef) (ComplianceFinding, string, string, string) {
 	finding := ComplianceFinding{
-		Path:    target.Path,
-		Code:    "no_governing_spec",
-		Message: fmt.Sprintf("%s is not governed by any accepted applies_to ref in the current index", target.Path),
+		Path:         target.Path,
+		Code:         "no_governing_spec",
+		Traceability: "missing_applies_to",
+		Message:      fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref in the current index", target.Path),
+		Suggestion:   complianceAppliesToSuggestion(target.Path, ""),
 	}
 	if len(suggestions) == 0 {
+		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval did not find a strong accepted spec match", target.Path)
 		return finding, "", "", ""
 	}
 
@@ -584,28 +590,48 @@ func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, 
 		bestTitle   string
 		bestHeading string
 		bestScore   float64
+		bestSection embeddedSection
 	)
 	for _, suggestion := range suggestions {
 		spec, ok := specs[suggestion.Ref]
 		if !ok {
 			continue
 		}
-		heading, score := strongestComplianceSection(spec, target)
+		section, score, ok := strongestComplianceSectionDetail(spec, target)
+		if !ok {
+			continue
+		}
+		heading := section.Heading
 		if score > bestScore {
 			bestRef = spec.Record.Ref
 			bestTitle = spec.Record.Title
 			bestHeading = heading
 			bestScore = score
+			bestSection = section
 		}
 	}
-	if bestRef == "" || bestScore < complianceSemanticSuggestionThreshold {
+	if bestRef == "" || bestScore < complianceSemanticSuggestionThreshold || !complianceSupportsTraceability(bestSection.Content, target.Content) {
+		if bestRef != "" && bestScore >= complianceWeakSuggestionThreshold {
+			finding.Code = "weak_traceability"
+			finding.Traceability = "weak_semantic_retrieval"
+			finding.SpecRef = bestRef
+			finding.Title = bestTitle
+			finding.SectionHeading = bestHeading
+			finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match %s was too weak to trust as the governing spec", target.Path, bestRef)
+			finding.Suggestion = complianceAppliesToSuggestion(target.Path, bestRef)
+			return finding, bestRef, bestTitle, "semantic"
+		}
+		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval only found low-confidence accepted matches", target.Path)
 		return finding, "", "", ""
 	}
 
 	finding.SpecRef = bestRef
 	finding.Title = bestTitle
 	finding.SectionHeading = bestHeading
-	finding.Message = fmt.Sprintf("%s is not explicitly governed by an accepted spec; nearest accepted match is %s", target.Path, bestRef)
+	finding.Code = "traceability_gap"
+	finding.Traceability = "semantic_neighbor_without_applies_to"
+	finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match is %s", target.Path, bestRef)
+	finding.Suggestion = complianceAppliesToSuggestion(target.Path, bestRef)
 	return finding, bestRef, bestTitle, "semantic"
 }
 
@@ -621,6 +647,8 @@ func assessComplianceSpec(spec specDocument, target complianceTarget) compliance
 				SectionHeading: heading,
 				Code:           "removed_content",
 				Message:        fmt.Sprintf("%s removes code governed by %s; deleted lines are not treated as active evidence, so compliance cannot be confirmed from the diff alone", target.Path, spec.Record.Ref),
+				Traceability:   "explicit_applies_to",
+				Suggestion:     fmt.Sprintf("%s already governs %s via applies_to. Review the surrounding spec change with analyze-impact or review-spec before treating the deletion as compliant.", spec.Record.Ref, target.Path),
 			},
 			Score: score,
 		}
@@ -674,24 +702,52 @@ func assessComplianceSpec(spec specDocument, target complianceTarget) compliance
 			SectionHeading: heading,
 			Code:           "insufficient_evidence",
 			Message:        fmt.Sprintf("%s governs %s but the provided code or diff does not contain enough deterministic evidence to confirm compliance", spec.Record.Ref, target.Path),
+			Traceability:   "explicit_applies_to",
+			Suggestion:     fmt.Sprintf("%s already governs %s via applies_to. Strengthen the accepted requirement wording or the changed code surface with more literal evidence, then rerun check-compliance.", spec.Record.Ref, target.Path),
 		},
 		Score: score,
 	}
 }
 
 func strongestComplianceSection(spec specDocument, target complianceTarget) (string, float64) {
+	section, score, ok := strongestComplianceSectionDetail(spec, target)
+	if !ok {
+		return "", 0
+	}
+	return section.Heading, score
+}
+
+func strongestComplianceSectionDetail(spec specDocument, target complianceTarget) (embeddedSection, float64, bool) {
 	var (
-		bestHeading string
+		bestSection embeddedSection
 		bestScore   float64
+		found       bool
 	)
 	for _, section := range spec.Sections {
 		score := cosineSimilarity(target.Embedding, section.Embedding)
-		if score > bestScore {
+		if !found || score > bestScore {
 			bestScore = score
-			bestHeading = section.Heading
+			bestSection = section
+			found = true
 		}
 	}
-	return bestHeading, bestScore
+	return bestSection, bestScore, found
+}
+
+func complianceSupportsTraceability(specContent, targetContent string) bool {
+	for _, statement := range complianceStatements(specContent) {
+		if _, _, ok := complianceRequestsPerMinuteMatch(statement, targetContent); ok {
+			return true
+		}
+		if _, _, ok := compliancePhraseMatch(statement, targetContent); ok {
+			return true
+		}
+		shared, ratio := complianceLexicalOverlap(statement, targetContent)
+		if ratio >= 0.55 && len(shared) >= 3 {
+			return true
+		}
+	}
+	return false
 }
 
 func complianceStatements(content string) []string {
@@ -719,6 +775,7 @@ func conflictingComplianceFinding(spec specDocument, target complianceTarget, se
 			SectionHeading: section.Heading,
 			Code:           "numeric_mismatch",
 			Message:        fmt.Sprintf("%s conflicts with %s: observed %s where %s requires %s", target.Path, spec.Record.Ref, observed, spec.Record.Ref, expected),
+			Traceability:   "explicit_applies_to",
 			Expected:       expected,
 			Observed:       observed,
 		}, true
@@ -733,6 +790,7 @@ func conflictingComplianceFinding(spec specDocument, target complianceTarget, se
 			SectionHeading: section.Heading,
 			Code:           "phrase_mismatch",
 			Message:        fmt.Sprintf("%s conflicts with %s: observed %s where %s expects %s", target.Path, spec.Record.Ref, observed, spec.Record.Ref, expected),
+			Traceability:   "explicit_applies_to",
 			Expected:       expected,
 			Observed:       observed,
 		}, true
@@ -751,6 +809,7 @@ func supportiveComplianceFinding(spec specDocument, target complianceTarget, sec
 			SectionHeading: section.Heading,
 			Code:           "matching_claim",
 			Message:        fmt.Sprintf("%s aligns with %s", target.Path, spec.Record.Ref),
+			Traceability:   "explicit_applies_to",
 			Expected:       expected,
 			Observed:       observed,
 		}, true
@@ -765,6 +824,7 @@ func supportiveComplianceFinding(spec specDocument, target complianceTarget, sec
 			SectionHeading: section.Heading,
 			Code:           "matching_claim",
 			Message:        fmt.Sprintf("%s aligns with %s", target.Path, spec.Record.Ref),
+			Traceability:   "explicit_applies_to",
 			Expected:       expected,
 			Observed:       observed,
 		}, true
@@ -779,11 +839,29 @@ func supportiveComplianceFinding(spec specDocument, target complianceTarget, sec
 			SectionHeading: section.Heading,
 			Code:           "matching_terms",
 			Message:        fmt.Sprintf("%s shares deterministic requirement terms with %s", target.Path, spec.Record.Ref),
+			Traceability:   "explicit_applies_to",
 			Observed:       strings.Join(shared, ", "),
 		}, true
 	}
 
 	return ComplianceFinding{}, false
+}
+
+func complianceAppliesToSuggestion(path, specRef string) string {
+	ref := primaryGovernedRefForPath(path)
+	if specRef != "" {
+		return fmt.Sprintf("If %s governs %s, add applies_to = [\"%s\"] to that accepted spec and rebuild the index.", specRef, path, ref)
+	}
+	return fmt.Sprintf("If an accepted spec governs %s, add applies_to = [\"%s\"] to that spec and rebuild the index.", path, ref)
+}
+
+func primaryGovernedRefForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg", ".conf":
+		return "config://" + normalizeCompliancePath(path)
+	default:
+		return "code://" + normalizeCompliancePath(path)
+	}
 }
 
 func complianceRequestsPerMinuteConflict(statement, content string) (string, string, bool) {
