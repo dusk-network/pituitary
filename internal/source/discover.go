@@ -258,10 +258,14 @@ func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCa
 	for _, token := range pathTokens {
 		pathSet[token] = struct{}{}
 	}
+	titleTokens := make(map[string]struct{}, len(discoveryTokens(titleLower)))
+	for _, token := range discoveryTokens(titleLower) {
+		titleTokens[token] = struct{}{}
+	}
 
 	lines := strings.Split(string(body), "\n")
 	contractScore, contractReasons := scoreMarkdownContractCandidate(pathSet, titleLower, lines)
-	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower)
+	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower, titleTokens)
 
 	switch {
 	case contractScore >= 3 && contractScore >= docScore+1:
@@ -325,22 +329,22 @@ func scoreMarkdownContractCandidate(pathTokens map[string]struct{}, titleLower s
 	return score, reasons
 }
 
-func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string) (int, []string) {
+func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string, titleTokens map[string]struct{}) (int, []string) {
 	var (
 		score   int
 		reasons []string
 	)
 
-	if hasAnyDiscoveryToken(pathTokens, "guides", "guide", "runbooks", "runbook", "playbooks", "playbook", "handbook", "manuals", "manual", "operations", "ops") {
+	if hasAnyDiscoveryToken(pathTokens, "guides", "guide", "runbooks", "runbook", "playbooks", "playbook", "handbook", "manuals", "manual", "operations", "ops", "reference", "references") {
 		score += 3
-		reasons = append(reasons, "lives under an operator-doc path")
+		reasons = append(reasons, "lives under a guide, runbook, operations, or reference-doc path")
 	} else if hasAnyDiscoveryToken(pathTokens, "docs", "doc") {
 		score++
 		reasons = append(reasons, "lives under a docs path")
 	}
-	if containsAny(titleLower, "guide", "runbook", "playbook", "manual", "operator", "operations") {
+	if hasAnyDiscoveryToken(titleTokens, "guide", "runbook", "playbook", "manual", "operator", "operations", "reference") {
 		score++
-		reasons = append(reasons, "title looks like an operator document")
+		reasons = append(reasons, "title looks like a guide, runbook, operations, or reference document")
 	}
 	if hasAnyDiscoveryToken(pathTokens, "development", "dev", "test", "tests", "testing", "example", "examples", "fixture", "fixtures") {
 		score -= 3
@@ -367,7 +371,7 @@ func buildDiscoveredSources(workspaceRoot string, specs, contracts, docs []disco
 		sources = append(sources, source)
 	}
 	if source, ok := buildDiscoveredSource(workspaceRoot, "docs", config.SourceKindMarkdownDocs, docs, []string{
-		fmt.Sprintf("discovered %d likely operator-doc file(s)", len(docs)),
+		fmt.Sprintf("discovered %d likely guide, runbook, operations, or reference-doc file(s)", len(docs)),
 		"uses exact file selectors to avoid indexing unrelated markdown",
 	}, usedNames); ok {
 		sources = append(sources, source)

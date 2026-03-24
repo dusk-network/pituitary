@@ -168,7 +168,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 
 | Command | What it does |
 |---|---|
-| `discover --path .` | Scan a repo, propose conservative sources, and show the generated local config |
+| `discover --path .` | Scan a repo, propose conservative sources for specs, contracts, guides, runbooks, and reference docs, and show the generated local config |
 | `preview-sources` | Show which files each configured source will index |
 | `explain-file docs/guides/api-rate-limits.md` | Explain how one file is classified by configured sources |
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
