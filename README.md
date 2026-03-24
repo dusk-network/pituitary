@@ -11,7 +11,7 @@
 
 Pituitary keeps your specifications, code, and documentation from drifting out of sync. Point it at a folder of spec files, and it builds a semantic index that can detect overlapping specs, compare competing designs, trace impact when a spec changes, and catch documentation that has gone stale.
 
-It ships as a single Go binary — no Docker, no external services. Just `pituitary` and one SQLite file.
+It ships as a single Go binary. Deterministic mode needs no Docker and no external services: just `pituitary` and one SQLite file. When you care about retrieval quality on a real repo, you can optionally point it at a local embedding server such as LM Studio.
 
 Prebuilt release archives are published on [GitHub Releases](https://github.com/dusk-network/pituitary/releases) for `linux/amd64`, `darwin/arm64`, and `windows/amd64` if you want to evaluate the CLI without building from source.
 
@@ -39,13 +39,34 @@ go build -o pituitary .
 # Build the index from the included example specs
 ./pituitary index --rebuild
 
-# Try some queries
-./pituitary search-specs --query "rate limiting"
-./pituitary check-overlap --path specs/rate-limit-v2
+# Run a real spec workflow
 ./pituitary review-spec --path specs/rate-limit-v2
+./pituitary analyze-impact --path specs/rate-limit-v2/body.md
+./pituitary check-doc-drift --scope all
+
+# Check a diff against accepted specs
+git diff --cached | ./pituitary check-compliance --diff-file -
 ```
 
 The repo ships with a small example workspace under `specs/` and curated fixture docs under `docs/guides/` and `docs/runbooks/` — three spec bundles with intentional overlaps and a guide with intentional drift — so you can try every command out of the box.
+
+### Existing repo onboarding
+
+For a repo that does not already have a hand-written `pituitary.toml`, start with discovery before you index:
+
+```sh
+./pituitary discover --path .
+./pituitary discover --path . --write
+./pituitary preview-sources
+./pituitary explain-file README.md
+./pituitary index --rebuild
+```
+
+`discover` proposes a conservative local config, `preview-sources` shows exactly what will be indexed, and `explain-file` helps you diagnose why an important file is or is not in scope before you pay for a rebuild.
+
+### Retrieval mode matters
+
+The default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the best retrieval runtime for real corpora. If you are evaluating search quality, overlap ranking, drift detection, or terminology audits on a real repo, switch to a real local embedding runtime first and then rebuild the index.
 
 ## How It Works
 
@@ -197,7 +218,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `analyze-impact --path specs/rate-limit-v2/body.md` | Trace which specs, code refs, and docs are affected by a change |
 | `check-terminology --term repo --canonical-term locality --spec-ref SPEC-042` | Audit docs and specs for displaced terminology after a conceptual migration |
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
-| `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs |
+| `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs; ideal for pre-merge and CI use |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs, with evidence and confidence |
 | `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
 
@@ -210,6 +231,17 @@ By default, `search-specs` down-ranks sections that look like historical provena
 `index --rebuild` now keeps the atomic staging-DB swap, but it also reuses unchanged chunk embeddings by default when the current index has a matching schema, embedder fingerprint, and source fingerprint. Use `--full` to disable reuse and force a complete re-embed.
 
 `index --rebuild` and `index --dry-run` also validate the spec relation graph before touching SQLite. Cycles in `depends_on` or `supersedes`, plus contradictory `depends_on`/`supersedes` combinations, fail fast with the exact refs involved. `pituitary status` reports the same graph-health findings without requiring a rebuild.
+
+### Example: CI-friendly compliance diff
+
+`check-compliance --diff-file` is the easiest way to turn Pituitary into a pre-merge guardrail:
+
+```sh
+git diff --cached | ./pituitary check-compliance --diff-file -
+git diff origin/main...HEAD | ./pituitary check-compliance --diff-file -
+```
+
+Use the first form locally before you commit, and the second form in CI when you want to compare a branch against `main`.
 
 ### Example: full spec review
 
@@ -343,7 +375,7 @@ provider = "disabled"
 
 For `fixture` embedder mode and `disabled` analysis mode, `endpoint`, `api_key_env`, `timeout_ms`, and `max_retries` remain inert. For `openai_compatible`, Pituitary uses them for the configured HTTP runtime call path.
 
-This means the repo still works out of the box with no model credentials. Today:
+This means the repo still works out of the box with no model credentials. Treat `fixture` as the deterministic test baseline, not the recommended retrieval runtime for a real spec corpus. Today:
 
 - `runtime.embedder.provider` supports `fixture` and `openai_compatible`
 - `runtime.analysis.provider` supports `disabled` and `openai_compatible`
@@ -357,11 +389,21 @@ Example local embedding setup against LM Studio:
 ```toml
 [runtime.embedder]
 provider = "openai_compatible"
-model = "pituitary-embed"
-endpoint = "http://100.92.91.40:1234/v1"
+model = "nomic-embed-text-v1.5"
+endpoint = "http://127.0.0.1:1234/v1"
 timeout_ms = 30000
 max_retries = 1
 ```
+
+Use the model identifier exposed by your local server. The value above is a concrete LM Studio-friendly example, not a required alias.
+
+A practical local setup is:
+
+1. Load a dedicated embedding model in LM Studio, for example `nomic-embed-text-v1.5`.
+2. Expose the OpenAI-compatible server on `http://127.0.0.1:1234/v1`.
+3. Point `runtime.embedder` at that endpoint.
+4. Run `pituitary status --check-runtime embedder`.
+5. Rebuild the index with `pituitary index --rebuild`.
 
 Before a long-running rebuild or search against a local model server, probe the configured embedder directly:
 
@@ -377,8 +419,8 @@ Example local analysis setup against LM Studio:
 ```toml
 [runtime.analysis]
 provider = "openai_compatible"
-model = "pituitary-analysis"
-endpoint = "http://100.92.91.40:1234/v1"
+model = "qwen3-coder-next"
+endpoint = "http://127.0.0.1:1234/v1"
 timeout_ms = 30000
 max_retries = 1
 ```
