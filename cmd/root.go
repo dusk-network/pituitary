@@ -8,71 +8,70 @@ import (
 	"sort"
 )
 
+const (
+	commandFormatText     = "text"
+	commandFormatJSON     = "json"
+	commandFormatTable    = "table"
+	commandFormatMarkdown = "markdown"
+)
+
 type commandSpec struct {
-	Run func(context.Context, []string, io.Writer, io.Writer) int
+	Description string
+	Formats     map[string]struct{}
+	Run         func(context.Context, []string, io.Writer, io.Writer) int
 }
 
-var commands = map[string]commandSpec{
-	"canonicalize":      {Run: runCanonicalizeContext},
-	"discover":          {Run: runDiscoverContext},
-	"migrate-config":    {Run: runMigrateConfigContext},
-	"index":             {Run: runIndexContext},
-	"status":            {Run: runStatusContext},
-	"version":           {Run: runVersionContext},
-	"preview-sources":   {Run: runPreviewSourcesContext},
-	"explain-file":      {Run: runExplainFileContext},
-	"search-specs":      {Run: runSearchSpecsContext},
-	"check-overlap":     {Run: runCheckOverlapContext},
-	"compare-specs":     {Run: runCompareSpecsContext},
-	"analyze-impact":    {Run: runAnalyzeImpactContext},
-	"check-terminology": {Run: runCheckTerminologyContext},
-	"check-compliance":  {Run: runCheckComplianceContext},
-	"check-doc-drift":   {Run: runCheckDocDriftContext},
-	"review-spec":       {Run: runReviewSpecContext},
-	"serve":             {Run: runServeContext},
+func commandRegistry() map[string]commandSpec {
+	return map[string]commandSpec{
+		"canonicalize":      {Description: "promote an inferred contract into a spec bundle", Formats: commandFormats(), Run: runCanonicalizeContext},
+		"discover":          {Description: "scan a repo and propose a local config", Formats: commandFormats(), Run: runDiscoverContext},
+		"migrate-config":    {Description: "rewrite a legacy config into the current schema", Formats: commandFormats(), Run: runMigrateConfigContext},
+		"index":             {Description: "rebuild or validate the local Pituitary index", Formats: commandFormats(), Run: runIndexContext},
+		"status":            {Description: "show current index status", Formats: commandFormats(), Run: runStatusContext},
+		"version":           {Description: "show Pituitary and Go runtime versions", Formats: commandFormats(), Run: runVersionContext},
+		"preview-sources":   {Description: "show which files each source will index", Formats: commandFormats(), Run: runPreviewSourcesContext},
+		"explain-file":      {Description: "explain how one file is treated by configured sources", Formats: commandFormats(), Run: runExplainFileContext},
+		"search-specs":      {Description: "search spec sections semantically", Formats: commandFormats(commandFormatTable), Run: runSearchSpecsContext},
+		"check-overlap":     {Description: "find overlapping specs", Formats: commandFormats(), Run: runCheckOverlapContext},
+		"compare-specs":     {Description: "compare design tradeoffs across specs", Formats: commandFormats(), Run: runCompareSpecsContext},
+		"analyze-impact":    {Description: "report affected specs and docs", Formats: commandFormats(), Run: runAnalyzeImpactContext},
+		"check-terminology": {Description: "audit terminology consistency after conceptual changes", Formats: commandFormats(), Run: runCheckTerminologyContext},
+		"check-compliance":  {Description: "check code paths and diffs against accepted specs", Formats: commandFormats(), Run: runCheckComplianceContext},
+		"check-doc-drift":   {Description: "find docs that drift from specs", Formats: commandFormats(), Run: runCheckDocDriftContext},
+		"review-spec":       {Description: "run the common spec-review workflow", Formats: commandFormats(commandFormatMarkdown), Run: runReviewSpecContext},
+		"serve":             {Description: "run the optional MCP server transport", Formats: commandFormats(), Run: runServeContext},
+	}
+}
+
+func commandFormats(extra ...string) map[string]struct{} {
+	formats := map[string]struct{}{
+		commandFormatText: {},
+		commandFormatJSON: {},
+	}
+	for _, format := range extra {
+		formats[format] = struct{}{}
+	}
+	return formats
 }
 
 func commandDescription(name string) string {
-	switch name {
-	case "canonicalize":
-		return "promote an inferred contract into a spec bundle"
-	case "discover":
-		return "scan a repo and propose a local config"
-	case "migrate-config":
-		return "rewrite a legacy config into the current schema"
-	case "index":
-		return "rebuild or validate the local Pituitary index"
-	case "status":
-		return "show current index status"
-	case "version":
-		return "show Pituitary and Go runtime versions"
-	case "preview-sources":
-		return "show which files each source will index"
-	case "explain-file":
-		return "explain how one file is treated by configured sources"
-	case "search-specs":
-		return "search spec sections semantically"
-	case "check-overlap":
-		return "find overlapping specs"
-	case "compare-specs":
-		return "compare design tradeoffs across specs"
-	case "analyze-impact":
-		return "report affected specs and docs"
-	case "check-terminology":
-		return "audit terminology consistency after conceptual changes"
-	case "check-compliance":
-		return "check code paths and diffs against accepted specs"
-	case "check-doc-drift":
-		return "find docs that drift from specs"
-	case "review-spec":
-		return "run the common spec-review workflow"
-	case "serve":
-		return "run the optional MCP server transport"
-	case "help":
+	if name == "help" {
 		return "show available commands"
-	default:
+	}
+	command, ok := commandRegistry()[name]
+	if !ok {
 		return ""
 	}
+	return command.Description
+}
+
+func commandSupportsFormat(name, format string) bool {
+	command, ok := commandRegistry()[name]
+	if !ok {
+		return false
+	}
+	_, ok = command.Formats[format]
+	return ok
 }
 
 // Run executes the bootstrap CLI transport and returns the desired process exit code.
@@ -110,7 +109,7 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 
-	command, ok := commands[name]
+	command, ok := commandRegistry()[name]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown command %q\n\n", name)
 		printHelp(stderr)
@@ -130,8 +129,9 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "available commands:")
 
-	names := make([]string, 0, len(commands))
-	for name := range commands {
+	registry := commandRegistry()
+	names := make([]string, 0, len(registry))
+	for name := range registry {
 		names = append(names, name)
 	}
 	sort.Strings(names)

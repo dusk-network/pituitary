@@ -1,18 +1,10 @@
 package index
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/openaicompat"
@@ -25,53 +17,24 @@ const (
 )
 
 type openAICompatibleEmbedder struct {
-	model      string
-	endpoint   string
-	token      string
-	maxRetries int
-	strategy   string
-	client     *http.Client
+	model    string
+	strategy string
+	client   *openaicompat.Client
 
 	mu        sync.Mutex
 	dimension int
 }
 
-type openAICompatibleEmbeddingsRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
-}
-
-type openAICompatibleEmbeddingsResponse struct {
-	Data []openAICompatibleEmbedding `json:"data"`
-	Err  json.RawMessage             `json:"error,omitempty"`
-}
-
-type openAICompatibleEmbedding struct {
-	Embedding []float64 `json:"embedding"`
-	Index     int       `json:"index"`
-}
-
 func newOpenAICompatibleEmbedder(provider config.RuntimeProvider) (Embedder, error) {
-	token := ""
-	if envVar := strings.TrimSpace(provider.APIKeyEnv); envVar != "" {
-		token = strings.TrimSpace(os.Getenv(envVar))
-		if token == "" {
-			return nil, embedderDependencyUnavailable("missing API key for %s", openAICompatibleEmbedderRuntime)
-		}
-	}
-
-	client := &http.Client{}
-	if provider.TimeoutMS > 0 {
-		client.Timeout = time.Duration(provider.TimeoutMS) * time.Millisecond
+	client, err := openaicompat.NewClient(provider, openAICompatibleEmbedderRuntime)
+	if err != nil {
+		return nil, err
 	}
 
 	return &openAICompatibleEmbedder{
-		model:      strings.TrimSpace(provider.Model),
-		endpoint:   strings.TrimRight(strings.TrimSpace(provider.Endpoint), "/"),
-		token:      token,
-		maxRetries: provider.MaxRetries,
-		strategy:   embeddingStrategyForModel(provider.Model),
-		client:     client,
+		model:    strings.TrimSpace(provider.Model),
+		strategy: embeddingStrategyForModel(provider.Model),
+		client:   client,
 	}, nil
 }
 
@@ -118,20 +81,12 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 		input = append(input, prepareEmbeddingInput(e.strategy, purpose, text))
 	}
 
-	body, err := json.Marshal(openAICompatibleEmbeddingsRequest{
-		Model: e.model,
-		Input: input,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("encode runtime.embedder request: %w", err)
-	}
-
-	payload, err := e.requestEmbeddings(ctx, body)
+	payload, err := e.client.Embeddings(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 	if len(payload.Data) != len(input) {
-		return nil, &DependencyUnavailableError{
+		return nil, &openaicompat.DependencyUnavailableError{
 			Runtime: openAICompatibleEmbedderRuntime,
 			Message: fmt.Sprintf("%s returned %d embedding(s) for %d input(s)", openAICompatibleEmbedderRuntime, len(payload.Data), len(input)),
 		}
@@ -144,7 +99,7 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 			index = i
 		}
 		if len(item.Embedding) == 0 {
-			return nil, &DependencyUnavailableError{
+			return nil, &openaicompat.DependencyUnavailableError{
 				Runtime: openAICompatibleEmbedderRuntime,
 				Message: fmt.Sprintf("%s returned an empty embedding for input %d", openAICompatibleEmbedderRuntime, index),
 			}
@@ -156,109 +111,13 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 	}
 	for i, vector := range vectors {
 		if len(vector) == 0 {
-			return nil, &DependencyUnavailableError{
+			return nil, &openaicompat.DependencyUnavailableError{
 				Runtime: openAICompatibleEmbedderRuntime,
 				Message: fmt.Sprintf("%s omitted embedding for input %d", openAICompatibleEmbedderRuntime, i),
 			}
 		}
 	}
 	return vectors, nil
-}
-
-func (e *openAICompatibleEmbedder) requestEmbeddings(ctx context.Context, body []byte) (*openAICompatibleEmbeddingsResponse, error) {
-	var lastErr error
-
-	for attempt := 0; attempt <= e.maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/embeddings", bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("build runtime.embedder request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if e.token != "" {
-			req.Header.Set("Authorization", "Bearer "+e.token)
-		}
-
-		resp, err := e.client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
-				return nil, err
-			}
-			lastErr = &DependencyUnavailableError{
-				Runtime: openAICompatibleEmbedderRuntime,
-				Message: fmt.Sprintf("call %s endpoint %s: %v", openAICompatibleEmbedderRuntime, e.endpoint, err),
-			}
-			if shouldRetryOpenAICompatibleRequest(err, 0) && attempt < e.maxRetries {
-				continue
-			}
-			return nil, lastErr
-		}
-
-		payload, err := readOpenAICompatibleEmbeddingsResponse(resp)
-		resp.Body.Close()
-		if err == nil {
-			return payload, nil
-		}
-		lastErr = err
-		if shouldRetryOpenAICompatibleRequest(err, resp.StatusCode) && attempt < e.maxRetries {
-			continue
-		}
-		return nil, err
-	}
-
-	if lastErr == nil {
-		lastErr = embedderDependencyUnavailable("%s request failed", openAICompatibleEmbedderRuntime)
-	}
-	return nil, lastErr
-}
-
-func readOpenAICompatibleEmbeddingsResponse(resp *http.Response) (*openAICompatibleEmbeddingsResponse, error) {
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, embedderDependencyUnavailable("read %s response: %v", openAICompatibleEmbedderRuntime, err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := openaicompat.ExtractErrorMessage(body)
-		if message == "" {
-			message = strings.TrimSpace(string(body))
-		}
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return nil, &DependencyUnavailableError{
-			Runtime: openAICompatibleEmbedderRuntime,
-			Message: fmt.Sprintf("%s endpoint %s returned %s: %s", openAICompatibleEmbedderRuntime, resp.Request.URL, resp.Status, message),
-		}
-	}
-
-	var payload openAICompatibleEmbeddingsResponse
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, embedderDependencyUnavailable("decode %s response: %v", openAICompatibleEmbedderRuntime, err)
-	}
-	if message := openaicompat.ExtractErrorValue(payload.Err); message != "" {
-		return nil, &DependencyUnavailableError{
-			Runtime: openAICompatibleEmbedderRuntime,
-			Message: fmt.Sprintf("%s endpoint %s returned an error: %s", openAICompatibleEmbedderRuntime, resp.Request.URL, message),
-		}
-	}
-	return &payload, nil
-}
-
-func shouldRetryOpenAICompatibleRequest(err error, statusCode int) bool {
-	if statusCode == http.StatusTooManyRequests || statusCode >= 500 {
-		return true
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
-	}
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "connection refused") ||
-		strings.Contains(strings.ToLower(err.Error()), "connection reset") ||
-		strings.Contains(strings.ToLower(err.Error()), "broken pipe")
 }
 
 func embeddingStrategyForModel(model string) string {
@@ -300,7 +159,7 @@ func (e *openAICompatibleEmbedder) cacheDimension(dimension int) error {
 		return nil
 	}
 	if e.dimension != dimension {
-		return &DependencyUnavailableError{
+		return &openaicompat.DependencyUnavailableError{
 			Runtime: openAICompatibleEmbedderRuntime,
 			Message: fmt.Sprintf("%s changed embedding dimension from %d to %d", openAICompatibleEmbedderRuntime, e.dimension, dimension),
 		}
@@ -308,9 +167,6 @@ func (e *openAICompatibleEmbedder) cacheDimension(dimension int) error {
 	return nil
 }
 
-func embedderDependencyUnavailable(format string, args ...any) *DependencyUnavailableError {
-	return &DependencyUnavailableError{
-		Runtime: openAICompatibleEmbedderRuntime,
-		Message: fmt.Sprintf(format, args...),
-	}
+func embedderDependencyUnavailable(format string, args ...any) *openaicompat.DependencyUnavailableError {
+	return openaicompat.NewDependencyUnavailable(openAICompatibleEmbedderRuntime, format, args...)
 }

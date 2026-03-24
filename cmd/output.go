@@ -22,26 +22,22 @@ type cliEnvelope struct {
 }
 
 func isSupportedFormat(format string) bool {
-	return format == "text" || format == "json" || format == "table" || format == "markdown"
-}
-
-func supportsTableFormat(command string) bool {
-	return command == "search-specs"
-}
-
-func supportsMarkdownFormat(command string) bool {
-	return command == "review-spec"
+	return format == commandFormatText || format == commandFormatJSON || format == commandFormatTable || format == commandFormatMarkdown
 }
 
 func validateCLIFormat(command, format string) error {
 	if !isSupportedFormat(format) {
 		return fmt.Errorf("unsupported format %q", format)
 	}
-	if format == "table" && !supportsTableFormat(command) {
-		return fmt.Errorf("format %q is only supported for search-specs", format)
-	}
-	if format == "markdown" && !supportsMarkdownFormat(command) {
-		return fmt.Errorf("format %q is only supported for review-spec", format)
+	if !commandSupportsFormat(command, format) {
+		switch format {
+		case commandFormatTable:
+			return fmt.Errorf("format %q is only supported for search-specs", format)
+		case commandFormatMarkdown:
+			return fmt.Errorf("format %q is only supported for review-spec", format)
+		default:
+			return fmt.Errorf("format %q is not supported for %s", format, command)
+		}
 	}
 	return nil
 }
@@ -50,7 +46,7 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 	if len(warnings) == 0 {
 		warnings = cliWarningsForResult(result)
 	}
-	if format == "json" {
+	if format == commandFormatJSON {
 		return writeCLIJSON(stdout, cliEnvelope{
 			Request:  request,
 			Result:   result,
@@ -58,7 +54,7 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 			Errors:   []cliIssue{},
 		})
 	}
-	if format == "table" {
+	if format == commandFormatTable {
 		writeCLIWarnings(stderr, command, warnings)
 		if err := renderCommandTable(stdout, command, result); err != nil {
 			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
@@ -66,7 +62,7 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 		}
 		return 0
 	}
-	if format == "markdown" {
+	if format == commandFormatMarkdown {
 		writeCLIWarnings(stderr, command, warnings)
 		if err := renderCommandMarkdown(stdout, command, result); err != nil {
 			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)

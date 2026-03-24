@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -37,22 +38,45 @@ type operationExecutionPolicy struct {
 	DefaultCode string
 }
 
-func executeWithFreshConfig[Req any, Res any](ctx context.Context, configPath string, request Req, policy operationExecutionPolicy, run func(*config.Config) (*Res, error)) Response[Req, Res] {
+type issueError struct {
+	issue *Issue
+}
+
+func (e *issueError) Error() string {
+	if e == nil || e.issue == nil {
+		return ""
+	}
+	return e.issue.Message
+}
+
+func executeWithConfig[Req any, Res any](ctx context.Context, configPath string, request Req, run func(*config.Config) (*Res, error), classify func(*config.Config, error) *Issue) Response[Req, Res] {
 	cfg, issue := loadConfig(configPath)
 	if issue != nil {
-		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
 		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
 	}
 
 	result, err := run(cfg)
 	if err != nil {
-		issue := classifyExecutionError(cfg, err, policy)
+		issue := classify(cfg, err)
 		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
 	}
 
 	return success(request, result)
+}
+
+func executeWithFreshConfig[Req any, Res any](ctx context.Context, configPath string, request Req, policy operationExecutionPolicy, run func(*config.Config) (*Res, error)) Response[Req, Res] {
+	return executeWithConfig(ctx, configPath, request, func(cfg *config.Config) (*Res, error) {
+		if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+			return nil, &issueError{issue: issue}
+		}
+		return run(cfg)
+	}, func(cfg *config.Config, err error) *Issue {
+		var wrapped *issueError
+		if errors.As(err, &wrapped) && wrapped != nil && wrapped.issue != nil {
+			return wrapped.issue
+		}
+		return classifyExecutionError(cfg, err, policy)
+	})
 }
 
 func classifyExecutionError(cfg *config.Config, err error, policy operationExecutionPolicy) *Issue {

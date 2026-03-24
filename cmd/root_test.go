@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunKnownCommandsStayCallable(t *testing.T) {
-	for name := range commands {
+	for name := range commandRegistry() {
 		if name == "help" {
 			continue
 		}
@@ -136,9 +136,18 @@ func buildLimiter() {}
 func TestCommandsRegistryHasRunners(t *testing.T) {
 	t.Parallel()
 
-	for name, command := range commands {
-		if commandDescription(name) == "" {
+	for name, command := range commandRegistry() {
+		if strings.TrimSpace(command.Description) == "" {
 			t.Fatalf("command %q description is empty", name)
+		}
+		if len(command.Formats) == 0 {
+			t.Fatalf("command %q formats are empty", name)
+		}
+		if _, ok := command.Formats[commandFormatText]; !ok {
+			t.Fatalf("command %q does not support text format", name)
+		}
+		if _, ok := command.Formats[commandFormatJSON]; !ok {
+			t.Fatalf("command %q does not support json format", name)
 		}
 		if command.Run == nil {
 			t.Fatalf("command %q has no runner", name)
@@ -180,7 +189,7 @@ func TestRunHelpIncludesCommandSurface(t *testing.T) {
 	}
 
 	out := stdout.String()
-	for name := range commands {
+	for name := range commandRegistry() {
 		if name == "help" {
 			continue
 		}

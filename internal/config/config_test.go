@@ -607,6 +607,48 @@ path = "specs"
 	}
 }
 
+func TestLoadPreservesExplicitZeroRuntimeTimeouts(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 0
+
+[runtime.analysis]
+provider = "openai_compatible"
+model = "pituitary-analysis"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Runtime.Embedder.TimeoutMS, 0; got != want {
+		t.Fatalf("runtime.embedder.timeout_ms = %d, want %d", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.TimeoutMS, 0; got != want {
+		t.Fatalf("runtime.analysis.timeout_ms = %d, want %d", got, want)
+	}
+}
+
 func TestLoadRejectsOpenAIAnalysisProviderWithoutEndpoint(t *testing.T) {
 	t.Parallel()
 
