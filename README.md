@@ -326,7 +326,12 @@ If a changed path has no explicit governance yet, `check-compliance` now disting
 - a likely traceability gap where a nearby accepted spec exists but does not govern the path explicitly
 - explicitly governed paths where deterministic evidence is still too weak to confirm or deny compliance
 
-Each `unspecified` finding includes traceability guidance plus a concrete `applies_to` suggestion so you can tighten the accepted spec and rebuild the index.
+Each `unspecified` finding now also includes a `limiting_factor` so you can tell what to fix first:
+
+- `spec_metadata_gap`: accepted spec governance is missing or too weak; tighten `applies_to`
+- `code_evidence_gap`: governance is explicit, but the changed code or diff does not expose enough literal evidence yet
+
+If `check-compliance` gets far enough to return findings at all, the index freshness checks have already passed. That means `unspecified` findings are about spec metadata or code evidence, not stale indexing.
 
 ## MCP Server
 

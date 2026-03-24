@@ -20,6 +20,8 @@ const (
 	complianceSemanticSuggestionLimit     = 4
 	complianceSemanticSuggestionThreshold = 0.45
 	complianceWeakSuggestionThreshold     = 0.25
+	complianceFactorSpecMetadataGap       = "spec_metadata_gap"
+	complianceFactorCodeEvidenceGap       = "code_evidence_gap"
 )
 
 var complianceRequestsPerMinutePattern = regexp.MustCompile(`(?i)\b(\d+)\s+requests?\s+per\s+minute\b`)
@@ -105,6 +107,7 @@ type ComplianceFinding struct {
 	Code           string `json:"code"`
 	Message        string `json:"message"`
 	Traceability   string `json:"traceability,omitempty"`
+	LimitingFactor string `json:"limiting_factor,omitempty"`
 	Suggestion     string `json:"suggestion,omitempty"`
 	Expected       string `json:"expected,omitempty"`
 	Observed       string `json:"observed,omitempty"`
@@ -592,14 +595,15 @@ func (r *analysisRepository) complianceSemanticSuggestions(embedding []float64) 
 
 func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, suggestions []scoredArtifactRef) (ComplianceFinding, string, string, string) {
 	finding := ComplianceFinding{
-		Path:         target.Path,
-		Code:         "no_governing_spec",
-		Traceability: "missing_applies_to",
-		Message:      fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref in the current index", target.Path),
-		Suggestion:   complianceAppliesToSuggestion(target.Path, ""),
+		Path:           target.Path,
+		Code:           "no_governing_spec",
+		Traceability:   "missing_applies_to",
+		LimitingFactor: complianceFactorSpecMetadataGap,
+		Message:        fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref in the current index; the limiting factor is accepted spec metadata, not indexing", target.Path),
+		Suggestion:     complianceAppliesToSuggestion(target.Path, ""),
 	}
 	if len(suggestions) == 0 {
-		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval did not find a strong accepted spec match", target.Path)
+		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval did not find a strong accepted spec match; the limiting factor is accepted spec metadata, not indexing", target.Path)
 		return finding, "", "", ""
 	}
 
@@ -641,14 +645,15 @@ func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, 
 		if bestRef != "" && bestScore >= complianceWeakSuggestionThreshold {
 			finding.Code = "weak_traceability"
 			finding.Traceability = "weak_semantic_retrieval"
+			finding.LimitingFactor = complianceFactorSpecMetadataGap
 			finding.SpecRef = bestRef
 			finding.Title = bestTitle
 			finding.SectionHeading = bestHeading
-			finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match %s was too weak to trust as the governing spec", target.Path, bestRef)
+			finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match %s was too weak to trust as the governing spec, so the limiting factor is still accepted spec metadata", target.Path, bestRef)
 			finding.Suggestion = complianceAppliesToSuggestion(target.Path, bestRef)
 			return finding, bestRef, bestTitle, "semantic"
 		}
-		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval only found low-confidence accepted matches", target.Path)
+		finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref, and semantic retrieval only found low-confidence accepted matches; the limiting factor is accepted spec metadata, not indexing", target.Path)
 		return finding, "", "", ""
 	}
 
@@ -657,7 +662,8 @@ func complianceNoSpecFinding(repo *analysisRepository, target complianceTarget, 
 	finding.SectionHeading = bestHeading
 	finding.Code = "traceability_gap"
 	finding.Traceability = "semantic_neighbor_without_applies_to"
-	finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match is %s", target.Path, bestRef)
+	finding.LimitingFactor = complianceFactorSpecMetadataGap
+	finding.Message = fmt.Sprintf("%s is not explicitly governed by any accepted applies_to ref; nearest accepted match is %s, so the limiting factor is accepted spec metadata rather than indexing", target.Path, bestRef)
 	finding.Suggestion = complianceAppliesToSuggestion(target.Path, bestRef)
 	return finding, bestRef, bestTitle, "semantic"
 }
@@ -673,8 +679,9 @@ func assessComplianceSpec(spec specDocument, target complianceTarget) compliance
 				Title:          spec.Record.Title,
 				SectionHeading: heading,
 				Code:           "removed_content",
-				Message:        fmt.Sprintf("%s removes code governed by %s; deleted lines are not treated as active evidence, so compliance cannot be confirmed from the diff alone", target.Path, spec.Record.Ref),
+				Message:        fmt.Sprintf("%s removes code governed by %s; deleted lines are not treated as active evidence, so compliance cannot be confirmed from the diff alone and the limiting factor is diff evidence rather than governance metadata", target.Path, spec.Record.Ref),
 				Traceability:   "explicit_applies_to",
+				LimitingFactor: complianceFactorCodeEvidenceGap,
 				Suggestion:     fmt.Sprintf("%s already governs %s via applies_to. Review the surrounding spec change with analyze-impact or review-spec before treating the deletion as compliant.", spec.Record.Ref, target.Path),
 			},
 			Score: score,
@@ -728,8 +735,9 @@ func assessComplianceSpec(spec specDocument, target complianceTarget) compliance
 			Title:          spec.Record.Title,
 			SectionHeading: heading,
 			Code:           "insufficient_evidence",
-			Message:        fmt.Sprintf("%s governs %s but the provided code or diff does not contain enough deterministic evidence to confirm compliance", spec.Record.Ref, target.Path),
+			Message:        fmt.Sprintf("%s governs %s but the provided code or diff does not contain enough deterministic evidence to confirm compliance; the limiting factor is literal code evidence rather than applies_to coverage", spec.Record.Ref, target.Path),
 			Traceability:   "explicit_applies_to",
+			LimitingFactor: complianceFactorCodeEvidenceGap,
 			Suggestion:     fmt.Sprintf("%s already governs %s via applies_to. Strengthen the accepted requirement wording or the changed code surface with more literal evidence, then rerun check-compliance.", spec.Record.Ref, target.Path),
 		},
 		Score: score,
