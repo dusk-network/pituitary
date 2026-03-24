@@ -741,6 +741,7 @@ Output:
 ```
 
 Unless the caller explicitly asks otherwise, `search_specs` should search `draft`, `review`, and `accepted` specs and exclude `superseded` and `deprecated` specs.
+Default semantic retrieval should also down-rank historical provenance and history sections so active normative content wins unless the query explicitly asks for historical context.
 
 #### Tool: `review_spec`
 
