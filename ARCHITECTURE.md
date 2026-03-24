@@ -112,6 +112,8 @@ When the config schema changes, Pituitary should detect older known shapes expli
 
 Inferred `markdown_contract` records must preserve confidence metadata alongside the normalized artifact so result surfaces can distinguish strong explicit extraction from weaker path/default fallbacks. Search should expose those confidence signals inline, while higher-stakes outputs such as impact and doc-drift should elevate weak inference as warnings instead of silently treating it as equally strong.
 
+The index must also carry enough metadata to reject stale reuse. At minimum, rebuilds should persist the configured embedder fingerprint, a normalized source fingerprint, and a content fingerprint of the indexed artifacts. Search and analysis commands should compare those values against the current workspace before returning results and fail fast with `pituitary index --rebuild` guidance when they no longer match.
+
 When teams want more rigor, Pituitary may optionally generate an explicit spec bundle from one inferred contract. That canonicalization flow must preserve the stable inferred ref, preserve source provenance, preview the generated `spec.toml` and `body.md` before write, and remain incremental rather than forcing whole-repo migration.
 
 ---
@@ -581,7 +583,7 @@ CLI exit codes should stay simple:
 
 - `status` (`pituitary status`)
   - Request: `{ "check_runtime": "none" | "embedder" | "analysis" | "all" }`
-  - Result: `{ "workspace_root": "...", "config_path": "...", "config_resolution": { "selected_by": "command_flag" | "global_flag" | "env" | "discovered_local", "reason": "...", "candidates": [{ "precedence": 1, "source": "...", "path": "...", "status": "selected" | "shadowed" | "not_set" | "missing", "detail": "..." }] }, "index_path": "...", "index_exists": true, "spec_count": N, "doc_count": N, "chunk_count": N, "artifact_locations": { "index_dir": "...", "discover_config_path": "...", "canonicalize_bundle_root": "...", "ignore_patterns": [".pituitary/"], "relocation_hints": ["..."] }, "runtime": { ... } | null }`
+  - Result: `{ "workspace_root": "...", "config_path": "...", "config_resolution": { "selected_by": "command_flag" | "global_flag" | "env" | "discovered_local", "reason": "...", "candidates": [{ "precedence": 1, "source": "...", "path": "...", "status": "selected" | "shadowed" | "not_set" | "missing", "detail": "..." }] }, "index_path": "...", "index_exists": true, "freshness": { "state": "missing" | "fresh" | "stale" | "incompatible", "action": "run `pituitary index --rebuild`", "issues": [{ "kind": "...", "message": "...", "indexed": "...", "current": "..." }] }, "spec_count": N, "doc_count": N, "chunk_count": N, "artifact_locations": { "index_dir": "...", "discover_config_path": "...", "canonicalize_bundle_root": "...", "ignore_patterns": [".pituitary/"], "relocation_hints": ["..."] }, "runtime": { ... } | null }`
 - `index` (`pituitary index --rebuild`)
   - Request: `{ "rebuild": true }`
   - Result: `{ "workspace_root": ".", "index_path": ".pituitary/pituitary.db", "artifact_counts": { "spec": N, "doc": N }, "chunk_count": N, "edge_count": N }`

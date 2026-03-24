@@ -211,6 +211,15 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	} else {
 		fmt.Fprintln(w, "index: missing")
 	}
+	if result.Freshness != nil {
+		fmt.Fprintf(w, "index freshness: %s\n", result.Freshness.State)
+		for _, issue := range result.Freshness.Issues {
+			fmt.Fprintf(w, "freshness: %s\n", issue.Message)
+		}
+		if result.Freshness.Action != "" {
+			fmt.Fprintf(w, "freshness action: %s\n", result.Freshness.Action)
+		}
+	}
 	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
 	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
 	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)

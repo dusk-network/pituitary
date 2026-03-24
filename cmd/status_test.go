@@ -80,11 +80,14 @@ func TestRunStatusJSON(t *testing.T) {
 					Path   string `json:"path"`
 				} `json:"candidates"`
 			} `json:"config_resolution"`
-			IndexPath         string `json:"index_path"`
-			IndexExists       bool   `json:"index_exists"`
-			SpecCount         int    `json:"spec_count"`
-			DocCount          int    `json:"doc_count"`
-			ChunkCount        int    `json:"chunk_count"`
+			IndexPath   string `json:"index_path"`
+			IndexExists bool   `json:"index_exists"`
+			Freshness   struct {
+				State string `json:"state"`
+			} `json:"freshness"`
+			SpecCount         int `json:"spec_count"`
+			DocCount          int `json:"doc_count"`
+			ChunkCount        int `json:"chunk_count"`
 			ArtifactLocations struct {
 				IndexDir               string   `json:"index_dir"`
 				DiscoverConfigPath     string   `json:"discover_config_path"`
@@ -107,6 +110,9 @@ func TestRunStatusJSON(t *testing.T) {
 	if !payload.Result.IndexExists {
 		t.Fatalf("result = %+v, want index_exists=true", payload.Result)
 	}
+	if got, want := payload.Result.Freshness.State, "fresh"; got != want {
+		t.Fatalf("result.freshness.state = %q, want %q", got, want)
+	}
 	if got, want := payload.Result.ConfigResolution.SelectedBy, configSourceDiscovery; got != want {
 		t.Fatalf("config_resolution.selected_by = %q, want %q", got, want)
 	}
@@ -126,6 +132,47 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 	if payload.Result.SpecCount != 3 || payload.Result.DocCount != 2 || payload.Result.ChunkCount != 17 {
 		t.Fatalf("result = %+v, want 3 specs, 2 docs, 17 chunks", payload.Result)
+	}
+}
+
+func TestRunStatusReportsStaleIndexFreshness(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var rebuildStdout bytes.Buffer
+	var rebuildStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &rebuildStdout, &rebuildStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, rebuildStderr.String())
+	}
+	mustWriteFileCmd(t, filepath.Join(repo, "docs", "guides", "api-rate-limits.md"), `
+# API Rate Limits
+
+This guide changed after indexing.
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runStatus(nil, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "index freshness: stale") {
+		t.Fatalf("runStatus() output %q does not report stale freshness", out)
+	}
+	if !strings.Contains(out, "freshness: index content fingerprint") {
+		t.Fatalf("runStatus() output %q does not contain content fingerprint reason", out)
+	}
+	if !strings.Contains(out, "freshness action: run `pituitary index --rebuild`") {
+		t.Fatalf("runStatus() output %q does not contain rebuild guidance", out)
 	}
 }
 

@@ -70,6 +70,12 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		SpecRef:        strings.TrimSpace(specRef),
 		Scope:          strings.TrimSpace(scope),
 	}
+	if countNonEmptyStrings(request.Terms) == 0 {
+		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
+			Code:    "validation_error",
+			Message: "at least one term is required",
+		}, 2)
+	}
 	if err := validateCLIFormat("check-terminology", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
 			Code:    "validation_error",
@@ -114,4 +120,14 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "check-terminology", operation.Request, operation.Result, nil)
+}
+
+func countNonEmptyStrings(values []string) int {
+	count := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			count++
+		}
+	}
+	return count
 }

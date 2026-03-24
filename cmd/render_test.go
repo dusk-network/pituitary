@@ -102,9 +102,12 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 		},
 		IndexPath:   "/tmp/repo/.pituitary/pituitary.db",
 		IndexExists: true,
-		SpecCount:   3,
-		DocCount:    2,
-		ChunkCount:  17,
+		Freshness: &index.FreshnessStatus{
+			State: "fresh",
+		},
+		SpecCount:  3,
+		DocCount:   2,
+		ChunkCount: 17,
 		ArtifactLocations: &statusArtifactLocation{
 			IndexDir:               "/tmp/repo/.pituitary",
 			DiscoverConfigPath:     "/tmp/repo/.pituitary/pituitary.toml",
@@ -144,6 +147,7 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 		"1. command-local --config | not_set",
 		"4. working-directory search | selected | /tmp/repo/pituitary.toml",
 		"index: present",
+		"index freshness: fresh",
 		"artifact index dir: /tmp/repo/.pituitary",
 		"artifact discover --write default: /tmp/repo/.pituitary/pituitary.toml",
 		"artifact canonicalize default: /tmp/repo/.pituitary/canonicalized",

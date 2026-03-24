@@ -113,6 +113,42 @@ path = "specs"
 	}
 }
 
+func TestSearchSpecsRejectsStaleIndexBeforeReturningResults(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeOperationWorkspace(t, false)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.Workspace.RootPath, "docs", "guides", "api-rate-limits.md"), []byte(strings.TrimSpace(`
+# API Rate Limits
+
+This guide changed after indexing.
+`)+"\n"), 0o644); err != nil {
+		t.Fatalf("write stale doc: %v", err)
+	}
+
+	operation := SearchSpecs(context.Background(), configPath, index.SearchSpecRequest{
+		Query: "rate limiting",
+	})
+	if operation.Issue == nil {
+		t.Fatal("SearchSpecs() issue = nil, want stale-index error")
+	}
+	if operation.Issue.Code != CodeConfigError {
+		t.Fatalf("SearchSpecs() issue.code = %q, want %q", operation.Issue.Code, CodeConfigError)
+	}
+	if !strings.Contains(operation.Issue.Message, "index is stale") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want stale-index message", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "content fingerprint") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want content fingerprint detail", operation.Issue.Message)
+	}
+	if !strings.Contains(operation.Issue.Message, "pituitary index --rebuild") {
+		t.Fatalf("SearchSpecs() issue.message = %q, want rebuild guidance", operation.Issue.Message)
+	}
+}
+
 func TestFormatDependencyUnavailableMessageIncludesConfiguredAPIKeyEnv(t *testing.T) {
 	t.Parallel()
 

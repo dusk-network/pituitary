@@ -138,7 +138,7 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		}
 	}()
 
-	result, err := buildStagingContext(ctx, db, dimension, embedder, records, reporter)
+	result, err := buildStagingContext(ctx, db, cfg, dimension, embedder, records, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -337,25 +337,22 @@ func summarizeRebuild(records *source.LoadResult, dimension int) *RebuildResult 
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
 
-	fingerprintParts := make([]string, 0, len(records.Specs)+len(records.Docs))
 	for _, spec := range records.Specs {
 		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
 		result.EdgeCount += len(spec.Relations) + len(spec.AppliesTo)
-		fingerprintParts = append(fingerprintParts, spec.Ref+":"+spec.ContentHash)
 	}
 	for _, doc := range records.Docs {
 		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
-		fingerprintParts = append(fingerprintParts, doc.Ref+":"+doc.ContentHash)
 	}
-	result.ContentFingerprint = fingerprint(fingerprintParts)
+	result.ContentFingerprint = contentFingerprint(records)
 	return result
 }
 
-func buildStaging(db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
-	return buildStagingContext(context.Background(), db, dimension, embedder, records, nil)
+func buildStaging(db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
+	return buildStagingContext(context.Background(), db, cfg, dimension, embedder, records, nil)
 }
 
-func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedder Embedder, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	if err := createSchemaContext(ctx, db, dimension); err != nil {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
@@ -374,7 +371,6 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		EmbedderDimension: dimension,
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
-	var fingerprintParts []string
 	totalArtifacts := len(records.Specs) + len(records.Docs)
 	currentArtifact := 0
 
@@ -385,6 +381,9 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		return nil, err
 	}
 	if err := insertMetadataContext(ctx, tx, "embedder_fingerprint", embedder.Fingerprint()); err != nil {
+		return nil, err
+	}
+	if err := insertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
 		return nil, err
 	}
 
@@ -416,7 +415,6 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		}
 		result.ArtifactCount++
 		result.SpecCount++
-		fingerprintParts = append(fingerprintParts, spec.Ref+":"+spec.ContentHash)
 
 		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, spec.BodyText, RebuildProgressEvent{
 			ArtifactKind: model.ArtifactKindSpec,
@@ -453,7 +451,6 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		}
 		result.ArtifactCount++
 		result.DocCount++
-		fingerprintParts = append(fingerprintParts, doc.Ref+":"+doc.ContentHash)
 
 		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, doc.BodyText, RebuildProgressEvent{
 			ArtifactKind: model.ArtifactKindDoc,
@@ -476,7 +473,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, dimension int, embedde
 		return nil, err
 	}
 
-	result.ContentFingerprint = fingerprint(fingerprintParts)
+	result.ContentFingerprint = contentFingerprint(records)
 	if err := insertContentFingerprintContext(ctx, db, result.ContentFingerprint); err != nil {
 		return nil, err
 	}

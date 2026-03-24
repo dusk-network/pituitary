@@ -49,6 +49,9 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 	if issue != nil {
 		return failure[index.SearchSpecRequest, index.SearchSpecResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[index.SearchSpecRequest, index.SearchSpecResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
 
 	result, err := index.SearchSpecsContext(ctx, cfg, query)
 	if err != nil {
@@ -69,6 +72,9 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 func CheckOverlap(ctx context.Context, configPath string, request analysis.OverlapRequest) Response[analysis.OverlapRequest, analysis.OverlapResult] {
 	cfg, issue := loadConfig(configPath)
 	if issue != nil {
+		return failure[analysis.OverlapRequest, analysis.OverlapResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
 		return failure[analysis.OverlapRequest, analysis.OverlapResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
 
@@ -95,6 +101,9 @@ func CompareSpecs(ctx context.Context, configPath string, request analysis.Compa
 	if issue != nil {
 		return failure[analysis.CompareRequest, analysis.CompareResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[analysis.CompareRequest, analysis.CompareResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
 
 	result, err := analysis.CompareSpecsContext(ctx, cfg, request)
 	if err != nil {
@@ -119,6 +128,9 @@ func AnalyzeImpact(ctx context.Context, configPath string, request analysis.Anal
 	if issue != nil {
 		return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
 
 	result, err := analysis.AnalyzeImpactContext(ctx, cfg, request)
 	if err != nil {
@@ -141,6 +153,9 @@ func CheckTerminology(ctx context.Context, configPath string, request analysis.T
 	if issue != nil {
 		return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
 
 	result, err := analysis.CheckTerminologyContext(ctx, cfg, request)
 	if err != nil {
@@ -161,6 +176,9 @@ func CheckTerminology(ctx context.Context, configPath string, request analysis.T
 func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocDriftRequest) Response[analysis.DocDriftRequest, analysis.DocDriftResult] {
 	cfg, issue := loadConfig(configPath)
 	if issue != nil {
+		return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
 		return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
 
@@ -187,6 +205,9 @@ func CheckCompliance(ctx context.Context, configPath string, request analysis.Co
 	if issue != nil {
 		return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
 
 	result, err := analysis.CheckComplianceContext(ctx, cfg, request)
 	if err != nil {
@@ -207,6 +228,9 @@ func CheckCompliance(ctx context.Context, configPath string, request analysis.Co
 func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewRequest) Response[analysis.ReviewRequest, analysis.ReviewResult] {
 	cfg, issue := loadConfig(configPath)
 	if issue != nil {
+		return failure[analysis.ReviewRequest, analysis.ReviewResult](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
 		return failure[analysis.ReviewRequest, analysis.ReviewResult](request, issue.Code, issue.Message, issue.ExitCode)
 	}
 
@@ -237,6 +261,32 @@ func loadConfig(configPath string) (*config.Config, *Issue) {
 		}
 	}
 	return cfg, nil
+}
+
+func ensureFreshIndex(ctx context.Context, cfg *config.Config) *Issue {
+	err := index.ValidateFreshnessContext(ctx, cfg)
+	switch {
+	case err == nil:
+		return nil
+	case index.IsDependencyUnavailable(err):
+		return &Issue{
+			Code:     CodeDependencyUnavailable,
+			Message:  FormatDependencyUnavailableMessage(cfg, err),
+			ExitCode: 3,
+		}
+	case index.IsStaleIndex(err):
+		return &Issue{
+			Code:     CodeConfigError,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	default:
+		return &Issue{
+			Code:     CodeInternalError,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	}
 }
 
 func success[Req any, Res any](request Req, result *Res) Response[Req, Res] {
