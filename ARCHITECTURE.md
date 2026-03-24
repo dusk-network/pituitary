@@ -717,7 +717,10 @@ Process:
        - weak_traceability
        - traceability_gap
        - insufficient_evidence
-  4. Cite spec refs, section headings, changed paths, and applies_to guidance when traceability is the limiting factor
+  4. Surface the limiting factor explicitly:
+     - spec_metadata_gap when accepted governance is missing or too weak
+     - code_evidence_gap when governance exists but literal code/diff evidence is insufficient
+  5. Cite spec refs, section headings, changed paths, and applies_to guidance when traceability is the limiting factor
 
 Output:
   compliant[]

@@ -267,12 +267,13 @@ func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
 		Paths: []string{"src/api/middleware/tenant_limiter.go"},
 		Unspecified: []analysis.ComplianceFinding{
 			{
-				Path:         "src/api/middleware/tenant_limiter.go",
-				SpecRef:      "SPEC-042",
-				Code:         "traceability_gap",
-				Message:      "src/api/middleware/tenant_limiter.go is not explicitly governed by any accepted applies_to ref; nearest accepted match is SPEC-042",
-				Traceability: "semantic_neighbor_without_applies_to",
-				Suggestion:   `If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
+				Path:           "src/api/middleware/tenant_limiter.go",
+				SpecRef:        "SPEC-042",
+				Code:           "traceability_gap",
+				Message:        "src/api/middleware/tenant_limiter.go is not explicitly governed by any accepted applies_to ref; nearest accepted match is SPEC-042, so the limiting factor is accepted spec metadata rather than indexing",
+				Traceability:   "semantic_neighbor_without_applies_to",
+				LimitingFactor: "spec_metadata_gap",
+				Suggestion:     `If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
 			},
 		},
 	})
@@ -282,6 +283,7 @@ func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
 		"paths: src/api/middleware/tenant_limiter.go",
 		"unspecified: 1",
 		"traceability: semantic_neighbor_without_applies_to",
+		"limiting factor: spec_metadata_gap",
 		`suggestion: If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
 	} {
 		if !strings.Contains(output, want) {

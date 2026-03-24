@@ -491,6 +491,9 @@ func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis
 		if item.Traceability != "" {
 			fmt.Fprintf(w, "  traceability: %s\n", item.Traceability)
 		}
+		if item.LimitingFactor != "" {
+			fmt.Fprintf(w, "  limiting factor: %s\n", item.LimitingFactor)
+		}
 		if item.Suggestion != "" {
 			fmt.Fprintf(w, "  suggestion: %s\n", item.Suggestion)
 		}

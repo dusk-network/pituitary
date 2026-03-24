@@ -178,11 +178,12 @@ plinth ember quartz
 			Compliant   []any `json:"compliant"`
 			Conflicts   []any `json:"conflicts"`
 			Unspecified []struct {
-				Path         string `json:"path"`
-				Code         string `json:"code"`
-				Message      string `json:"message"`
-				Traceability string `json:"traceability"`
-				Suggestion   string `json:"suggestion"`
+				Path           string `json:"path"`
+				Code           string `json:"code"`
+				Message        string `json:"message"`
+				Traceability   string `json:"traceability"`
+				LimitingFactor string `json:"limiting_factor"`
+				Suggestion     string `json:"suggestion"`
 			} `json:"unspecified"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -207,6 +208,9 @@ plinth ember quartz
 	}
 	if payload.Result.Unspecified[0].Traceability != "weak_semantic_retrieval" {
 		t.Fatalf("unspecified finding = %+v, want weak_semantic_retrieval traceability", payload.Result.Unspecified[0])
+	}
+	if payload.Result.Unspecified[0].LimitingFactor != "spec_metadata_gap" {
+		t.Fatalf("unspecified finding = %+v, want spec_metadata_gap limiting factor", payload.Result.Unspecified[0])
 	}
 	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://notes/ungoverned.txt"]`) {
 		t.Fatalf("unspecified finding = %+v, want applies_to suggestion", payload.Result.Unspecified[0])
@@ -244,11 +248,12 @@ func buildTenantLimiter() {}
 	var payload struct {
 		Result struct {
 			Unspecified []struct {
-				Path         string `json:"path"`
-				SpecRef      string `json:"spec_ref"`
-				Code         string `json:"code"`
-				Traceability string `json:"traceability"`
-				Suggestion   string `json:"suggestion"`
+				Path           string `json:"path"`
+				SpecRef        string `json:"spec_ref"`
+				Code           string `json:"code"`
+				Traceability   string `json:"traceability"`
+				LimitingFactor string `json:"limiting_factor"`
+				Suggestion     string `json:"suggestion"`
 			} `json:"unspecified"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -270,6 +275,9 @@ func buildTenantLimiter() {}
 	}
 	if payload.Result.Unspecified[0].Traceability != "semantic_neighbor_without_applies_to" {
 		t.Fatalf("unspecified finding = %+v, want semantic_neighbor_without_applies_to", payload.Result.Unspecified[0])
+	}
+	if payload.Result.Unspecified[0].LimitingFactor != "spec_metadata_gap" {
+		t.Fatalf("unspecified finding = %+v, want spec_metadata_gap limiting factor", payload.Result.Unspecified[0])
 	}
 	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://src/api/middleware/tenant_limiter.go"]`) {
 		t.Fatalf("unspecified finding = %+v, want applies_to suggestion for tenant_limiter", payload.Result.Unspecified[0])
@@ -304,10 +312,11 @@ func buildLimiter() {}
 	var payload struct {
 		Result struct {
 			Unspecified []struct {
-				SpecRef      string `json:"spec_ref"`
-				Code         string `json:"code"`
-				Traceability string `json:"traceability"`
-				Suggestion   string `json:"suggestion"`
+				SpecRef        string `json:"spec_ref"`
+				Code           string `json:"code"`
+				Traceability   string `json:"traceability"`
+				LimitingFactor string `json:"limiting_factor"`
+				Suggestion     string `json:"suggestion"`
 			} `json:"unspecified"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -327,6 +336,9 @@ func buildLimiter() {}
 		}
 		if item.Traceability != "explicit_applies_to" {
 			t.Fatalf("unspecified finding = %+v, want explicit_applies_to", item)
+		}
+		if item.LimitingFactor != "code_evidence_gap" {
+			t.Fatalf("unspecified finding = %+v, want code_evidence_gap limiting factor", item)
 		}
 		if !strings.Contains(item.Suggestion, "already governs") {
 			t.Fatalf("unspecified finding = %+v, want explicit guidance", item)
@@ -448,9 +460,10 @@ index 1111111..0000000
 			Compliant   []any    `json:"compliant"`
 			Conflicts   []any    `json:"conflicts"`
 			Unspecified []struct {
-				Path    string `json:"path"`
-				SpecRef string `json:"spec_ref"`
-				Code    string `json:"code"`
+				Path           string `json:"path"`
+				SpecRef        string `json:"spec_ref"`
+				Code           string `json:"code"`
+				LimitingFactor string `json:"limiting_factor"`
 			} `json:"unspecified"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -482,6 +495,9 @@ index 1111111..0000000
 		}
 		if item.Code != "removed_content" {
 			t.Fatalf("unspecified finding = %+v, want removed_content", item)
+		}
+		if item.LimitingFactor != "code_evidence_gap" {
+			t.Fatalf("unspecified finding = %+v, want code_evidence_gap limiting factor", item)
 		}
 	}
 }
