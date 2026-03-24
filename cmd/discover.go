@@ -11,8 +11,9 @@ import (
 )
 
 type discoverRequest struct {
-	Path  string `json:"path"`
-	Write bool   `json:"write,omitempty"`
+	Path       string `json:"path"`
+	ConfigPath string `json:"config_path,omitempty"`
+	Write      bool   `json:"write,omitempty"`
 }
 
 func runDiscover(args []string, stdout, stderr io.Writer) int {
@@ -22,15 +23,17 @@ func runDiscover(args []string, stdout, stderr io.Writer) int {
 func runDiscoverContext(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("discover", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newStandaloneCommandHelp("discover", "pituitary discover [--path PATH] [--write] [--format FORMAT]")
+	help := newStandaloneCommandHelp("discover", "pituitary discover [--path PATH] [--config-path PATH] [--write] [--format FORMAT]")
 
 	var (
-		path   string
-		write  bool
-		format string
+		path       string
+		configPath string
+		write      bool
+		format     string
 	)
 	fs.StringVar(&path, "path", ".", "workspace path to scan")
-	fs.BoolVar(&write, "write", false, "write .pituitary/pituitary.toml")
+	fs.StringVar(&configPath, "config-path", "", "where discover --write should place the generated config")
+	fs.BoolVar(&write, "write", false, "write the generated config")
 	fs.StringVar(&format, "format", "text", "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -48,19 +51,21 @@ func runDiscoverContext(_ context.Context, args []string, stdout, stderr io.Writ
 		}, 2)
 	}
 	if err := validateCLIFormat("discover", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "discover", discoverRequest{Path: path, Write: write}, cliIssue{
+		return writeCLIError(stdout, stderr, format, "discover", discoverRequest{Path: path, ConfigPath: strings.TrimSpace(configPath), Write: write}, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
 	}
 
 	request := discoverRequest{
-		Path:  path,
-		Write: write,
+		Path:       path,
+		ConfigPath: strings.TrimSpace(configPath),
+		Write:      write,
 	}
 	result, err := source.DiscoverWorkspace(source.DiscoverOptions{
-		RootPath: path,
-		Write:    write,
+		RootPath:   path,
+		ConfigPath: request.ConfigPath,
+		Write:      write,
 	})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "discover", request, cliIssue{

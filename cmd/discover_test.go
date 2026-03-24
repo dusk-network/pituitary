@@ -105,6 +105,35 @@ func TestRunDiscoverWriteProducesUsableLocalConfig(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverWriteSupportsCustomConfigPath(t *testing.T) {
+	repo := writeDiscoveryWorkspace(t)
+	configPath := filepath.Join(repo, "tools", "pituitary.local.toml")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runDiscover([]string{"--path", ".", "--write", "--config-path", filepath.ToSlash(filepath.Join("tools", "pituitary.local.toml"))}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runDiscover(--write, --config-path) exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("custom discovered config %s missing: %v", configPath, err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = withWorkingDir(t, repo, func() int {
+		return Run([]string{"--config", configPath, "index", "--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("Run(--config, index --rebuild) exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
+		t.Fatalf("rebuilt index missing after custom config: %v", err)
+	}
+}
+
 func TestRunDiscoverHelpDoesNotAdvertiseConfigResolution(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -120,8 +149,11 @@ func TestRunDiscoverHelpDoesNotAdvertiseConfigResolution(t *testing.T) {
 	if strings.Contains(out, "shared config resolution:") {
 		t.Fatalf("discover help %q unexpectedly advertises config resolution", out)
 	}
-	if !strings.Contains(out, "usage: pituitary discover [--path PATH] [--write] [--format FORMAT]") {
+	if !strings.Contains(out, "usage: pituitary discover [--path PATH] [--config-path PATH] [--write] [--format FORMAT]") {
 		t.Fatalf("discover help %q missing usage line", out)
+	}
+	if !strings.Contains(out, "--config-path VALUE") {
+		t.Fatalf("discover help %q missing --config-path flag", out)
 	}
 }
 

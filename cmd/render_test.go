@@ -88,12 +88,34 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 
 	var stdout bytes.Buffer
 	renderStatusResult(&stdout, &statusResult{
-		ConfigPath:  "/tmp/repo/pituitary.toml",
+		WorkspaceRoot: "/tmp/repo",
+		ConfigPath:    "/tmp/repo/pituitary.toml",
+		ConfigResolution: &configResolution{
+			SelectedBy: configSourceDiscovery,
+			Reason:     "working-directory search found /tmp/repo/pituitary.toml",
+			Candidates: []configResolutionCandidate{
+				{Precedence: 1, Source: configSourceCommandFlag, Status: "not_set", Detail: "command-local --config was not provided"},
+				{Precedence: 2, Source: configSourceGlobalFlag, Status: "not_set", Detail: "global --config was not provided"},
+				{Precedence: 3, Source: configSourceEnv, Status: "not_set", Detail: "PITUITARY_CONFIG is not set"},
+				{Precedence: 4, Source: configSourceDiscovery, Status: "selected", Path: "/tmp/repo/pituitary.toml", Detail: "found during working-directory search in /tmp/repo"},
+			},
+		},
 		IndexPath:   "/tmp/repo/.pituitary/pituitary.db",
 		IndexExists: true,
 		SpecCount:   3,
 		DocCount:    2,
 		ChunkCount:  17,
+		ArtifactLocations: &statusArtifactLocation{
+			IndexDir:               "/tmp/repo/.pituitary",
+			DiscoverConfigPath:     "/tmp/repo/.pituitary/pituitary.toml",
+			CanonicalizeBundleRoot: "/tmp/repo/.pituitary/canonicalized",
+			IgnorePatterns:         []string{".pituitary/"},
+			RelocationHints: []string{
+				"set [workspace].index_path to move the SQLite index",
+				"use `pituitary discover --config-path PATH --write` to place generated config elsewhere",
+				"use `pituitary canonicalize --bundle-dir PATH` to place generated bundles elsewhere",
+			},
+		},
 		Runtime: &runtimeprobe.Result{
 			Scope: "all",
 			Checks: []runtimeprobe.Check{
@@ -116,7 +138,17 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"workspace: /tmp/repo",
+		"config resolution: working-directory search found /tmp/repo/pituitary.toml",
+		"config candidates:",
+		"1. command-local --config | not_set",
+		"4. working-directory search | selected | /tmp/repo/pituitary.toml",
 		"index: present",
+		"artifact index dir: /tmp/repo/.pituitary",
+		"artifact discover --write default: /tmp/repo/.pituitary/pituitary.toml",
+		"artifact canonicalize default: /tmp/repo/.pituitary/canonicalized",
+		"artifact ignore patterns: .pituitary/",
+		"artifact relocation: set [workspace].index_path to move the SQLite index",
 		"runtime probe: all",
 		"runtime: runtime.embedder | ready | provider: openai_compatible | model: pituitary-embed | endpoint: http://localhost:1234/v1",
 		"runtime: runtime.analysis | disabled | provider: disabled",

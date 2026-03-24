@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/app"
@@ -18,13 +20,24 @@ type statusRequest struct {
 }
 
 type statusResult struct {
-	ConfigPath  string               `json:"config_path"`
-	IndexPath   string               `json:"index_path"`
-	IndexExists bool                 `json:"index_exists"`
-	SpecCount   int                  `json:"spec_count"`
-	DocCount    int                  `json:"doc_count"`
-	ChunkCount  int                  `json:"chunk_count"`
-	Runtime     *runtimeprobe.Result `json:"runtime,omitempty"`
+	WorkspaceRoot     string                  `json:"workspace_root"`
+	ConfigPath        string                  `json:"config_path"`
+	ConfigResolution  *configResolution       `json:"config_resolution,omitempty"`
+	IndexPath         string                  `json:"index_path"`
+	IndexExists       bool                    `json:"index_exists"`
+	SpecCount         int                     `json:"spec_count"`
+	DocCount          int                     `json:"doc_count"`
+	ChunkCount        int                     `json:"chunk_count"`
+	ArtifactLocations *statusArtifactLocation `json:"artifact_locations,omitempty"`
+	Runtime           *runtimeprobe.Result    `json:"runtime,omitempty"`
+}
+
+type statusArtifactLocation struct {
+	IndexDir               string   `json:"index_dir"`
+	DiscoverConfigPath     string   `json:"discover_config_path"`
+	CanonicalizeBundleRoot string   `json:"canonicalize_bundle_root"`
+	IgnorePatterns         []string `json:"ignore_patterns,omitempty"`
+	RelocationHints        []string `json:"relocation_hints,omitempty"`
 }
 
 func runStatus(args []string, stdout, stderr io.Writer) int {
@@ -79,7 +92,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		request.CheckRuntime = string(scope)
 	}
 
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	resolvedConfigPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, configPath)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
 			Code:    "config_error",
@@ -123,12 +136,62 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "status", request, &statusResult{
-		ConfigPath:  cfg.ConfigPath,
-		IndexPath:   status.IndexPath,
-		IndexExists: status.Exists,
-		SpecCount:   status.SpecCount,
-		DocCount:    status.DocCount,
-		ChunkCount:  status.ChunkCount,
-		Runtime:     runtimeResult,
+		WorkspaceRoot:     cfg.Workspace.RootPath,
+		ConfigPath:        cfg.ConfigPath,
+		ConfigResolution:  resolution,
+		IndexPath:         status.IndexPath,
+		IndexExists:       status.Exists,
+		SpecCount:         status.SpecCount,
+		DocCount:          status.DocCount,
+		ChunkCount:        status.ChunkCount,
+		ArtifactLocations: buildStatusArtifactLocations(cfg),
+		Runtime:           runtimeResult,
 	}, nil)
+}
+
+func buildStatusArtifactLocations(cfg *config.Config) *statusArtifactLocation {
+	if cfg == nil {
+		return nil
+	}
+
+	workspaceRoot := cfg.Workspace.RootPath
+	indexDir := filepath.Dir(cfg.Workspace.ResolvedIndexPath)
+	discoverConfigPath := filepath.Join(workspaceRoot, localConfigDirName, defaultConfigName)
+	canonicalizeBundleRoot := filepath.Join(workspaceRoot, localConfigDirName, "canonicalized")
+
+	ignoreSet := map[string]struct{}{
+		filepath.ToSlash(localConfigDirName) + "/": {},
+	}
+	indexPattern := relativeStatusPath(workspaceRoot, cfg.Workspace.ResolvedIndexPath)
+	if indexPattern != "" && indexPattern != "." && !strings.HasPrefix(indexPattern, filepath.ToSlash(localConfigDirName)+"/") {
+		ignoreSet[indexPattern] = struct{}{}
+	}
+	ignorePatterns := make([]string, 0, len(ignoreSet))
+	for pattern := range ignoreSet {
+		ignorePatterns = append(ignorePatterns, pattern)
+	}
+	sort.Strings(ignorePatterns)
+
+	return &statusArtifactLocation{
+		IndexDir:               indexDir,
+		DiscoverConfigPath:     discoverConfigPath,
+		CanonicalizeBundleRoot: canonicalizeBundleRoot,
+		IgnorePatterns:         ignorePatterns,
+		RelocationHints: []string{
+			"set [workspace].index_path to move the SQLite index",
+			"use `pituitary discover --config-path PATH --write` to place generated config elsewhere",
+			"use `pituitary canonicalize --bundle-dir PATH` to place generated bundles elsewhere",
+		},
+	}
+}
+
+func relativeStatusPath(root, path string) string {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(path) == "" {
+		return ""
+	}
+	relativePath, err := filepath.Rel(root, path)
+	if err != nil {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(relativePath)
 }

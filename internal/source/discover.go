@@ -11,10 +11,16 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 )
 
+const (
+	discoverDefaultConfigName = "pituitary.toml"
+	discoverLocalConfigDir    = ".pituitary"
+)
+
 // DiscoverOptions controls how workspace discovery runs.
 type DiscoverOptions struct {
-	RootPath string
-	Write    bool
+	RootPath   string
+	ConfigPath string
+	Write      bool
 }
 
 // DiscoverResult reports a conservative source proposal for one workspace.
@@ -88,7 +94,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 		return nil, fmt.Errorf("no likely sources discovered under %s", filepath.ToSlash(workspaceRoot))
 	}
 
-	cfg, err := buildDiscoveredConfig(workspaceRoot, sources)
+	cfg, err := buildDiscoveredConfig(workspaceRoot, strings.TrimSpace(options.ConfigPath), sources)
 	if err != nil {
 		return nil, err
 	}
@@ -423,13 +429,16 @@ func buildDiscoveredSource(workspaceRoot, fallbackName, kind string, candidates 
 	}, true
 }
 
-func buildDiscoveredConfig(workspaceRoot string, sources []DiscoveredSource) (*config.Config, error) {
-	configPath := filepath.Join(workspaceRoot, ".pituitary", "pituitary.toml")
+func buildDiscoveredConfig(workspaceRoot, requestedConfigPath string, sources []DiscoveredSource) (*config.Config, error) {
+	configPath, configDir, workspaceSetting, err := resolveDiscoveredConfigPath(workspaceRoot, requestedConfigPath)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &config.Config{
 		ConfigPath: configPath,
-		ConfigDir:  workspaceRoot,
+		ConfigDir:  configDir,
 		Workspace: config.Workspace{
-			Root:      ".",
+			Root:      workspaceSetting,
 			RootPath:  workspaceRoot,
 			IndexPath: filepath.ToSlash(filepath.Join(".pituitary", "pituitary.db")),
 		},
@@ -462,6 +471,42 @@ func buildDiscoveredConfig(workspaceRoot string, sources []DiscoveredSource) (*c
 		return nil, fmt.Errorf("validate discovered config: %w", err)
 	}
 	return cfg, nil
+}
+
+func resolveDiscoveredConfigPath(workspaceRoot, requestedConfigPath string) (string, string, string, error) {
+	configPath := strings.TrimSpace(requestedConfigPath)
+	if configPath == "" {
+		configPath = filepath.Join(workspaceRoot, discoverLocalConfigDir, discoverDefaultConfigName)
+	} else if !filepath.IsAbs(configPath) {
+		configPath = filepath.Join(workspaceRoot, configPath)
+	}
+
+	absoluteConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return "", "", "", fmt.Errorf("resolve discovered config path %q: %w", configPath, err)
+	}
+	if !pathWithinRoot(workspaceRoot, absoluteConfigPath) {
+		return "", "", "", fmt.Errorf("discover config path %q resolves outside workspace root %q", requestedConfigPath, filepath.ToSlash(workspaceRoot))
+	}
+
+	configDir := discoveredConfigBaseDir(absoluteConfigPath)
+	workspaceSetting, err := filepath.Rel(configDir, workspaceRoot)
+	if err != nil {
+		return "", "", "", fmt.Errorf("relativize workspace root against config path: %w", err)
+	}
+	workspaceSetting = filepath.ToSlash(workspaceSetting)
+	if workspaceSetting == "" {
+		workspaceSetting = "."
+	}
+	return absoluteConfigPath, configDir, workspaceSetting, nil
+}
+
+func discoveredConfigBaseDir(configPath string) string {
+	configDir := filepath.Dir(configPath)
+	if filepath.Base(configPath) == discoverDefaultConfigName && filepath.Base(configDir) == discoverLocalConfigDir {
+		return filepath.Dir(configDir)
+	}
+	return configDir
 }
 
 func writeDiscoveredConfig(path, content string) error {
