@@ -190,6 +190,41 @@ func TestRunReviewSpecMarkdown(t *testing.T) {
 	}
 }
 
+func TestRunReviewSpecHTML(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{"--spec-ref", "SPEC-042", "--format", "html"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec(--format html) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec(--format html) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"<!doctype html>",
+		"<title>Pituitary Review Report: SPEC-042</title>",
+		"<h2>Summary</h2>",
+		"<h2>Recommended Next Actions</h2>",
+		"<h2>Doc Drift</h2>",
+		"<h2>Doc Remediation</h2>",
+		"doc://guides/api-rate-limits",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runReviewSpec(--format html) output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunReviewSpecTextIncludesTopImpactSummaries(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

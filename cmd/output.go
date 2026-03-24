@@ -22,7 +22,7 @@ type cliEnvelope struct {
 }
 
 func isSupportedFormat(format string) bool {
-	return format == commandFormatText || format == commandFormatJSON || format == commandFormatTable || format == commandFormatMarkdown
+	return format == commandFormatText || format == commandFormatJSON || format == commandFormatTable || format == commandFormatMarkdown || format == commandFormatHTML
 }
 
 func validateCLIFormat(command, format string) error {
@@ -34,6 +34,8 @@ func validateCLIFormat(command, format string) error {
 		case commandFormatTable:
 			return fmt.Errorf("format %q is only supported for search-specs", format)
 		case commandFormatMarkdown:
+			return fmt.Errorf("format %q is only supported for review-spec", format)
+		case commandFormatHTML:
 			return fmt.Errorf("format %q is only supported for review-spec", format)
 		default:
 			return fmt.Errorf("format %q is not supported for %s", format, command)
@@ -65,6 +67,14 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 	if format == commandFormatMarkdown {
 		writeCLIWarnings(stderr, command, warnings)
 		if err := renderCommandMarkdown(stdout, command, result); err != nil {
+			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
+			return 2
+		}
+		return 0
+	}
+	if format == commandFormatHTML {
+		writeCLIWarnings(stderr, command, warnings)
+		if err := renderCommandHTML(stdout, command, result); err != nil {
 			fmt.Fprintf(stderr, "pituitary %s: %s\n", command, err)
 			return 2
 		}
