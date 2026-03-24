@@ -815,6 +815,7 @@ func markdownContractRefForPath(workspaceRoot, path string) (string, error) {
 func parseSpecBundle(contents []byte) (rawSpecBundle, error) {
 	var spec rawSpecBundle
 	var activeArrayKey string
+	seenKeys := map[string]int{}
 
 	scanner := bufio.NewScanner(bytes.NewReader(contents))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxScannerTokenSize(len(contents)))
@@ -845,6 +846,9 @@ func parseSpecBundle(contents []byte) (rawSpecBundle, error) {
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
+		if err := markSpecDuplicateKey(seenKeys, key, lineNo); err != nil {
+			return rawSpecBundle{}, err
+		}
 
 		if value == "[" {
 			if !isSpecArrayField(key) {
@@ -886,6 +890,14 @@ func parseSpecBundle(contents []byte) (rawSpecBundle, error) {
 	}
 
 	return spec, nil
+}
+
+func markSpecDuplicateKey(seen map[string]int, key string, lineNo int) error {
+	if firstLine, ok := seen[key]; ok {
+		return fmt.Errorf("line %d: duplicate %s; first defined at line %d", lineNo, key, firstLine)
+	}
+	seen[key] = lineNo
+	return nil
 }
 
 func assignSpecScalarField(spec *rawSpecBundle, key, value string) error {

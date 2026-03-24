@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,6 +136,51 @@ path = "specs"
 		t.Fatalf("runtime.analysis.provider = %q, want %q", got, want)
 	}
 }
+
+func TestParseRejectsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	t.Run("workspace scalar", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := parse(bytes.NewBufferString(`
+[workspace]
+root = "."
+root = "other"
+`))
+		if err == nil {
+			t.Fatal("parse() error = nil, want duplicate workspace field error")
+		}
+		if !strings.Contains(err.Error(), "duplicate workspace.root; first defined at line 3") {
+			t.Fatalf("parse() error = %q, want duplicate workspace.root details", err)
+		}
+	})
+
+	t.Run("source array", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := parse(bytes.NewBufferString(`
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md"]
+include = ["runbooks/*.md"]
+`))
+		if err == nil {
+			t.Fatal("parse() error = nil, want duplicate sources array field error")
+		}
+		if !strings.Contains(err.Error(), "duplicate sources.include; first defined at line 11") {
+			t.Fatalf("parse() error = %q, want duplicate sources.include details", err)
+		}
+	})
+}
+
 func TestLoadPreservesSourceSelectors(t *testing.T) {
 	t.Parallel()
 
