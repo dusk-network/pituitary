@@ -321,6 +321,46 @@ func TestCheckDocDriftSurfacesPossibleDriftForConceptualNearMatch(t *testing.T) 
 	}
 }
 
+func TestCheckDocDriftKeepsPossibleDriftInMixedBatches(t *testing.T) {
+	t.Parallel()
+
+	cfg := writeMixedDocDriftWorkspace(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+
+	var foundDrift, foundPossible bool
+	for _, assessment := range result.Assessments {
+		switch assessment.DocRef {
+		case "doc://guides/api-rate-limits":
+			if got, want := assessment.Status, "drift"; got != want {
+				t.Fatalf("api-rate-limits assessment.status = %q, want %q", got, want)
+			}
+			foundDrift = true
+		case "doc://guides/kernel-migration":
+			if got, want := assessment.Status, "possible_drift"; got != want {
+				t.Fatalf("migration assessment.status = %q, want %q", got, want)
+			}
+			foundPossible = true
+		}
+	}
+	if !foundDrift {
+		t.Fatalf("assessments = %+v, want deterministic drift doc", result.Assessments)
+	}
+	if !foundPossible {
+		t.Fatalf("assessments = %+v, want possible_drift doc in mixed batch", result.Assessments)
+	}
+}
+
 func TestClassifyArtifactConstraintScopesRuntimeInputToLocalArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -428,6 +468,99 @@ Use locality and continuity language in operator guidance.
 
 The kernel keeps continuity in local state during migration.
 Operators should map old repository language to the new locality model while updating guides.
+`)
+
+	mustWriteFile(tb, configPath, fmt.Sprintf(`
+[workspace]
+root = %q
+index_path = %q
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = %q
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = %q
+`, root, indexPath, filepath.Join(root, "specs"), filepath.Join(root, "docs")))
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		tb.Fatalf("config.Load() error = %v", err)
+	}
+	return cfg
+}
+
+func writeMixedDocDriftWorkspace(tb testing.TB) *config.Config {
+	tb.Helper()
+
+	root := tb.TempDir()
+	indexPath := filepath.Join(root, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(root, "pituitary.toml")
+
+	mustWriteFile(tb, filepath.Join(root, "specs", "kernel-locality", "spec.toml"), `
+id = "SPEC-LOCALITY"
+title = "Kernel Locality Contract"
+status = "accepted"
+domain = "kernel"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "specs", "kernel-locality", "body.md"), `
+# Kernel Locality Contract
+
+## Core Model
+
+The kernel keeps continuity in clone-local state and treats locality as the primary runtime boundary.
+
+## Operator Guidance
+
+Use locality and continuity language in operator guidance.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "kernel-migration.md"), `
+# Kernel Migration Guide
+
+## Working Notes
+
+The kernel keeps continuity in local state during migration.
+Operators should map old repository language to the new locality model while updating guides.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "specs", "rate-limit", "spec.toml"), `
+id = "SPEC-042"
+title = "Per-Tenant Rate Limiting"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "specs", "rate-limit", "body.md"), `
+# Per-Tenant Rate Limiting
+
+## Enforcement
+
+Use a sliding-window limiter with a default limit of 200 requests per minute.
+
+## Subject
+
+Apply limits per tenant rather than per API key.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "api-rate-limits.md"), `
+# Public API Rate Limits
+
+## Current Policy
+
+Apply limits per API key using a fixed-window limiter with a default limit of 100 requests per minute.
 `)
 
 	mustWriteFile(tb, configPath, fmt.Sprintf(`

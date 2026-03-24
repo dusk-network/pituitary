@@ -264,6 +264,20 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 					warningSpecs = append(warningSpecs, spec)
 				}
 			}
+		} else if item == nil {
+			allSpecs, err := ensureAllSpecs()
+			if err != nil {
+				return nil, err
+			}
+			if assessment := possibleDriftAssessment(doc, allSpecs); assessment != nil {
+				assessments = append(assessments, *assessment)
+				relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
+				for _, specRef := range assessment.SpecRefs {
+					if spec, ok := allSpecs[specRef]; ok {
+						warningSpecs = append(warningSpecs, spec)
+					}
+				}
+			}
 		}
 		if item == nil {
 			continue
@@ -276,26 +290,6 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 			if spec, ok := specs[specRef]; ok {
 				relevantSpecRefs = append(relevantSpecRefs, specRef)
 				warningSpecs = append(warningSpecs, spec)
-			}
-		}
-	}
-	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
-	if len(driftItems) == 0 && len(assessments) == 0 {
-		allSpecs, err := ensureAllSpecs()
-		if err != nil {
-			return nil, err
-		}
-		for _, ref := range sortedDocRefs(selectedDocs) {
-			assessment := possibleDriftAssessment(selectedDocs[ref], allSpecs)
-			if assessment == nil {
-				continue
-			}
-			assessments = append(assessments, *assessment)
-			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
-			for _, specRef := range assessment.SpecRefs {
-				if spec, ok := allSpecs[specRef]; ok {
-					warningSpecs = append(warningSpecs, spec)
-				}
 			}
 		}
 	}
