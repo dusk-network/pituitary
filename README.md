@@ -97,6 +97,8 @@ If you are evaluating search quality, overlap ranking, doc drift, or terminology
 ```sh
 pituitary status --check-runtime embedder
 pituitary index --rebuild
+pituitary check-doc-drift --scope all
+pituitary fix --scope all --dry-run
 ```
 
 ### Build from source when contributing
@@ -297,6 +299,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs; ideal for pre-merge and CI use |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs, with evidence and confidence |
+| `fix --path docs/guides/api-rate-limits.md --dry-run` | Preview deterministic doc-drift remediations before writing changes |
 | `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report, with text/json/markdown/html output |
 
 `canonicalize` is optional high-rigor mode. It does not replace inferred-contract indexing; it helps you promote one Markdown contract into an explicit bundle when you want stronger structure without converting the whole repo at once.
@@ -308,6 +311,8 @@ By default, `search-specs` down-ranks sections that look like historical provena
 `index --rebuild` now keeps the atomic staging-DB swap, but it also reuses unchanged chunk embeddings by default when the current index has a matching schema, embedder fingerprint, and source fingerprint. Use `--full` to disable reuse and force a complete re-embed.
 
 `index --rebuild` and `index --dry-run` also validate the spec relation graph before touching SQLite. Cycles in `depends_on` or `supersedes`, plus contradictory `depends_on`/`supersedes` combinations, fail fast with the exact refs involved. `pituitary status` reports the same graph-health findings without requiring a rebuild.
+
+`fix` is intentionally narrow: it only applies deterministic `replace_claim` remediations that `check-doc-drift` can justify from accepted specs and exact document evidence. Use `--dry-run` to preview the edit plan, then rerun with `--yes` when the replacements look correct. After any successful apply, rebuild the index before the next analysis command.
 
 ### Example: CI-friendly compliance diff
 

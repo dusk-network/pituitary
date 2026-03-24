@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
+	"github.com/dusk-network/pituitary/internal/app"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/source"
 )
@@ -55,6 +56,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderComplianceResult(w, typed)
 	case *analysis.DocDriftResult:
 		renderDocDriftResult(w, typed)
+	case *app.FixResult:
+		renderFixResult(w, typed)
 	case *analysis.ReviewResult:
 		renderReviewResult(w, typed)
 	default:
@@ -66,7 +69,7 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 
 func usesSemanticTextRendering(command string) bool {
 	switch command {
-	case "check-doc-drift", "check-overlap", "review-spec", "check-compliance", "status", "init":
+	case "check-doc-drift", "check-overlap", "review-spec", "check-compliance", "status", "init", "fix":
 		return true
 	default:
 		return false
@@ -738,6 +741,63 @@ func renderDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence, prefix s
 		if evidence.DocExcerpt != "" {
 			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.DocExcerpt)
 		}
+	}
+}
+
+func renderFixResult(w io.Writer, result *app.FixResult) {
+	p := presentationForWriter(w)
+	suffix := ""
+	if strings.TrimSpace(result.Selector) != "" {
+		suffix = " " + p.dim(result.Selector)
+	}
+	fmt.Fprintln(w, p.headerLine("fix", suffix))
+	fmt.Fprintln(w)
+
+	if len(result.Files) == 0 {
+		fmt.Fprintf(w, "  %s no deterministic doc-drift edits available\n", p.info())
+		for _, guidance := range result.Guidance {
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+		}
+		return
+	}
+
+	for i, file := range result.Files {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		renderFixPromptFile(w, result.Selector, file)
+		if file.Status == "applied" {
+			fmt.Fprintf(w, "    %s applied %d edit%s\n", p.check(), len(file.Edits), pluralSuffix(len(file.Edits)))
+		}
+		if file.Reason != "" {
+			fmt.Fprintf(w, "    %s %s\n", p.arrow(), file.Reason)
+		}
+		for _, warning := range file.Warnings {
+			fmt.Fprintf(w, "    %s %s\n", p.arrow(), warning)
+		}
+	}
+	if len(result.Guidance) > 0 {
+		fmt.Fprintln(w)
+		for _, guidance := range result.Guidance {
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+		}
+	}
+}
+
+func renderFixPromptFile(w io.Writer, selector string, file app.FixFileResult) {
+	p := presentationForWriter(w)
+	fmt.Fprintf(w, "  %s\n\n", p.dim(file.Path))
+	if len(file.Edits) == 0 {
+		fmt.Fprintf(w, "    %s %s\n", p.info(), "no deterministic replace-claim edits available")
+		return
+	}
+	for _, edit := range file.Edits {
+		fmt.Fprintf(w, "    %s %s\n", p.red("-"), edit.Before)
+		fmt.Fprintf(w, "    %s %s\n", p.green("+"), edit.After)
+		if edit.Summary != "" {
+			fmt.Fprintf(w, "      %s\n", p.dim(edit.Summary))
+		}
+		fmt.Fprintln(w)
 	}
 }
 
