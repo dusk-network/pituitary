@@ -158,6 +158,30 @@ path = "specs"
 	}
 }
 
+func TestParseGlobalCLIOptionsSupportsColorMode(t *testing.T) {
+	t.Parallel()
+
+	options, remaining, err := parseGlobalCLIOptions([]string{"--color", "always", "status"})
+	if err != nil {
+		t.Fatalf("parseGlobalCLIOptions() error = %v, want nil", err)
+	}
+	if got, want := options.ColorMode, colorModeAlways; got != want {
+		t.Fatalf("color mode = %q, want %q", got, want)
+	}
+	if len(remaining) != 1 || remaining[0] != "status" {
+		t.Fatalf("remaining args = %#v, want [status]", remaining)
+	}
+}
+
+func TestParseGlobalCLIOptionsRejectsInvalidColorMode(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := parseGlobalCLIOptions([]string{"--color", "violet", "status"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --color value") {
+		t.Fatalf("parseGlobalCLIOptions() error = %v, want invalid --color value", err)
+	}
+}
+
 func TestResolveCommandConfigPathPrefersCommandFlagAndExplainsCandidates(t *testing.T) {
 	repo := t.TempDir()
 	commandConfigPath := filepath.Join(repo, "configs", "pituitary.local.toml")

@@ -15,6 +15,10 @@ const (
 	localConfigDirName = ".pituitary"
 	configEnvVar       = "PITUITARY_CONFIG"
 
+	colorModeAuto   = "auto"
+	colorModeAlways = "always"
+	colorModeNever  = "never"
+
 	configSourceCommandFlag = "command_flag"
 	configSourceGlobalFlag  = "global_flag"
 	configSourceEnv         = "env"
@@ -23,6 +27,7 @@ const (
 
 type cliGlobalOptions struct {
 	ConfigPath string
+	ColorMode  string
 }
 
 type configPathOption struct {
@@ -53,12 +58,22 @@ func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 
 	var options cliGlobalOptions
 	fs.StringVar(&options.ConfigPath, "config", "", "path to workspace config")
+	fs.StringVar(&options.ColorMode, "color", colorModeAuto, "terminal color: auto, always, or never")
 
 	if err := fs.Parse(args); err != nil {
 		return cliGlobalOptions{}, nil, err
 	}
 
 	options.ConfigPath = strings.TrimSpace(options.ConfigPath)
+	options.ColorMode = strings.TrimSpace(strings.ToLower(options.ColorMode))
+	if options.ColorMode == "" {
+		options.ColorMode = colorModeAuto
+	}
+	switch options.ColorMode {
+	case colorModeAuto, colorModeAlways, colorModeNever:
+	default:
+		return cliGlobalOptions{}, nil, fmt.Errorf("invalid --color value %q; expected auto, always, or never", options.ColorMode)
+	}
 	return options, fs.Args(), nil
 }
 

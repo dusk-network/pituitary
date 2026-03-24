@@ -67,7 +67,7 @@ func TestRunStatusReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, `guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+	if !strings.Contains(out, `runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
 		t.Fatalf("runStatus() output %q does not contain fixture guidance", out)
 	}
 	if !strings.Contains(out, "`pituitary status --check-runtime embedder`") {
@@ -205,10 +205,10 @@ This guide changed after indexing.
 	if !strings.Contains(out, "index freshness: stale") {
 		t.Fatalf("runStatus() output %q does not report stale freshness", out)
 	}
-	if !strings.Contains(out, "freshness: index content fingerprint") {
+	if !strings.Contains(out, "index content fingerprint") {
 		t.Fatalf("runStatus() output %q does not contain content fingerprint reason", out)
 	}
-	if !strings.Contains(out, "freshness action: run `pituitary index --rebuild`") {
+	if !strings.Contains(out, "run `pituitary index --rebuild`") {
 		t.Fatalf("runStatus() output %q does not contain rebuild guidance", out)
 	}
 }

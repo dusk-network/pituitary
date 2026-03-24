@@ -93,10 +93,10 @@ func TestRunInitWritesConfigRebuildsAndSummarizes(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"pituitary init: discover, write, index, and summarize a workspace",
-		"config action: wrote",
-		"index: 4 artifact(s), 4 chunk(s), 2 edge(s)",
-		"status: fresh | specs: 2 | docs: 2 | chunks: 4",
+		"━━◈ init",
+		"config: ",
+		"action: wrote",
+		"index: 2 specs · 2 docs",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("runInit() output %q does not contain %q", output, want)
@@ -120,7 +120,7 @@ func TestRunInitReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, `guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+	if !strings.Contains(output, `runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
 		t.Fatalf("runInit() output %q does not contain fixture guidance", output)
 	}
 	if !strings.Contains(output, "`pituitary status --check-runtime embedder`") {

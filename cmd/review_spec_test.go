@@ -246,10 +246,9 @@ func TestRunReviewSpecTextIncludesTopImpactSummaries(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"impact: 2 spec(s), 2 ref(s), 2 doc(s)",
-		"top impacted specs:",
+		"━━◈ review-spec · SPEC-042",
+		"IMPACT    2 specs · 2 refs · 2 docs",
 		"SPEC-055",
-		"top impacted docs:",
 		"doc://guides/api-rate-limits",
 	} {
 		if !strings.Contains(out, want) {

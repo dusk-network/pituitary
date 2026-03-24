@@ -99,7 +99,7 @@ func TestRunStatusTextIncludesRelationGraphFindings(t *testing.T) {
 	}
 	for _, want := range []string{
 		"relation graph: invalid",
-		"relation issue: depends_on cycle detected:",
+		"depends_on cycle detected:",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("runStatus() output %q does not contain %q", stdout.String(), want)

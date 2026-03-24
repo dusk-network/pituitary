@@ -100,7 +100,8 @@ func writeCLIError(stdout, stderr io.Writer, format, command string, request any
 		}
 		return exitCode
 	}
-	fmt.Fprintf(stderr, "pituitary %s: %s\n", command, issue.Message)
+	p := presentationForWriter(stderr)
+	fmt.Fprintf(stderr, "%s %s\n", p.red("pituitary "+command+":"), issue.Message)
 	return exitCode
 }
 
@@ -143,7 +144,8 @@ func warningsToCLIIssues(warnings []analysis.Warning) []cliIssue {
 }
 
 func writeCLIWarnings(stderr io.Writer, command string, warnings []cliIssue) {
+	p := presentationForWriter(stderr)
 	for _, warning := range warnings {
-		fmt.Fprintf(stderr, "pituitary %s: warning: %s\n", command, warning.Message)
+		fmt.Fprintf(stderr, "%s %s\n", p.yellow("pituitary "+command+": warning:"), warning.Message)
 	}
 }

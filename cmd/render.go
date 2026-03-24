@@ -18,7 +18,9 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		return fmt.Errorf("unknown command %q", command)
 	}
 
-	fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
+	if !usesSemanticTextRendering(command) {
+		fmt.Fprintf(w, "pituitary %s: %s\n", command, description)
+	}
 
 	switch typed := result.(type) {
 	case *source.CanonicalizeResult:
@@ -60,6 +62,15 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	}
 
 	return nil
+}
+
+func usesSemanticTextRendering(command string) bool {
+	switch command {
+	case "check-doc-drift", "check-overlap", "review-spec", "check-compliance", "status", "init":
+		return true
+	default:
+		return false
+	}
 }
 
 func renderCommandTable(w io.Writer, command string, result any) error {
@@ -183,27 +194,53 @@ func renderCanonicalizeResult(w io.Writer, result *source.CanonicalizeResult) {
 }
 
 func renderInitResult(w io.Writer, result *initResult) {
-	fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
-	fmt.Fprintf(w, "config path: %s\n", result.ConfigPath)
-	fmt.Fprintf(w, "config action: %s\n", result.ConfigAction)
+	p := presentationForWriter(w)
+	fmt.Fprintln(w, p.headerLine("init", ""))
+	fmt.Fprintln(w)
+
+	sourceCount := 0
 	if result.Discover != nil {
-		fmt.Fprintf(w, "discovered sources: %d\n", len(result.Discover.Sources))
+		sourceCount = len(result.Discover.Sources)
 	}
+	artifactCount := 0
+	chunkCount := 0
 	if result.Index != nil {
-		fmt.Fprintf(w, "index: %d artifact(s), %d chunk(s), %d edge(s)\n", result.Index.ArtifactCount, result.Index.ChunkCount, result.Index.EdgeCount)
+		artifactCount = result.Index.ArtifactCount
+		chunkCount = result.Index.ChunkCount
 	}
+	specCount := 0
+	docCount := 0
+	freshness := "unknown"
+	embedderProvider := ""
 	if result.Status != nil {
-		status := "unknown"
+		specCount = result.Status.SpecCount
+		docCount = result.Status.DocCount
 		if result.Status.Freshness != nil && result.Status.Freshness.State != "" {
-			status = result.Status.Freshness.State
+			freshness = result.Status.Freshness.State
 		}
-		fmt.Fprintf(w, "status: %s | specs: %d | docs: %d | chunks: %d\n", status, result.Status.SpecCount, result.Status.DocCount, result.Status.ChunkCount)
+		embedderProvider = result.Status.EmbedderProvider
+	}
+	fmt.Fprintf(
+		w,
+		"  %s sources  %s artifacts  %s chunks  %s  %s\n",
+		p.bold(fmt.Sprintf("%d", sourceCount)),
+		p.bold(fmt.Sprintf("%d", artifactCount)),
+		p.bold(fmt.Sprintf("%d", chunkCount)),
+		renderFreshnessLabel(p, freshness),
+		p.dim(statusEmbedderSummary(embedderProvider)),
+	)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %s %s\n", p.dim("workspace:"), result.WorkspaceRoot)
+	fmt.Fprintf(w, "  %s %s\n", p.dim("config:"), result.ConfigPath)
+	fmt.Fprintf(w, "  %s %s\n", p.dim("action:"), result.ConfigAction)
+	fmt.Fprintf(w, "  %s %d specs · %d docs\n", p.dim("index:"), specCount, docCount)
+	if result.Status != nil {
 		for _, guidance := range result.Status.Guidance {
-			fmt.Fprintf(w, "guidance: %s\n", guidance)
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
 		}
 	}
 	if result.ConfigAction == "preview" {
-		fmt.Fprintln(w, "next: run `pituitary init` without --dry-run to write the config and build the index")
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), "run `pituitary init` without --dry-run to write the config and build the index")
 	}
 }
 
@@ -237,67 +274,83 @@ func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary)
 }
 
 func renderStatusResult(w io.Writer, result *statusResult) {
-	if result.WorkspaceRoot != "" {
-		fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	p := presentationForWriter(w)
+	fmt.Fprintln(w, p.headerLine("status", ""))
+	fmt.Fprintln(w)
+
+	freshnessState := "unknown"
+	if result.Freshness != nil && result.Freshness.State != "" {
+		freshnessState = result.Freshness.State
 	}
-	fmt.Fprintf(w, "config: %s\n", result.ConfigPath)
+	fmt.Fprintf(
+		w,
+		"  %s specs  %s docs  %s chunks  %s  %s\n",
+		p.bold(fmt.Sprintf("%d", result.SpecCount)),
+		p.bold(fmt.Sprintf("%d", result.DocCount)),
+		p.bold(fmt.Sprintf("%d", result.ChunkCount)),
+		renderFreshnessLabel(p, freshnessState),
+		p.dim(statusEmbedderSummary(result.EmbedderProvider)),
+	)
+	fmt.Fprintln(w)
+
+	if result.WorkspaceRoot != "" {
+		fmt.Fprintf(w, "  %s %s\n", p.dim("workspace:"), result.WorkspaceRoot)
+	}
+	fmt.Fprintf(w, "  %s %s\n", p.dim("config:"), result.ConfigPath)
 	if result.ConfigResolution != nil {
 		if result.ConfigResolution.Reason != "" {
-			fmt.Fprintf(w, "config resolution: %s\n", result.ConfigResolution.Reason)
+			fmt.Fprintf(w, "  %s %s\n", p.dim("config resolution:"), result.ConfigResolution.Reason)
 		}
 		if len(result.ConfigResolution.Candidates) > 0 {
-			fmt.Fprintln(w, "config candidates:")
+			fmt.Fprintf(w, "  %s\n", p.white("CONFIG CANDIDATES"))
 			for _, candidate := range result.ConfigResolution.Candidates {
-				fmt.Fprintf(w, "  %d. %s | %s", candidate.Precedence, configSourceLabel(candidate.Source), candidate.Status)
+				fmt.Fprintf(w, "  %s %d. %s | %s", p.treeItem(candidate.Precedence == len(result.ConfigResolution.Candidates)), candidate.Precedence, configSourceLabel(candidate.Source), candidate.Status)
 				if candidate.Path != "" {
 					fmt.Fprintf(w, " | %s", candidate.Path)
 				}
 				fmt.Fprintln(w)
 				if candidate.Detail != "" {
-					fmt.Fprintf(w, "     %s\n", candidate.Detail)
+					fmt.Fprintf(w, "     %s\n", p.dim(candidate.Detail))
 				}
 			}
 		}
 	}
-	fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
+	fmt.Fprintf(w, "  %s %s\n", p.dim("index path:"), result.IndexPath)
 	if result.IndexExists {
-		fmt.Fprintln(w, "index: present")
+		fmt.Fprintf(w, "  %s %s\n", p.dim("index:"), p.green("present"))
 	} else {
-		fmt.Fprintln(w, "index: missing")
+		fmt.Fprintf(w, "  %s %s\n", p.dim("index:"), p.red("missing"))
 	}
 	if result.Freshness != nil {
-		fmt.Fprintf(w, "index freshness: %s\n", result.Freshness.State)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("index freshness:"), renderFreshnessLabel(p, result.Freshness.State))
 		for _, issue := range result.Freshness.Issues {
-			fmt.Fprintf(w, "freshness: %s\n", issue.Message)
+			fmt.Fprintf(w, "  %s %s\n", p.cross(), issue.Message)
 		}
 		if result.Freshness.Action != "" {
-			fmt.Fprintf(w, "freshness action: %s\n", result.Freshness.Action)
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), result.Freshness.Action)
 		}
 	}
-	fmt.Fprintf(w, "indexed specs: %d\n", result.SpecCount)
-	fmt.Fprintf(w, "indexed docs: %d\n", result.DocCount)
-	fmt.Fprintf(w, "indexed chunks: %d\n", result.ChunkCount)
 	if result.RelationGraph != nil {
-		fmt.Fprintf(w, "relation graph: %s\n", result.RelationGraph.State)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("relation graph:"), result.RelationGraph.State)
 		for _, finding := range result.RelationGraph.Findings {
-			fmt.Fprintf(w, "relation issue: %s\n", finding.Message)
+			fmt.Fprintf(w, "  %s %s\n", p.cross(), finding.Message)
 		}
 	}
 	if result.ArtifactLocations != nil {
-		fmt.Fprintf(w, "artifact index dir: %s\n", result.ArtifactLocations.IndexDir)
-		fmt.Fprintf(w, "artifact discover --write default: %s\n", result.ArtifactLocations.DiscoverConfigPath)
-		fmt.Fprintf(w, "artifact canonicalize default: %s\n", result.ArtifactLocations.CanonicalizeBundleRoot)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("artifact index dir:"), result.ArtifactLocations.IndexDir)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("artifact discover --write default:"), result.ArtifactLocations.DiscoverConfigPath)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("artifact canonicalize default:"), result.ArtifactLocations.CanonicalizeBundleRoot)
 		if len(result.ArtifactLocations.IgnorePatterns) > 0 {
-			fmt.Fprintf(w, "artifact ignore patterns: %s\n", strings.Join(result.ArtifactLocations.IgnorePatterns, ", "))
+			fmt.Fprintf(w, "  %s %s\n", p.dim("artifact ignore patterns:"), strings.Join(result.ArtifactLocations.IgnorePatterns, ", "))
 		}
 		for _, hint := range result.ArtifactLocations.RelocationHints {
-			fmt.Fprintf(w, "artifact relocation: %s\n", hint)
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), hint)
 		}
 	}
 	if result.Runtime != nil {
-		fmt.Fprintf(w, "runtime probe: %s\n", result.Runtime.Scope)
+		fmt.Fprintf(w, "  %s %s\n", p.dim("runtime probe:"), result.Runtime.Scope)
 		for _, check := range result.Runtime.Checks {
-			fmt.Fprintf(w, "runtime: %s | %s | provider: %s", check.Name, check.Status, check.Provider)
+			fmt.Fprintf(w, "  %s %s %s | %s | provider: %s", p.dim("runtime:"), runtimeCheckGlyph(p, check.Status), check.Name, check.Status, check.Provider)
 			if check.Model != "" {
 				fmt.Fprintf(w, " | model: %s", check.Model)
 			}
@@ -306,12 +359,12 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 			}
 			fmt.Fprintln(w)
 			if check.Message != "" {
-				fmt.Fprintf(w, "runtime note: %s\n", check.Message)
+				fmt.Fprintf(w, "     %s %s\n", p.dim("runtime note:"), check.Message)
 			}
 		}
 	}
 	for _, guidance := range result.Guidance {
-		fmt.Fprintf(w, "guidance: %s\n", guidance)
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
 	}
 }
 
@@ -481,15 +534,30 @@ func renderTableValue(value string, maxWidth int) string {
 }
 
 func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {
-	fmt.Fprintf(w, "candidate: %s | %s\n", result.Candidate.Ref, result.Candidate.Title)
+	p := presentationForWriter(w)
+	fmt.Fprintln(w, p.headerLine("check-overlap", " · "+p.cyan(result.Candidate.Ref)))
+	if strings.TrimSpace(result.Candidate.Title) != "" {
+		fmt.Fprintf(w, "    %s\n", p.dim(result.Candidate.Title))
+	}
+	fmt.Fprintln(w)
+
 	if len(result.Overlaps) == 0 {
-		fmt.Fprintln(w, "no overlaps")
+		fmt.Fprintf(w, "  %s no overlaps\n", p.check())
 		renderOverlapRecommendation(w, result.Recommendation)
 		return
 	}
-	for i, overlap := range result.Overlaps {
-		fmt.Fprintf(w, "%d. %s | %s | %.3f | %s | %s | %s\n", i+1, overlap.Ref, overlap.Title, overlap.Score, overlap.OverlapDegree, overlap.Relationship, humanizeOverlapGuidance(overlap.Guidance))
+	for _, overlap := range result.Overlaps {
+		fmt.Fprintf(
+			w,
+			"  %s %s  %s  %s  %s\n",
+			overlapBlock(p, overlap),
+			p.cyan(overlap.Ref),
+			p.bold(fmt.Sprintf("%.3f", overlap.Score)),
+			p.dim(overlap.Title),
+			overlapDisplaySummary(overlap),
+		)
 	}
+	fmt.Fprintln(w)
 	renderOverlapRecommendation(w, result.Recommendation)
 }
 
@@ -509,37 +577,44 @@ func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult
 }
 
 func renderComplianceResult(w io.Writer, result *analysis.ComplianceResult) {
-	fmt.Fprintf(w, "paths: %s\n", strings.Join(result.Paths, ", "))
-	fmt.Fprintf(w, "relevant specs: %d\n", len(result.RelevantSpecs))
+	p := presentationForWriter(w)
+	fmt.Fprintln(w, p.headerLine("check-compliance", ""))
+	fmt.Fprintln(w)
+	if len(result.Paths) > 0 {
+		fmt.Fprintf(w, "  %s %s\n", p.dim("paths:"), strings.Join(result.Paths, ", "))
+	}
+	fmt.Fprintf(w, "  %s %d\n", p.dim("relevant specs:"), len(result.RelevantSpecs))
+	fmt.Fprintln(w)
 	renderComplianceFindingGroup(w, "conflicts", result.Conflicts)
 	renderComplianceFindingGroup(w, "compliant", result.Compliant)
 	renderComplianceFindingGroup(w, "unspecified", result.Unspecified)
 }
 
 func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis.ComplianceFinding) {
+	p := presentationForWriter(w)
 	if len(findings) == 0 {
-		fmt.Fprintf(w, "%s: none\n", label)
+		fmt.Fprintf(w, "  %s none\n", p.dim(label+":"))
 		return
 	}
 
-	fmt.Fprintf(w, "%s: %d\n", label, len(findings))
+	fmt.Fprintf(w, "  %s %d\n", p.white(strings.ToUpper(label)+":"), len(findings))
 	for _, item := range findings {
-		fmt.Fprintf(w, "- %s", item.Path)
+		fmt.Fprintf(w, "  %s %s", complianceBadge(p, label), item.Path)
 		if item.SpecRef != "" {
-			fmt.Fprintf(w, " | %s", item.SpecRef)
+			fmt.Fprintf(w, " | %s", p.cyan(item.SpecRef))
 		}
 		if item.SectionHeading != "" {
 			fmt.Fprintf(w, " | %s", item.SectionHeading)
 		}
 		fmt.Fprintf(w, " | %s\n", item.Message)
 		if item.Traceability != "" {
-			fmt.Fprintf(w, "  traceability: %s\n", item.Traceability)
+			fmt.Fprintf(w, "     %s %s\n", p.dim("traceability"), item.Traceability)
 		}
 		if item.LimitingFactor != "" {
-			fmt.Fprintf(w, "  limiting factor: %s\n", item.LimitingFactor)
+			fmt.Fprintf(w, "     %s %s\n", p.dim("limiting factor"), item.LimitingFactor)
 		}
 		if item.Suggestion != "" {
-			fmt.Fprintf(w, "  suggestion: %s\n", item.Suggestion)
+			fmt.Fprintf(w, "     %s %s\n", p.arrow(), item.Suggestion)
 		}
 	}
 }
@@ -592,8 +667,12 @@ func renderTerminologyAuditResult(w io.Writer, result *analysis.TerminologyAudit
 }
 
 func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
+	p := presentationForWriter(w)
+	fmt.Fprintln(w, p.headerLine("check-doc-drift", ""))
+	fmt.Fprintln(w)
+
 	if len(result.DriftItems) == 0 && len(result.Assessments) == 0 {
-		fmt.Fprintln(w, "no drift items")
+		fmt.Fprintf(w, "  %s no drift items\n", p.check())
 		return
 	}
 
@@ -604,62 +683,38 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 	driftItems := driftItemsByDocRef(result.DriftItems)
 	remediation := remediationItemsByDocRef(result.Remediation)
 	for i, assessment := range assessments {
-		fmt.Fprintf(w, "%d. %s | %s | status: %s", i+1, assessment.DocRef, assessment.Title, assessment.Status)
-		if assessment.Confidence != nil && assessment.Confidence.Level != "" {
-			fmt.Fprintf(w, " | confidence: %s", assessment.Confidence.Level)
-			if assessment.Confidence.Score > 0 {
-				fmt.Fprintf(w, " (%.3f)", assessment.Confidence.Score)
-			}
+		if i > 0 {
+			fmt.Fprintln(w)
 		}
-		if item, ok := driftItems[assessment.DocRef]; ok {
-			fmt.Fprintf(w, " | findings: %d", len(item.Findings))
+		docLabel := preferredDocLabel(assessment.DocRef, assessment.SourceRef)
+		fmt.Fprintf(w, "  %s", p.cyan(docLabel))
+		if padding := docDriftPadding(docLabel); padding > 0 {
+			fmt.Fprint(w, strings.Repeat(" ", padding))
+		} else {
+			fmt.Fprint(w, "  ")
 		}
-		if suggestions := remediation[assessment.DocRef]; len(suggestions) > 0 {
-			fmt.Fprintf(w, " | remediation: %d", len(suggestions))
-		}
-		fmt.Fprintln(w)
-		if assessment.Rationale != "" {
-			fmt.Fprintf(w, "   rationale: %s\n", assessment.Rationale)
-		}
-		if assessment.Evidence != nil {
-			renderDriftEvidence(w, assessment.Evidence, "   ")
-		}
-		if assessment.Confidence != nil && assessment.Confidence.Basis != "" {
-			fmt.Fprintf(w, "   confidence basis: %s\n", assessment.Confidence.Basis)
-		}
-		if item, ok := driftItems[assessment.DocRef]; ok {
+		fmt.Fprintln(w, driftAssessmentBadge(p, assessment.Status))
+		if item, ok := driftItems[assessment.DocRef]; ok && len(item.Findings) > 0 {
 			for _, finding := range item.Findings {
-				fmt.Fprintf(w, "   finding: %s", finding.Code)
-				if finding.Artifact != "" {
-					fmt.Fprintf(w, " | artifact: %s", finding.Artifact)
+				fmt.Fprintf(w, "\n    %s %s", p.cross(), p.bold(driftFindingSummary(finding)))
+				if finding.Expected != "" {
+					fmt.Fprintf(w, "  %s %s", p.yellow("expected"), finding.Expected)
 				}
-				if finding.Confidence != nil && finding.Confidence.Level != "" {
-					fmt.Fprintf(w, " | confidence: %s", finding.Confidence.Level)
+				if finding.Observed != "" {
+					fmt.Fprintf(w, "  %s %s", p.yellow("got"), finding.Observed)
 				}
 				fmt.Fprintln(w)
-				fmt.Fprintf(w, "     message: %s\n", finding.Message)
-				if finding.Rationale != "" {
-					fmt.Fprintf(w, "     rationale: %s\n", finding.Rationale)
-				}
-				if finding.Expected != "" || finding.Observed != "" {
-					fmt.Fprintf(w, "     expected: %s\n", finding.Expected)
-					fmt.Fprintf(w, "     observed: %s\n", finding.Observed)
-				}
-				if finding.Evidence != nil {
-					renderDriftEvidence(w, finding.Evidence, "     ")
-				}
-				if finding.Confidence != nil && finding.Confidence.Basis != "" {
-					fmt.Fprintf(w, "     confidence basis: %s\n", finding.Confidence.Basis)
-				}
 			}
+		} else if assessment.Rationale != "" {
+			fmt.Fprintf(w, "\n    %s %s\n", p.arrow(), assessment.Rationale)
 		}
-		for _, suggestion := range remediation[assessment.DocRef] {
-			fmt.Fprintf(w, "   remediation: %s | %s\n", suggestion.SpecRef, suggestion.Summary)
-			if suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "" {
-				fmt.Fprintf(w, "   suggested edit: replace %q with %q\n", suggestion.SuggestedEdit.Replace, suggestion.SuggestedEdit.With)
-			} else if suggestion.SuggestedEdit.Note != "" {
-				fmt.Fprintf(w, "   suggested edit: %s\n", suggestion.SuggestedEdit.Note)
+		if suggestions := remediation[assessment.DocRef]; len(suggestions) > 0 {
+			pathArg := docLabel
+			if assessment.SourceRef != "" {
+				pathArg = assessment.SourceRef
 			}
+			fmt.Fprintf(w, "\n    %s pituitary fix --path %s %s\n", p.green("fix:"), pathArg, p.dim(fmt.Sprintf("(%d edits)", len(suggestions))))
+			fmt.Fprintf(w, "    %s  run review-spec --format html for the full evidence report\n", p.info())
 		}
 	}
 }
@@ -687,40 +742,56 @@ func renderDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence, prefix s
 }
 
 func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
-	fmt.Fprintf(w, "spec: %s\n", result.SpecRef)
+	p := presentationForWriter(w)
+	headerSuffix := " · " + p.cyan(result.SpecRef)
+	fmt.Fprintln(w, p.headerLine("review-spec", headerSuffix))
+	if result.Overlap != nil && strings.TrimSpace(result.Overlap.Candidate.Title) != "" {
+		fmt.Fprintf(w, "    %s\n", p.dim(result.Overlap.Candidate.Title))
+	}
+	fmt.Fprintln(w)
 
 	if result.Overlap != nil {
-		fmt.Fprintf(w, "overlaps: %d | recommendation: %s", len(result.Overlap.Overlaps), result.Overlap.Recommendation)
-		if detail := humanizeOverlapRecommendation(result.Overlap.Recommendation); detail != "" {
-			fmt.Fprintf(w, " | %s", detail)
+		fmt.Fprintf(w, "  %s   %d specs · recommendation: %s\n", p.white("OVERLAP"), len(result.Overlap.Overlaps), result.Overlap.Recommendation)
+		if len(result.Overlap.Overlaps) == 0 {
+			fmt.Fprintf(w, "  %s %s\n", p.treeLast(), p.dim("no overlapping specs detected"))
+		} else {
+			for i, overlap := range result.Overlap.Overlaps {
+				fmt.Fprintf(w, "  %s %s  %s  %s\n", p.treeBranch(i == len(result.Overlap.Overlaps)-1), p.cyan(overlap.Ref), fmt.Sprintf("%.3f", overlap.Score), overlap.Relationship)
+			}
 		}
 		fmt.Fprintln(w)
-		if len(result.Overlap.Overlaps) > 0 {
-			top := result.Overlap.Overlaps[0]
-			fmt.Fprintf(w, "top overlap: %s | %s | %.3f | %s\n", top.Ref, top.Relationship, top.Score, humanizeOverlapGuidance(top.Guidance))
+	}
+
+	if result.Impact != nil {
+		fmt.Fprintf(w, "  %s    %d specs · %d refs · %d docs\n", p.white("IMPACT"), len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
+		items := reviewImpactLines(result.Impact)
+		for i, item := range items {
+			fmt.Fprintf(w, "  %s %s\n", p.treeBranch(i == len(items)-1), item)
+		}
+		fmt.Fprintln(w)
+	}
+
+	driftAssessments := reviewDocDriftAssessments(result.DocDrift)
+	fmt.Fprintf(w, "  %s %d item%s · %d remediation%s\n", p.white("DOC DRIFT"), len(driftAssessments), pluralSuffix(len(driftAssessments)), reviewRemediationSuggestionCount(result.DocRemediation), pluralSuffix(reviewRemediationSuggestionCount(result.DocRemediation)))
+	if len(driftAssessments) == 0 {
+		fmt.Fprintf(w, "  %s %s\n", p.treeLast(), p.dim("no drifting docs detected"))
+	} else {
+		for i, assessment := range driftAssessments {
+			fmt.Fprintf(w, "  %s %s  %s\n", p.treeBranch(i == len(driftAssessments)-1), p.cyan(preferredDocLabel(assessment.DocRef, assessment.SourceRef)), driftAssessmentBadge(p, assessment.Status))
+			if suggestions := remediationItemsByDocRef(result.DocRemediation)[assessment.DocRef]; len(suggestions) > 0 {
+				fmt.Fprintf(w, "     %s %d suggested edits %s\n", p.arrow(), len(suggestions), p.dim("(see check-doc-drift for detail)"))
+			}
 		}
 	}
+	fmt.Fprintln(w)
+
 	if result.Comparison != nil {
-		fmt.Fprintf(w, "comparison: %s\n", result.Comparison.Comparison.Recommendation)
+		fmt.Fprintf(w, "  %s  prefer %s as the primary reference\n", p.white("COMPARISON"), p.cyan(result.SpecRef))
 	} else {
-		fmt.Fprintln(w, "comparison: none")
+		fmt.Fprintf(w, "  %s  %s\n", p.white("COMPARISON"), p.dim("none"))
 	}
-	if result.Impact != nil {
-		fmt.Fprintf(w, "impact: %d spec(s), %d ref(s), %d doc(s)\n", len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
-		renderReviewImpactSummary(w, result.Impact)
-	} else {
-		fmt.Fprintln(w, "impact: none")
-	}
-	if result.DocDrift != nil {
-		fmt.Fprintf(w, "doc drift: %d item(s)\n", len(result.DocDrift.DriftItems))
-	} else {
-		fmt.Fprintln(w, "doc drift: none")
-	}
-	if result.DocRemediation != nil {
-		fmt.Fprintf(w, "doc remediation: %d item(s)\n", len(result.DocRemediation.Items))
-	} else {
-		fmt.Fprintln(w, "doc remediation: none")
-	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %s  run review-spec --format html for the full evidence report\n", p.info())
 }
 
 func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
@@ -1428,6 +1499,144 @@ func reviewRemediationSuggestionCount(result *analysis.DocRemediationResult) int
 	return count
 }
 
+func renderFreshnessLabel(p renderPresentation, state string) string {
+	switch state {
+	case "fresh":
+		return p.green(state)
+	case "stale", "incompatible":
+		return p.red(state)
+	default:
+		return p.yellow(state)
+	}
+}
+
+func statusEmbedderSummary(provider string) string {
+	if strings.TrimSpace(provider) == "" {
+		return "embedder unknown"
+	}
+	return provider + " embedder"
+}
+
+func runtimeCheckGlyph(p renderPresentation, status string) string {
+	switch status {
+	case "ready":
+		return p.check()
+	case "disabled":
+		return p.info()
+	default:
+		return p.cross()
+	}
+}
+
+func complianceBadge(p renderPresentation, label string) string {
+	switch label {
+	case "conflicts":
+		return p.conflictBadge()
+	case "compliant":
+		return p.compliantBadge()
+	default:
+		return p.unspecifiedBadge()
+	}
+}
+
+func preferredDocLabel(docRef, sourceRef string) string {
+	if strings.TrimSpace(sourceRef) != "" {
+		return sourceRef
+	}
+	return docRef
+}
+
+func docDriftPadding(label string) int {
+	width := 56 - len([]rune(label))
+	if width < 2 {
+		return 2
+	}
+	return width
+}
+
+func driftAssessmentBadge(p renderPresentation, status string) string {
+	switch status {
+	case "aligned":
+		return p.okBadge()
+	case "possible_drift":
+		return p.reviewBadge()
+	default:
+		return p.driftBadge()
+	}
+}
+
+func driftFindingSummary(finding analysis.DriftFinding) string {
+	if strings.TrimSpace(finding.Code) != "" {
+		return humanizeSymbol(finding.Code)
+	}
+	return strings.TrimSpace(finding.Message)
+}
+
+func overlapBlock(p renderPresentation, item analysis.OverlapItem) string {
+	if item.Guidance == "merge_candidate" || item.Score >= 0.85 {
+		return p.blockHigh()
+	}
+	return p.blockMedium()
+}
+
+func overlapDisplaySummary(item analysis.OverlapItem) string {
+	guidance := humanizeOverlapGuidance(item.Guidance)
+	if item.Relationship == "" {
+		return guidance
+	}
+	if guidance == "" || guidance == item.Relationship {
+		return item.Relationship
+	}
+	return guidance
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func reviewImpactLines(result *analysis.AnalyzeImpactResult) []string {
+	if result == nil {
+		return nil
+	}
+	lines := make([]string, 0, 6)
+	for _, item := range topImpactedSpecs(result.AffectedSpecs, 2) {
+		line := fmt.Sprintf("%s  %s · %s", item.Ref, item.Title, item.Relationship)
+		if item.Historical {
+			line += " · historical"
+		}
+		lines = append(lines, line)
+	}
+	for _, item := range topImpactedDocs(result.AffectedDocs, 2) {
+		line := fmt.Sprintf("%s  %.3f", item.Ref, item.Score)
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func humanizeSymbol(value string) string {
+	value = strings.ReplaceAll(value, "_", " ")
+	value = strings.ReplaceAll(value, "-", " ")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return value
+	}
+	return value
+}
+
+func (p renderPresentation) treeBranch(last bool) string {
+	if last {
+		return p.treeLast()
+	}
+	return p.treeMid()
+}
+
+func (p renderPresentation) treeItem(last bool) string {
+	return p.treeBranch(last)
+}
+
 func renderReviewMarkdownDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence) {
 	if evidence == nil {
 		return
@@ -1455,11 +1664,17 @@ func renderReviewMarkdownDriftEvidence(w io.Writer, evidence *analysis.DriftEvid
 }
 
 func renderOverlapRecommendation(w io.Writer, recommendation string) {
-	fmt.Fprintf(w, "recommendation: %s", recommendation)
-	if detail := humanizeOverlapRecommendation(recommendation); detail != "" {
-		fmt.Fprintf(w, " | %s", detail)
+	p := presentationForWriter(w)
+	switch recommendation {
+	case "proceed_with_supersedes":
+		fmt.Fprintf(w, "  %s %s\n", p.check(), "candidate already declares the replacement path — no action needed")
+	case "merge_into_existing":
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), "strong merge candidate — merge into the existing spec")
+	case "review_boundaries":
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), "real overlap detected — review scope boundaries before merging")
+	default:
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), recommendation)
 	}
-	fmt.Fprintln(w)
 }
 
 func humanizeOverlapRecommendation(recommendation string) string {

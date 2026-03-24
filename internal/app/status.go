@@ -17,13 +17,15 @@ type StatusRequest struct {
 
 // StatusResult captures transport-agnostic status details for one workspace.
 type StatusResult struct {
-	WorkspaceRoot string
-	ConfigPath    string
-	Index         *index.Status
-	Freshness     *index.FreshnessStatus
-	RelationGraph *index.RelationGraphStatus
-	Runtime       *runtimeprobe.Result
-	Guidance      []string
+	WorkspaceRoot    string
+	ConfigPath       string
+	EmbedderProvider string
+	AnalysisProvider string
+	Index            *index.Status
+	Freshness        *index.FreshnessStatus
+	RelationGraph    *index.RelationGraphStatus
+	Runtime          *runtimeprobe.Result
+	Guidance         []string
 }
 
 // Status loads config, inspects the current index, and optionally probes runtime dependencies.
@@ -52,13 +54,15 @@ func Status(ctx context.Context, configPath string, request StatusRequest) Respo
 		}
 
 		return &StatusResult{
-			WorkspaceRoot: cfg.Workspace.RootPath,
-			ConfigPath:    cfg.ConfigPath,
-			Index:         status,
-			Freshness:     freshness,
-			RelationGraph: index.InspectRelationGraph(records.Specs),
-			Runtime:       runtimeResult,
-			Guidance:      fixtureEmbedderGuidance(cfg, status),
+			WorkspaceRoot:    cfg.Workspace.RootPath,
+			ConfigPath:       cfg.ConfigPath,
+			EmbedderProvider: cfg.Runtime.Embedder.Provider,
+			AnalysisProvider: cfg.Runtime.Analysis.Provider,
+			Index:            status,
+			Freshness:        freshness,
+			RelationGraph:    index.InspectRelationGraph(records.Specs),
+			Runtime:          runtimeResult,
+			Guidance:         fixtureEmbedderGuidance(cfg, status),
 		}, nil
 	}, classifyStatusError)
 }
