@@ -239,7 +239,7 @@ If you still have a legacy config shaped like `[project]` with `specs_dir = "spe
 
 ## Commands
 
-Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports with a summary, recommended next actions, and detailed evidence sections.
+Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` and `--format html` for shareable review reports with a summary, recommended next actions, and detailed evidence sections.
 
 | Command | What it does |
 |---|---|
@@ -262,7 +262,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `check-compliance --path PATH` | Check one or more code paths against accepted specs |
 | `check-compliance --diff-file PATH|-` | Check a unified diff against accepted specs; ideal for pre-merge and CI use |
 | `check-doc-drift --scope all` | Find docs that have gone stale relative to accepted specs, with evidence and confidence |
-| `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report |
+| `review-spec --path specs/rate-limit-v2` | Full review: overlap + comparison + impact + drift + remediation in one report, with text/json/markdown/html output |
 
 `canonicalize` is optional high-rigor mode. It does not replace inferred-contract indexing; it helps you promote one Markdown contract into an explicit bundle when you want stronger structure without converting the whole repo at once.
 
@@ -496,7 +496,7 @@ Key design decisions:
 
 Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See the [GitHub issue queue](https://github.com/dusk-network/pituitary/issues) for active priorities and planned follow-up work.
 
-**What works today:** indexing, incremental rebuild reuse, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
+**What works today:** indexing, incremental rebuild reuse, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown and HTML output for `review-spec`, MCP server.
 
 **Product boundary:** Pituitary remains specification-first; compliance is a supporting bridge feature rather than a general code-analysis pivot. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
