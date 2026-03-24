@@ -12,6 +12,11 @@ The current release workflow publishes one archive per supported platform:
 
 Each archive is built from the checked-in [/.goreleaser.yaml](../../.goreleaser.yaml) configuration, and the workflow also uploads a combined SHA-256 checksum manifest for the tagged release.
 
+Consumer install surfaces built on top of those release artifacts:
+
+- Homebrew formula in `dusk-network/homebrew-tap`
+- repository-owned one-line installer at [`scripts/install.sh`](../../scripts/install.sh)
+
 ## Release Workflow
 
 1. Make sure the branch you want to release is already merged to `main`.
@@ -31,6 +36,21 @@ Pushing the tag triggers [/.github/workflows/release.yml](../../.github/workflow
 - injects the tag, commit, and build date into the binary metadata
 - uploads the versioned archives to a GitHub release for that tag
 - publishes `pituitary_<tag>_checksums.txt` alongside the archives
+
+## Homebrew Tap Maintenance
+
+After the tagged release is published, update the tap formula from a local checkout of `dusk-network/homebrew-tap`:
+
+```sh
+git clone https://github.com/dusk-network/homebrew-tap.git /tmp/homebrew-tap
+gh auth login
+./scripts/update-homebrew-formula.sh v0.4.0 /tmp/homebrew-tap
+git -C /tmp/homebrew-tap add Formula/pituitary.rb lib/github_private_repository_release_download_strategy.rb
+git -C /tmp/homebrew-tap commit -m "Update pituitary to v0.4.0"
+git -C /tmp/homebrew-tap push
+```
+
+`scripts/update-homebrew-formula.sh` uses authenticated `gh release download` access to pull the published checksum manifest from GitHub Releases, rewrites `Formula/pituitary.rb` for the requested tag, and refreshes the custom private-release download strategy in the tap so Homebrew stays aligned with the private release artifacts.
 
 ## Validation
 
