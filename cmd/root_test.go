@@ -32,7 +32,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "init" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "canonicalize" || name == "discover" || name == "init" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "fix" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "discover" || name == "init" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
@@ -122,6 +122,8 @@ func buildLimiter() {}
 						args = []string{name, "--term", "tenant"}
 					} else if name == "check-compliance" {
 						args = []string{name, "--path", "src/api/middleware/ratelimiter.go"}
+					} else if name == "fix" {
+						args = []string{name, "--path", "docs/guides/api-rate-limits.md", "--dry-run"}
 					} else if name == "review-spec" {
 						args = []string{name, "--spec-ref", "SPEC-042"}
 					} else {

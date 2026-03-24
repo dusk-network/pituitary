@@ -611,6 +611,9 @@ CLI exit codes should stay simple:
 - `check_doc_drift` (`pituitary check-doc-drift`)
   - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
   - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "aligned" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
+- `fix` (`pituitary fix`)
+  - Request: exactly one of `{ "path": "docs/guides/api-rate-limits.md", "dry_run": true }`, `{ "scope": "all", "dry_run": true }`, or `{ "doc_refs": ["doc://guides/api-rate-limits"], "apply": true }`
+  - Result: `{ "selector": "docs/guides/api-rate-limits.md" | "all" | "doc_refs", "applied": false, "files": [{ "doc_ref": "...", "path": "...", "status": "planned" | "applied" | "skipped", "reason": "...", "warnings": ["..."], "edits": [{ "code": "...", "action": "replace_claim", "replace": "...", "with": "...", "line": N, "start_byte": N, "end_byte": N, "before": "...", "after": "..." }] }], "planned_file_count": N, "planned_edit_count": N, "applied_file_count": N, "applied_edit_count": N, "guidance": ["..."] }`
 - `review_spec` (`pituitary review-spec`)
   - Request: `{ "spec_ref": "SPEC-042" }` or `{ "spec_record": { ... canonical spec record ... } }`
   - Result: `{ "spec_ref": "SPEC-042", "overlap": { ... }, "comparison": { ... } | null, "impact": { ... }, "doc_drift": { ... } }`

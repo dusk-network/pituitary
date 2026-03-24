@@ -23,6 +23,7 @@ func TestRunCommandHelpAcrossSurface(t *testing.T) {
 		"check-terminology": {"usage: pituitary [--config PATH] check-terminology --term TERM... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] [--format FORMAT]", "shared config resolution:", "--term VALUE", "--canonical-term VALUE", "--scope VALUE"},
 		"check-compliance":  {"usage: pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--diff-file VALUE"},
 		"check-doc-drift":   {"usage: pituitary [--config PATH] check-doc-drift", "shared config resolution:", "--doc-ref VALUE", "--scope VALUE"},
+		"fix":               {"usage: pituitary [--config PATH] fix (--path PATH | --scope VALUE) [--dry-run] [--yes] [--format FORMAT]", "shared config resolution:", "--path VALUE", "--scope VALUE", "--dry-run", "--yes"},
 		"review-spec":       {"usage: pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-record-file VALUE"},
 		"serve":             {"usage: pituitary [--config PATH] serve", "shared config resolution:", "--transport VALUE"},
 	}
