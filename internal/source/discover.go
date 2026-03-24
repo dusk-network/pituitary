@@ -258,10 +258,14 @@ func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCa
 	for _, token := range pathTokens {
 		pathSet[token] = struct{}{}
 	}
+	titleTokens := make(map[string]struct{}, len(discoveryTokens(titleLower)))
+	for _, token := range discoveryTokens(titleLower) {
+		titleTokens[token] = struct{}{}
+	}
 
 	lines := strings.Split(string(body), "\n")
 	contractScore, contractReasons := scoreMarkdownContractCandidate(pathSet, titleLower, lines)
-	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower)
+	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower, titleTokens)
 
 	switch {
 	case contractScore >= 3 && contractScore >= docScore+1:
@@ -325,7 +329,7 @@ func scoreMarkdownContractCandidate(pathTokens map[string]struct{}, titleLower s
 	return score, reasons
 }
 
-func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string) (int, []string) {
+func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string, titleTokens map[string]struct{}) (int, []string) {
 	var (
 		score   int
 		reasons []string
@@ -338,7 +342,7 @@ func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string
 		score++
 		reasons = append(reasons, "lives under a docs path")
 	}
-	if containsAny(titleLower, "guide", "runbook", "playbook", "manual", "operator", "operations", "reference") {
+	if hasAnyDiscoveryToken(titleTokens, "guide", "runbook", "playbook", "manual", "operator", "operations", "reference") {
 		score++
 		reasons = append(reasons, "title looks like a guide, runbook, operations, or reference document")
 	}

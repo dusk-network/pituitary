@@ -37,6 +37,9 @@ Applies To:
 	mustWriteFile(t, filepath.Join(repo, "docs", "reference", "rate-limit-keys.md"), `
 # Rate Limit Reference
 `)
+	mustWriteFile(t, filepath.Join(repo, "docs", "misc", "preferences.md"), `
+# Preferences
+`)
 	mustWriteFile(t, filepath.Join(repo, "docs", "development", "testing-guide.md"), `
 # Testing Guide
 `)
