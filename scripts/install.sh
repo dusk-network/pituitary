@@ -20,7 +20,8 @@ need_cmd() {
 resolve_version() {
   version_input="${PITUITARY_VERSION:-${1:-latest}}"
   if [ "$version_input" = "latest" ]; then
-    tag="$(gh api "repos/${REPO}/releases/latest" -q .tag_name)"
+    tag="$(gh api "repos/${REPO}/releases/latest" -q .tag_name)" \
+      || fail "failed to resolve the latest release tag"
     [ -n "$tag" ] || fail "failed to resolve the latest release tag"
   else
     case "$version_input" in
@@ -50,7 +51,9 @@ detect_platform() {
 
   case "${os_slug}/${arch_slug}" in
     linux/amd64|macOS/arm64) ;;
-    *) fail "unsupported release target: ${os_slug}/${arch_slug}" ;;
+    *)
+      fail "unsupported release target: ${os_slug}/${arch_slug}. Supported targets are linux/amd64 and macOS/arm64. For other platforms, install pituitary manually from GitHub Releases: https://github.com/${REPO}/releases"
+      ;;
   esac
 
   archive="pituitary_${version}_${os_slug}_${arch_slug}.tar.gz"

@@ -3,7 +3,6 @@
 set -eu
 
 REPO="dusk-network/pituitary"
-TAP_REPO="dusk-network/homebrew-tap"
 
 log() {
   printf '%s\n' "$*" >&2

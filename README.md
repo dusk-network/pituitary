@@ -34,6 +34,13 @@ gh api repos/dusk-network/pituitary/contents/scripts/install.sh?ref=main \
 
 Because `dusk-network/pituitary` is currently private, both install paths require GitHub authentication with access to that repository. The installer downloads the latest released archive for the current platform through `gh release download`, verifies it against the published checksum manifest, and installs `pituitary` to `/usr/local/bin` when that path is writable or `~/.local/bin` otherwise.
 
+The current released binary targets are:
+
+- `linux/amd64`
+- `macOS/arm64`
+
+If you need a different platform, fall back to manual download from [GitHub Releases](https://github.com/dusk-network/pituitary/releases).
+
 You can also pin the release or install directory:
 
 ```sh
