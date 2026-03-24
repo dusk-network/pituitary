@@ -1,6 +1,9 @@
 package ranking
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSearchPrefersHistoricalContext(t *testing.T) {
 	t.Parallel()
@@ -39,7 +42,7 @@ func TestAdjustHistoricalSectionScoreDownranksByDefault(t *testing.T) {
 	if got >= 0.9 {
 		t.Fatalf("adjusted score = %.3f, want historical down-rank", got)
 	}
-	if want := 0.63; got != want {
+	if want := 0.63; math.Abs(got-want) > 1e-9 {
 		t.Fatalf("adjusted score = %.3f, want %.3f", got, want)
 	}
 	if got := AdjustHistoricalSectionScore(0.9, "Spec / Historical provenance", true); got != 0.9 {

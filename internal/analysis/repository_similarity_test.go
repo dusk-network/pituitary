@@ -44,7 +44,15 @@ func TestShortlistScoresForEmbeddingDownranksHistoricalDocSections(t *testing.T)
 	if err != nil {
 		t.Fatalf("repo.shortlistScoresForEmbedding() error = %v", err)
 	}
-	if scores["doc://guides/current-locality"] <= scores["doc://guides/locality-history"] {
+	currentScore, ok := scores["doc://guides/current-locality"]
+	if !ok {
+		t.Fatalf("doc scores = %+v, want active doc score present", scores)
+	}
+	historicalScore, ok := scores["doc://guides/locality-history"]
+	if !ok {
+		t.Fatalf("doc scores = %+v, want historical doc score present", scores)
+	}
+	if currentScore <= historicalScore {
 		t.Fatalf("doc scores = %+v, want active doc ahead of historical provenance doc", scores)
 	}
 }
@@ -84,7 +92,15 @@ func TestShortlistScoresForEmbeddingDownranksHistoricalSpecSectionsForDocDrift(t
 	if err != nil {
 		t.Fatalf("repo.shortlistScoresForEmbedding() error = %v", err)
 	}
-	if scores["SPEC-LOCALITY"] <= scores["SPEC-LEGACY-CONTEXT"] {
+	currentScore, ok := scores["SPEC-LOCALITY"]
+	if !ok {
+		t.Fatalf("spec scores = %+v, want active spec score present", scores)
+	}
+	historicalScore, ok := scores["SPEC-LEGACY-CONTEXT"]
+	if !ok {
+		t.Fatalf("spec scores = %+v, want historical spec score present", scores)
+	}
+	if currentScore <= historicalScore {
 		t.Fatalf("spec scores = %+v, want active spec ahead of historical provenance spec", scores)
 	}
 }
