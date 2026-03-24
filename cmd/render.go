@@ -93,13 +93,26 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	if result.DryRun {
 		fmt.Fprintf(w, "dry run validated %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 		fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
+		renderIndexReuseSummary(w, result)
 		renderIndexSourceSummaries(w, result.Sources)
 		fmt.Fprintln(w, "database write: skipped")
 		return
 	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+	renderIndexReuseSummary(w, result)
 	renderIndexSourceSummaries(w, result.Sources)
+}
+
+func renderIndexReuseSummary(w io.Writer, result *index.RebuildResult) {
+	if result.FullRebuild {
+		fmt.Fprintln(w, "rebuild mode: full")
+	} else {
+		fmt.Fprintln(w, "rebuild mode: incremental")
+	}
+	fmt.Fprintf(w, "reused artifacts: %d\n", result.ReusedArtifactCount)
+	fmt.Fprintf(w, "reused chunks: %d\n", result.ReusedChunkCount)
+	fmt.Fprintf(w, "embedded chunks: %d\n", result.EmbeddedChunkCount)
 }
 
 func renderDiscoverResult(w io.Writer, result *source.DiscoverResult) {

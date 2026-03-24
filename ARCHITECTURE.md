@@ -515,16 +515,17 @@ pituitary index --rebuild
 
   1. Create pituitary.db.new
   2. Load all records from configured adapters
-  3. Populate artifacts + edges
-  4. Chunk text and populate chunks + chunks_vec
-  5. Run integrity checks
-  6. Rename pituitary.db.new -> pituitary.db
-  7. On failure: delete pituitary.db.new, keep existing index untouched
+  3. Reuse unchanged chunk vectors from the active index when schema + fingerprints still match
+  4. Populate artifacts + edges
+  5. Chunk text and populate chunks + chunks_vec
+  6. Run integrity checks
+  7. Rename pituitary.db.new -> pituitary.db
+  8. On failure: delete pituitary.db.new, keep existing index untouched
 ```
 
 To make the swap visible to a running process, tool handlers should open a fresh read-only SQLite connection per request, or explicitly reload when the active index generation changes.
 
-**V1 simplification:** full rebuilds should be the default and the only required mode. Incremental updates are optional later if rebuild time becomes a measured bottleneck.
+By default, `pituitary index --rebuild` should reuse unchanged chunk embeddings when the active index has the same schema version, embedder fingerprint, and source fingerprint. `pituitary index --rebuild --full` remains the escape hatch for a complete re-embed.
 
 #### Scaling Path
 
@@ -587,8 +588,8 @@ CLI exit codes should stay simple:
   - Request: `{ "check_runtime": "none" | "embedder" | "analysis" | "all" }`
   - Result: `{ "workspace_root": "...", "config_path": "...", "config_resolution": { "selected_by": "command_flag" | "global_flag" | "env" | "discovered_local", "reason": "...", "candidates": [{ "precedence": 1, "source": "...", "path": "...", "status": "selected" | "shadowed" | "not_set" | "missing", "detail": "..." }] }, "index_path": "...", "index_exists": true, "freshness": { "state": "missing" | "fresh" | "stale" | "incompatible", "action": "run `pituitary index --rebuild`", "issues": [{ "kind": "...", "message": "...", "indexed": "...", "current": "..." }] }, "spec_count": N, "doc_count": N, "chunk_count": N, "artifact_locations": { "index_dir": "...", "discover_config_path": "...", "canonicalize_bundle_root": "...", "ignore_patterns": [".pituitary/"], "relocation_hints": ["..."] }, "runtime": { ... } | null }`
 - `index` (`pituitary index --rebuild`)
-  - Request: `{ "rebuild": true }`
-  - Result: `{ "workspace_root": ".", "index_path": ".pituitary/pituitary.db", "artifact_counts": { "spec": N, "doc": N }, "chunk_count": N, "edge_count": N }`
+  - Request: `{ "rebuild": true, "full": false }`
+  - Result: `{ "workspace_root": ".", "index_path": ".pituitary/pituitary.db", "artifact_counts": { "spec": N, "doc": N }, "chunk_count": N, "edge_count": N, "full_rebuild": false, "reused_artifact_count": N, "reused_chunk_count": N, "embedded_chunk_count": N }`
 - `search_specs` (`pituitary search-specs`)
   - Request: `{ "query": "...", "filters": { "domain": "...", "statuses": ["accepted"] }, "limit": 10 }`
   - Result: `{ "matches": [{ "ref": "SPEC-042", "title": "...", "section_heading": "...", "score": 0.0, "excerpt": "...", "source_ref": "file://..." }] }`
@@ -963,7 +964,6 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 
 - Non-filesystem source adapters
 - GitHub-specific flows and vendor-specific CI/reporting integrations
-- Incremental indexing
 - Stored code embeddings or code-summary corpora
 
 ---
@@ -972,7 +972,7 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 
 The first shipping slice is done when all of the following are true:
 
-1. `pituitary index --rebuild` reads `pituitary.toml`, builds a fresh SQLite index, and swaps it atomically.
+1. `pituitary index --rebuild` reads `pituitary.toml`, reuses unchanged chunk embeddings when safe, builds a fresh SQLite index in a staging DB, and swaps it atomically.
 2. A fixture workspace with at least three specs and two docs can be indexed without manual intervention.
 3. `pituitary search-specs --query "..." --format json` returns ranked spec sections with stable artifact refs.
 4. `pituitary check-overlap --path specs/<bundle> --format json` detects a known overlapping fixture pair without requiring a ref lookup first.
