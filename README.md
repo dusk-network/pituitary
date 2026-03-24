@@ -248,6 +248,8 @@ Pass `--format json` to any command to get this format, suitable for piping into
 
 Use `check-terminology` when accepted specs have moved to new kernel terms and you need a hybrid lexical-plus-semantic audit across related docs and specs.
 
+The audit reports exact actionable mentions only. Compatibility-only migration notes such as explicit compatibility/debug projections are suppressed so they do not drown out canonical misuse.
+
 ```sh
 $ ./pituitary check-terminology \
     --term repo \

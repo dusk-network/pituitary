@@ -42,11 +42,15 @@ func TestRunCheckTerminologyReportsAnchoredFindings(t *testing.T) {
 		"pituitary check-terminology: audit terminology consistency after conceptual changes",
 		"anchor spec: SPEC-LOCALITY",
 		"doc://guides/repo-kernel | doc | Repo Kernel Guide | terms: repo, workflow",
+		"assessment: exact match in body text without compatibility-only markers",
 		"evidence: SPEC-LOCALITY | Kernel Locality Contract / Core Model",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("runCheckTerminology() output %q does not contain %q", out, want)
 		}
+	}
+	if strings.Contains(out, "repo-compatibility") {
+		t.Fatalf("runCheckTerminology() output %q unexpectedly contains compatibility-only doc", out)
 	}
 }
 
@@ -88,6 +92,11 @@ The runtime is locality-centric and treats repository adapters as optional exten
 
 The kernel keeps workflow continuity in each repo.
 Repository storage is the default operator model.
+`)
+	mustWriteFileCmd(t, root+"/docs/guides/repo-compatibility.md", `
+# Repo Compatibility Notes
+
+Legacy repo references remain available only as a compatibility alias during migration to locality.
 `)
 	mustWriteIndexFixture(t, root, `
 [workspace]

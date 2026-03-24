@@ -225,9 +225,10 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 				Terms:     []string{"repo", "workflow"},
 				Sections: []analysis.TerminologySectionFinding{
 					{
-						Section: "Core Model",
-						Terms:   []string{"repo"},
-						Excerpt: "The kernel keeps workflow continuity in each repo.",
+						Section:    "Core Model",
+						Terms:      []string{"repo"},
+						Excerpt:    "The kernel keeps workflow continuity in each repo.",
+						Assessment: "exact match in body text without compatibility-only markers",
 						Evidence: &analysis.TerminologyEvidence{
 							SpecRef: "SPEC-LOCALITY",
 							Section: "Core Model",
@@ -249,6 +250,7 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 		"canonical terms: locality, continuity",
 		"evidence specs: SPEC-LOCALITY",
 		"doc://guides/repo-kernel | doc | Repo Kernel Guide | terms: repo, workflow",
+		"assessment: exact match in body text without compatibility-only markers",
 		"evidence: SPEC-LOCALITY | Core Model | 0.812",
 	} {
 		if !strings.Contains(output, want) {

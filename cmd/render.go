@@ -506,6 +506,9 @@ func renderTerminologyAuditResult(w io.Writer, result *analysis.TerminologyAudit
 			if section.Excerpt != "" {
 				fmt.Fprintf(w, "     excerpt: %s\n", section.Excerpt)
 			}
+			if section.Assessment != "" {
+				fmt.Fprintf(w, "     assessment: %s\n", section.Assessment)
+			}
 			if section.Evidence != nil {
 				fmt.Fprintf(w, "     evidence: %s | %s | %.3f\n", section.Evidence.SpecRef, section.Evidence.Section, section.Evidence.Score)
 				if section.Evidence.Excerpt != "" {

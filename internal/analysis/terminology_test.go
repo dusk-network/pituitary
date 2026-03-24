@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -51,6 +52,9 @@ func TestCheckTerminologyAnchorsFindingsToAcceptedSpec(t *testing.T) {
 			t.Fatalf("finding = %+v, want section evidence", finding)
 		}
 		for _, section := range finding.Sections {
+			if section.Assessment == "" {
+				t.Fatalf("section = %+v, want assessment", section)
+			}
 			if section.Evidence == nil {
 				t.Fatalf("section = %+v, want canonical evidence", section)
 			}
@@ -101,6 +105,88 @@ func TestCheckTerminologyWorkspaceScopeUsesCanonicalTerms(t *testing.T) {
 	}
 }
 
+func TestCheckTerminologySuppressesCompatibilityOnlyMentions(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadTerminologyFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckTerminology(cfg, TerminologyAuditRequest{
+		Terms:          []string{"repo"},
+		CanonicalTerms: []string{"locality"},
+		SpecRef:        "SPEC-LOCALITY",
+		Scope:          "docs",
+	})
+	if err != nil {
+		t.Fatalf("CheckTerminology() error = %v", err)
+	}
+	for _, finding := range result.Findings {
+		if finding.Ref == "doc://guides/repo-compatibility" {
+			t.Fatalf("findings = %+v, did not expect compatibility-only doc", result.Findings)
+		}
+	}
+}
+
+func TestCheckTerminologyRebuildDropsRemovedLegacyTerms(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadTerminologyFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckTerminology(cfg, TerminologyAuditRequest{
+		Terms:          []string{"repo"},
+		CanonicalTerms: []string{"locality"},
+		Scope:          "docs",
+	})
+	if err != nil {
+		t.Fatalf("CheckTerminology() error = %v", err)
+	}
+	if len(result.Findings) != 1 || result.Findings[0].Ref != "doc://guides/repo-kernel" {
+		t.Fatalf("initial findings = %+v, want stale repo guide only", result.Findings)
+	}
+
+	if err := os.WriteFile(filepath.Join(cfg.Workspace.RootPath, "docs", "guides", "repo-kernel.md"), []byte(`
+# Locality Kernel Guide
+
+The kernel keeps continuity in each locality.
+Locality storage is the default operator model.
+`), 0o644); err != nil {
+		t.Fatalf("rewrite stale doc: %v", err)
+	}
+
+	records, err = source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() after rewrite error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() after rewrite error = %v", err)
+	}
+
+	result, err = CheckTerminology(cfg, TerminologyAuditRequest{
+		Terms:          []string{"repo"},
+		CanonicalTerms: []string{"locality"},
+		Scope:          "docs",
+	})
+	if err != nil {
+		t.Fatalf("CheckTerminology() after rewrite error = %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("findings after rewrite = %+v, want none", result.Findings)
+	}
+}
+
 func loadTerminologyFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 
@@ -148,6 +234,11 @@ Repository metadata remains the default storage boundary for operators.
 
 The kernel keeps workflow continuity in each repo.
 Repository storage is the default operator model.
+`)
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "repo-compatibility.md"), `
+# Repo Compatibility Notes
+
+Legacy repo references remain available only as a compatibility alias during migration to locality.
 `)
 	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "locality-kernel.md"), `
 # Locality Kernel Guide
