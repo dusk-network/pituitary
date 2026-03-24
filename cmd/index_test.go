@@ -531,6 +531,178 @@ func TestRunIndexDryRunDoesNotModifyExistingDatabase(t *testing.T) {
 	}
 }
 
+func TestRunIndexRebuildReusesUnchangedCorpus(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var firstStdout bytes.Buffer
+	var firstStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &firstStdout, &firstStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("initial runIndex(--rebuild) exit code = %d, want 0 (stderr: %q)", exitCode, firstStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("second runIndex(--rebuild) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("second runIndex(--rebuild) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Rebuild bool `json:"rebuild"`
+			Full    bool `json:"full"`
+		} `json:"request"`
+		Result struct {
+			FullRebuild         bool `json:"full_rebuild"`
+			ArtifactCount       int  `json:"artifact_count"`
+			ChunkCount          int  `json:"chunk_count"`
+			ReusedArtifactCount int  `json:"reused_artifact_count"`
+			ReusedChunkCount    int  `json:"reused_chunk_count"`
+			EmbeddedChunkCount  int  `json:"embedded_chunk_count"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal incremental rebuild payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if !payload.Request.Rebuild || payload.Request.Full {
+		t.Fatalf("request = %+v, want rebuild=true full=false", payload.Request)
+	}
+	if payload.Result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental rebuild mode", payload.Result)
+	}
+	if payload.Result.ArtifactCount != 5 || payload.Result.ChunkCount != 17 {
+		t.Fatalf("result = %+v, want 5 artifacts and 17 chunks", payload.Result)
+	}
+	if payload.Result.ReusedArtifactCount != 5 || payload.Result.ReusedChunkCount != 17 || payload.Result.EmbeddedChunkCount != 0 {
+		t.Fatalf("result = %+v, want full vector reuse on unchanged corpus", payload.Result)
+	}
+}
+
+func TestRunIndexFullForcesReembedding(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var firstStdout bytes.Buffer
+	var firstStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &firstStdout, &firstStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("initial runIndex(--rebuild) exit code = %d, want 0 (stderr: %q)", exitCode, firstStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--full", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex(--rebuild --full) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runIndex(--rebuild --full) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Full bool `json:"full"`
+		} `json:"request"`
+		Result struct {
+			FullRebuild         bool `json:"full_rebuild"`
+			ReusedArtifactCount int  `json:"reused_artifact_count"`
+			ReusedChunkCount    int  `json:"reused_chunk_count"`
+			EmbeddedChunkCount  int  `json:"embedded_chunk_count"`
+			ChunkCount          int  `json:"chunk_count"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal full rebuild payload: %v", err)
+	}
+	if !payload.Request.Full || !payload.Result.FullRebuild {
+		t.Fatalf("payload = %+v, want explicit full rebuild mode", payload)
+	}
+	if payload.Result.ReusedArtifactCount != 0 || payload.Result.ReusedChunkCount != 0 || payload.Result.EmbeddedChunkCount != payload.Result.ChunkCount {
+		t.Fatalf("result = %+v, want zero reuse and full re-embedding", payload.Result)
+	}
+}
+
+func TestRunIndexRebuildReusesOnlyUnchangedSections(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var firstStdout bytes.Buffer
+	var firstStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &firstStdout, &firstStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("initial runIndex(--rebuild) exit code = %d, want 0 (stderr: %q)", exitCode, firstStderr.String())
+	}
+
+	mustWriteFileCmd(t, filepath.Join(repo, "docs", "guides", "api-rate-limits.md"), `
+# Public API Rate Limits
+
+## Default Limit
+
+Tenant-scoped rate limits default to 200 requests per minute.
+
+## Configuration
+
+Limits are configured in src/api/config/limits.yaml.
+
+## Operational Notes
+
+Avoid per-api-key fallback modes for accepted tenants.
+
+## Rollout Notes
+
+Canary the new limiter before the full rollout.
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("incremental runIndex(--rebuild) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("incremental runIndex(--rebuild) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			ChunkCount          int `json:"chunk_count"`
+			ReusedArtifactCount int `json:"reused_artifact_count"`
+			ReusedChunkCount    int `json:"reused_chunk_count"`
+			EmbeddedChunkCount  int `json:"embedded_chunk_count"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal partial reuse payload: %v", err)
+	}
+	if payload.Result.ReusedArtifactCount == 0 {
+		t.Fatalf("result = %+v, want unchanged artifacts to be reused", payload.Result)
+	}
+	if payload.Result.ReusedChunkCount == 0 || payload.Result.EmbeddedChunkCount == 0 {
+		t.Fatalf("result = %+v, want both reused and embedded chunks after one doc changes", payload.Result)
+	}
+	if payload.Result.EmbeddedChunkCount >= payload.Result.ChunkCount {
+		t.Fatalf("result = %+v, want only a subset of chunks to be re-embedded", payload.Result)
+	}
+}
+
 func mustWriteIndexFixture(t *testing.T, dir, content string) {
 	t.Helper()
 	path := filepath.Join(dir, "pituitary.toml")

@@ -23,16 +23,25 @@ const schemaVersion = 3
 
 // RebuildResult reports the staged rebuild outcome.
 type RebuildResult struct {
-	DryRun             bool                       `json:"dry_run,omitempty"`
-	IndexPath          string                     `json:"index_path"`
-	ArtifactCount      int                        `json:"artifact_count"`
-	SpecCount          int                        `json:"spec_count"`
-	DocCount           int                        `json:"doc_count"`
-	ChunkCount         int                        `json:"chunk_count"`
-	EdgeCount          int                        `json:"edge_count"`
-	EmbedderDimension  int                        `json:"embedder_dimension"`
-	ContentFingerprint string                     `json:"content_fingerprint"`
-	Sources            []source.LoadSourceSummary `json:"sources,omitempty"`
+	DryRun              bool                       `json:"dry_run,omitempty"`
+	IndexPath           string                     `json:"index_path"`
+	FullRebuild         bool                       `json:"full_rebuild,omitempty"`
+	ArtifactCount       int                        `json:"artifact_count"`
+	SpecCount           int                        `json:"spec_count"`
+	DocCount            int                        `json:"doc_count"`
+	ChunkCount          int                        `json:"chunk_count"`
+	EdgeCount           int                        `json:"edge_count"`
+	EmbedderDimension   int                        `json:"embedder_dimension"`
+	ReusedArtifactCount int                        `json:"reused_artifact_count,omitempty"`
+	ReusedChunkCount    int                        `json:"reused_chunk_count,omitempty"`
+	EmbeddedChunkCount  int                        `json:"embedded_chunk_count,omitempty"`
+	ContentFingerprint  string                     `json:"content_fingerprint"`
+	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`
+}
+
+// RebuildOptions controls optional rebuild behavior.
+type RebuildOptions struct {
+	Full bool
 }
 
 // RebuildProgressEvent reports one text-mode rebuild progress update.
@@ -50,22 +59,27 @@ type RebuildProgressReporter func(RebuildProgressEvent)
 
 // Rebuild writes a fresh staging database and atomically swaps it into place.
 func Rebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	return RebuildContext(context.Background(), cfg, records)
+	return RebuildContextWithOptions(context.Background(), cfg, records, RebuildOptions{})
 }
 
 // RebuildWithProgressContext writes a fresh staging database, atomically swaps it into place,
 // and reports chunking/embedding progress through the provided callback.
 func RebuildWithProgressContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
-	return rebuildContext(ctx, cfg, records, reporter)
+	return RebuildWithProgressContextAndOptions(ctx, cfg, records, RebuildOptions{}, reporter)
 }
 
 // PrepareRebuild validates rebuild prerequisites and summarizes the pending index contents without writing a database.
 func PrepareRebuild(cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	return PrepareRebuildContext(context.Background(), cfg, records)
+	return PrepareRebuildContextWithOptions(context.Background(), cfg, records, RebuildOptions{})
 }
 
 // PrepareRebuildContext validates rebuild prerequisites and summarizes the pending index contents without writing a database.
 func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
+	return PrepareRebuildContextWithOptions(ctx, cfg, records, RebuildOptions{})
+}
+
+// PrepareRebuildContextWithOptions validates rebuild prerequisites and summarizes the pending index contents without writing a database.
+func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options RebuildOptions) (*RebuildResult, error) {
 	embedder, err := prepareRebuildContext(ctx, cfg, records)
 	if err != nil {
 		return nil, err
@@ -77,8 +91,12 @@ func PrepareRebuildContext(ctx context.Context, cfg *config.Config, records *sou
 	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, dimension); err != nil {
 		return nil, err
 	}
+	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), options)
+	if err != nil {
+		return nil, err
+	}
 
-	result := summarizeRebuild(records, dimension)
+	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
 	return result, nil
@@ -107,15 +125,29 @@ func prepareDryRunPreflightContext(ctx context.Context, indexPath string, dimens
 
 // RebuildContext writes a fresh staging database and atomically swaps it into place.
 func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	return rebuildContext(ctx, cfg, records, nil)
+	return RebuildContextWithOptions(ctx, cfg, records, RebuildOptions{})
 }
 
-func rebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+// RebuildContextWithOptions writes a fresh staging database with explicit rebuild options.
+func RebuildContextWithOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options RebuildOptions) (*RebuildResult, error) {
+	return rebuildContext(ctx, cfg, records, options, nil)
+}
+
+// RebuildWithProgressContextAndOptions writes a fresh staging database with progress reporting and explicit rebuild options.
+func RebuildWithProgressContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options RebuildOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
+	return rebuildContext(ctx, cfg, records, options, reporter)
+}
+
+func rebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, options RebuildOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	embedder, err := prepareRebuildContext(ctx, cfg, records)
 	if err != nil {
 		return nil, err
 	}
 	dimension, err := embedder.Dimension(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), options)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +170,7 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		}
 	}()
 
-	result, err := buildStagingContext(ctx, db, cfg, dimension, embedder, records, reporter)
+	result, err := buildStagingContext(ctx, db, cfg, dimension, embedder, records, reuseState, options, reporter)
 	if err != nil {
 		return nil, err
 	}
@@ -331,31 +363,11 @@ func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimensio
 	return nil
 }
 
-func summarizeRebuild(records *source.LoadResult, dimension int) *RebuildResult {
-	result := &RebuildResult{
-		ArtifactCount:     len(records.Specs) + len(records.Docs),
-		SpecCount:         len(records.Specs),
-		DocCount:          len(records.Docs),
-		EmbedderDimension: dimension,
-		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
-	}
-
-	for _, spec := range records.Specs {
-		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
-		result.EdgeCount += len(spec.Relations) + len(spec.AppliesTo)
-	}
-	for _, doc := range records.Docs {
-		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
-	}
-	result.ContentFingerprint = contentFingerprint(records)
-	return result
-}
-
 func buildStaging(db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
-	return buildStagingContext(context.Background(), db, cfg, dimension, embedder, records, nil)
+	return buildStagingContext(context.Background(), db, cfg, dimension, embedder, records, &reuseState{artifacts: map[string]storedArtifact{}}, RebuildOptions{}, nil)
 }
 
-func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, state *reuseState, options RebuildOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	if err := createSchemaContext(ctx, db, dimension); err != nil {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
@@ -372,6 +384,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 
 	result := &RebuildResult{
 		EmbedderDimension: dimension,
+		FullRebuild:       options.Full,
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
 	totalArtifacts := len(records.Specs) + len(records.Docs)
@@ -419,7 +432,8 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 		result.ArtifactCount++
 		result.SpecCount++
 
-		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, spec.BodyText, RebuildProgressEvent{
+		plan := planArtifactReuse(spec.Title, spec.ContentHash, spec.BodyText, storedArtifactForRecord(state, spec.Ref))
+		chunkCount, reusedCount, embeddedCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, plan, RebuildProgressEvent{
 			ArtifactKind: model.ArtifactKindSpec,
 			ArtifactRef:  spec.Ref,
 			Current:      currentArtifact,
@@ -429,6 +443,11 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 			return nil, err
 		}
 		result.ChunkCount += chunkCount
+		result.ReusedChunkCount += reusedCount
+		result.EmbeddedChunkCount += embeddedCount
+		if plan.artifactUnchanged {
+			result.ReusedArtifactCount++
+		}
 
 		for _, relation := range spec.Relations {
 			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type)); err != nil {
@@ -455,7 +474,8 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 		result.ArtifactCount++
 		result.DocCount++
 
-		chunkCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, doc.BodyText, RebuildProgressEvent{
+		plan := planArtifactReuse(doc.Title, doc.ContentHash, doc.BodyText, storedArtifactForRecord(state, doc.Ref))
+		chunkCount, reusedCount, embeddedCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, plan, RebuildProgressEvent{
 			ArtifactKind: model.ArtifactKindDoc,
 			ArtifactRef:  doc.Ref,
 			Current:      currentArtifact,
@@ -465,6 +485,11 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 			return nil, err
 		}
 		result.ChunkCount += chunkCount
+		result.ReusedChunkCount += reusedCount
+		result.EmbeddedChunkCount += embeddedCount
+		if plan.artifactUnchanged {
+			result.ReusedArtifactCount++
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -601,54 +626,76 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 }
 
 func insertArtifactChunks(chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string) error {
-	_, err := insertArtifactChunksContext(context.Background(), chunkStmt, vectorStmt, embedder, artifactRef, title, body, RebuildProgressEvent{}, nil)
+	plan := planArtifactReuse(title, "", body, storedArtifact{})
+	_, _, _, err := insertArtifactChunksContext(context.Background(), chunkStmt, vectorStmt, embedder, artifactRef, title, plan, RebuildProgressEvent{}, nil)
 	return err
 }
 
-func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, error) {
+func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title string, plan artifactChunkPlan, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, int, int, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, 0, 0, err
 	}
-	sections := chunk.Markdown(title, body)
+	sections := plan.sections
 	event.Phase = "chunking"
 	event.ChunkCount = len(sections)
 	reportRebuildProgress(reporter, event)
 	if len(sections) == 0 {
-		return 0, nil
+		return 0, 0, 0, nil
 	}
 
 	texts := make([]string, 0, len(sections))
+	sectionKeys := make([]string, 0, len(sections))
 	for _, section := range sections {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, 0, 0, err
+		}
+		key := reuseChunkKey(title, section.Heading, section.Body)
+		sectionKeys = append(sectionKeys, key)
+		if _, ok := plan.reusedEmbeddings[key]; ok {
+			continue
 		}
 		texts = append(texts, textForEmbedding(title, section))
 	}
 
-	event.Phase = "embedding"
-	reportRebuildProgress(reporter, event)
-	vectors, err := embedder.EmbedDocuments(ctx, texts)
-	if err != nil {
-		return 0, fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
-	}
-	if len(vectors) != len(sections) {
-		return 0, fmt.Errorf("embed chunks for %s: returned %d vector(s) for %d section(s)", artifactRef, len(vectors), len(sections))
+	vectors := make([][]float64, 0, len(texts))
+	if len(texts) > 0 {
+		var err error
+		event.Phase = "embedding"
+		reportRebuildProgress(reporter, event)
+		vectors, err = embedder.EmbedDocuments(ctx, texts)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
+		}
+		if len(vectors) != len(texts) {
+			return 0, 0, 0, fmt.Errorf("embed chunks for %s: returned %d vector(s) for %d new section(s)", artifactRef, len(vectors), len(texts))
+		}
 	}
 
+	newVectorIndex := 0
 	for i, section := range sections {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return 0, 0, 0, err
 		}
 		chunkID, err := insertChunkContext(ctx, chunkStmt, artifactRef, section.Heading, section.Body)
 		if err != nil {
-			return 0, err
+			return 0, 0, 0, err
 		}
-		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, len(vectors[i]), vectors[i]); err != nil {
-			return 0, err
+		if embeddingBlob, ok := plan.reusedEmbeddings[sectionKeys[i]]; ok {
+			if err := insertChunkVectorBlobContext(ctx, vectorStmt, chunkID, embeddingBlob); err != nil {
+				return 0, 0, 0, err
+			}
+			continue
 		}
+		if newVectorIndex >= len(vectors) {
+			return 0, 0, 0, fmt.Errorf("embed chunks for %s: missing vector for section %q", artifactRef, section.Heading)
+		}
+		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, len(vectors[newVectorIndex]), vectors[newVectorIndex]); err != nil {
+			return 0, 0, 0, err
+		}
+		newVectorIndex++
 	}
 
-	return len(sections), nil
+	return len(sections), plan.reusedChunkCount, plan.embeddedChunkCount, nil
 }
 
 func reportRebuildProgress(reporter RebuildProgressReporter, event RebuildProgressEvent) {
@@ -683,6 +730,10 @@ func insertChunkVectorContext(ctx context.Context, stmt *sql.Stmt, chunkID int64
 	if err != nil {
 		return fmt.Errorf("encode chunk vector %d: %w", chunkID, err)
 	}
+	return insertChunkVectorBlobContext(ctx, stmt, chunkID, embeddingBlob)
+}
+
+func insertChunkVectorBlobContext(ctx context.Context, stmt *sql.Stmt, chunkID int64, embeddingBlob []byte) error {
 	if _, err := stmt.ExecContext(ctx, chunkID, embeddingBlob); err != nil {
 		return fmt.Errorf("insert chunk vector %d: %w", chunkID, err)
 	}

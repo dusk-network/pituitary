@@ -86,11 +86,14 @@ When you run `pituitary index --rebuild`, Pituitary:
 
 1. Discovers all spec bundles and Markdown docs in your configured sources.
 2. Chunks the content by heading-aware sections.
-3. Generates embeddings for each chunk.
-4. Stores everything — metadata, embeddings, and dependency graph — in a single SQLite database.
-5. Writes to a staging DB first and atomically swaps it in, so a failed rebuild never corrupts your index.
+3. Reuses unchanged chunk embeddings from the current index when the embedder and source fingerprints still match.
+4. Generates fresh embeddings only for new or changed chunks.
+5. Stores everything — metadata, embeddings, and dependency graph — in a single SQLite database.
+6. Writes to a staging DB first and atomically swaps it in, so a failed rebuild never corrupts your index.
 
 Pituitary also stores source and content fingerprints in the index. Search and analysis commands compare those fingerprints against the current workspace before returning results, so stale or incompatible indexes fail fast with a rebuild hint instead of silently serving outdated findings.
+
+If you need to ignore reuse and force a complete re-embed, run `pituitary index --rebuild --full`.
 
 The workspace is configured with a `pituitary.toml` at your project root:
 
@@ -183,7 +186,8 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `preview-sources` | Show which files each configured source will index |
 | `explain-file docs/guides/api-rate-limits.md` | Explain how one file is classified by configured sources |
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
-| `index --rebuild` | Rebuild the SQLite index from all configured sources |
+| `index --rebuild` | Rebuild the SQLite index from all configured sources, reusing unchanged chunk embeddings when safe |
+| `index --rebuild --full` | Force a full re-embed instead of reusing unchanged chunk embeddings |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
 | `status [--check-runtime all]` | Report index counts, config resolution, freshness, relation-graph health, artifact locations, and optionally probe embedder and analysis runtime readiness |
 | `version` | Print Pituitary and Go runtime version information |
@@ -203,7 +207,9 @@ By default, `search-specs` down-ranks sections that look like historical provena
 
 `check-overlap` keeps weaker structural matches visible, but it now reserves `merge_into_existing` for strong merge candidates. Mature accepted specs usually surface `review_boundaries` instead, so overlap stays visible without implying that every adjacency should collapse into one spec.
 
-`index --rebuild` and `index --dry-run` now validate the spec relation graph before touching SQLite. Cycles in `depends_on` or `supersedes`, plus contradictory `depends_on`/`supersedes` combinations, fail fast with the exact refs involved. `pituitary status` reports the same graph-health findings without requiring a rebuild.
+`index --rebuild` now keeps the atomic staging-DB swap, but it also reuses unchanged chunk embeddings by default when the current index has a matching schema, embedder fingerprint, and source fingerprint. Use `--full` to disable reuse and force a complete re-embed.
+
+`index --rebuild` and `index --dry-run` also validate the spec relation graph before touching SQLite. Cycles in `depends_on` or `supersedes`, plus contradictory `depends_on`/`supersedes` combinations, fail fast with the exact refs involved. `pituitary status` reports the same graph-health findings without requiring a rebuild.
 
 ### Example: full spec review
 
@@ -399,9 +405,9 @@ Key design decisions:
 
 Pituitary is in active development. The v1 shipping slice is functional: all core analysis commands work end-to-end. See the [GitHub issue queue](https://github.com/dusk-network/pituitary/issues) for active priorities and planned follow-up work.
 
-**What works today:** indexing, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
+**What works today:** indexing, incremental rebuild reuse, semantic search, overlap detection, spec comparison, impact analysis, terminology audits, code compliance, doc drift detection, composite review, JSON output, table output for `search-specs`, markdown output for `review-spec`, MCP server.
 
-**Coming next:** incremental indexing, non-filesystem source adapters, CI vendor integrations.
+**Coming next:** non-filesystem source adapters, CI vendor integrations, deeper compliance-direction RFC follow-up.
 
 ## Development
 
