@@ -133,6 +133,80 @@ func TestInspectFreshnessReportsIncompatibleWhenMetadataIsMissing(t *testing.T) 
 	}
 }
 
+func TestInspectFreshnessDoesNotRequireEmbedderCredentialsForFingerprintCheck(t *testing.T) {
+	cfg := loadFreshnessFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Runtime.Embedder = config.RuntimeProvider{
+		Provider:   config.RuntimeProviderOpenAI,
+		Model:      "nomic-ai/nomic-embed-text-v1.5",
+		Endpoint:   "http://127.0.0.1:1234/v1",
+		APIKeyEnv:  "PITUITARY_TEST_EMBEDDER_API_KEY",
+		TimeoutMS:  1000,
+		MaxRetries: 0,
+	}
+	t.Setenv("PITUITARY_TEST_EMBEDDER_API_KEY", "")
+
+	fingerprint, err := configuredEmbedderFingerprint(cfg.Runtime.Embedder)
+	if err != nil {
+		t.Fatalf("configuredEmbedderFingerprint() error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite3", cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`UPDATE metadata SET value = ? WHERE key = 'embedder_fingerprint'`, fingerprint); err != nil {
+		t.Fatalf("update embedder_fingerprint: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close writable db: %v", err)
+	}
+
+	status, err := InspectFreshnessContext(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if got, want := status.State, freshnessStateFresh; got != want {
+		t.Fatalf("freshness.state = %q, want %q", got, want)
+	}
+}
+
+func TestInspectFreshnessReturnsSourceMismatchBeforeReloadingWorkspaceContent(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFreshnessFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Sources[1].Include = []string{"reference/*.md"}
+	if err := os.RemoveAll(filepath.Join(cfg.Workspace.RootPath, "docs")); err != nil {
+		t.Fatalf("remove docs: %v", err)
+	}
+
+	status, err := InspectFreshnessContext(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if got, want := status.State, freshnessStateIncompatible; got != want {
+		t.Fatalf("freshness.state = %q, want %q", got, want)
+	}
+	if len(status.Issues) == 0 || status.Issues[0].Kind != "source_fingerprint_mismatch" {
+		t.Fatalf("freshness.issues = %+v, want source_fingerprint_mismatch", status.Issues)
+	}
+}
+
 func loadFreshnessFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 

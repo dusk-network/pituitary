@@ -94,17 +94,12 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		return nil, fmt.Errorf("index path %s is a directory", cfg.Workspace.ResolvedIndexPath)
 	}
 
-	embedder, err := newEmbedder(cfg.Runtime.Embedder)
+	configuredEmbedderFingerprint, err := configuredEmbedderFingerprint(cfg.Runtime.Embedder)
 	if err != nil {
 		return nil, err
 	}
 
-	records, err := source.LoadFromConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("load current sources for freshness check: %w", err)
-	}
 	currentSourceFingerprint := sourceFingerprint(cfg)
-	currentContentFingerprint := contentFingerprint(records)
 
 	db, err := OpenReadOnlyContext(ctx, cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
@@ -139,7 +134,6 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		})
 	}
 
-	configuredEmbedderFingerprint := strings.TrimSpace(embedder.Fingerprint())
 	switch stored := strings.TrimSpace(metadata["embedder_fingerprint"]); {
 	case stored == "":
 		issues = append(issues, FreshnessIssue{
@@ -170,6 +164,21 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		})
 	}
 
+	if len(issues) != 0 {
+		status.Issues = issues
+		status.State = deriveFreshnessState(issues)
+		if status.State == freshnessStateFresh {
+			status.Action = ""
+		}
+		return status, nil
+	}
+
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("load current sources for freshness check: %w", err)
+	}
+	currentContentFingerprint := contentFingerprint(records)
+
 	switch stored := strings.TrimSpace(metadata["content_fingerprint"]); {
 	case stored == "":
 		issues = append(issues, FreshnessIssue{
@@ -191,6 +200,25 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		status.Action = ""
 	}
 	return status, nil
+}
+
+func configuredEmbedderFingerprint(provider config.RuntimeProvider) (string, error) {
+	switch provider.Provider {
+	case "", config.RuntimeProviderFixture:
+		if _, err := fixtureDimension(provider.Model); err != nil {
+			return "", err
+		}
+		return embedderFingerprint(config.RuntimeProviderFixture, provider.Model, embeddingStrategyPlain), nil
+	case config.RuntimeProviderOpenAI:
+		return embedderFingerprint(config.RuntimeProviderOpenAI, provider.Model, embeddingStrategyForModel(provider.Model)), nil
+	default:
+		return "", fmt.Errorf(
+			"runtime.embedder.provider %q is not supported; supported providers are %q and %q",
+			provider.Provider,
+			config.RuntimeProviderFixture,
+			config.RuntimeProviderOpenAI,
+		)
+	}
 }
 
 // ValidateFreshnessContext returns a stale-index error when the current workspace no longer matches the index metadata.
@@ -231,7 +259,6 @@ func contentFingerprint(records *source.LoadResult) string {
 	for _, doc := range records.Docs {
 		parts = append(parts, doc.Ref+":"+doc.ContentHash)
 	}
-	sort.Strings(parts)
 	return fingerprint(parts)
 }
 

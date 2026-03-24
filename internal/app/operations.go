@@ -268,6 +268,12 @@ func ensureFreshIndex(ctx context.Context, cfg *config.Config) *Issue {
 	switch {
 	case err == nil:
 		return nil
+	case index.IsDependencyUnavailable(err):
+		return &Issue{
+			Code:     CodeDependencyUnavailable,
+			Message:  FormatDependencyUnavailableMessage(cfg, err),
+			ExitCode: 3,
+		}
 	case index.IsStaleIndex(err):
 		return &Issue{
 			Code:     CodeConfigError,
