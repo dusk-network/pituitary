@@ -178,7 +178,11 @@ func assertKnownCommandResult(t *testing.T, name, description string, exitCode i
 		t.Fatalf("Run(%q) stderr %q does not contain init progress", name, stderr)
 	}
 
-	if !strings.Contains(stdout, description) {
+	if usesSemanticTextRendering(name) {
+		if !strings.Contains(stdout, name) {
+			t.Fatalf("Run(%q) output %q does not contain command header %q", name, stdout, name)
+		}
+	} else if !strings.Contains(stdout, description) {
 		t.Fatalf("Run(%q) output %q does not contain description %q", name, stdout, description)
 	}
 	if expectBootstrapStatus && !strings.Contains(stdout, "status: bootstrap only, not implemented yet") {
@@ -206,5 +210,20 @@ func TestRunHelpIncludesCommandSurface(t *testing.T) {
 		if !strings.Contains(out, name) {
 			t.Fatalf("help output %q does not include command %q", out, name)
 		}
+	}
+}
+
+func TestRunHelpIncludesColorGlobalOption(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("Run(help) exit code = %d, want 0", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "--color MODE") {
+		t.Fatalf("help output %q does not include --color global option", stdout.String())
 	}
 }

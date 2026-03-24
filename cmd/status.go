@@ -21,6 +21,8 @@ type statusRequest struct {
 type statusResult struct {
 	WorkspaceRoot     string                     `json:"workspace_root"`
 	ConfigPath        string                     `json:"config_path"`
+	EmbedderProvider  string                     `json:"embedder_provider,omitempty"`
+	AnalysisProvider  string                     `json:"analysis_provider,omitempty"`
 	ConfigResolution  *configResolution          `json:"config_resolution,omitempty"`
 	IndexPath         string                     `json:"index_path"`
 	IndexExists       bool                       `json:"index_exists"`
@@ -121,6 +123,8 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 	return &statusResult{
 		WorkspaceRoot:     result.WorkspaceRoot,
 		ConfigPath:        result.ConfigPath,
+		EmbedderProvider:  result.EmbedderProvider,
+		AnalysisProvider:  result.AnalysisProvider,
 		ConfigResolution:  resolution,
 		IndexPath:         result.Index.IndexPath,
 		IndexExists:       result.Index.Exists,

@@ -204,14 +204,12 @@ func TestRunCheckDocDriftTextIncludesRemediation(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"status: drift",
-		"status: aligned",
-		"confidence:",
-		"rationale:",
-		"spec evidence:",
-		"doc evidence:",
-		"remediation:",
-		"suggested edit:",
+		"━━◈ check-doc-drift",
+		"██ DRIFT",
+		"██ OK",
+		"default limit mismatch",
+		"pituitary fix --path",
+		"review-spec --format html",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("runCheckDocDrift() output %q does not contain %q", out, want)

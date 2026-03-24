@@ -88,8 +88,9 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 
 	var stdout bytes.Buffer
 	renderStatusResult(&stdout, &statusResult{
-		WorkspaceRoot: "/tmp/repo",
-		ConfigPath:    "/tmp/repo/pituitary.toml",
+		WorkspaceRoot:    "/tmp/repo",
+		ConfigPath:       "/tmp/repo/pituitary.toml",
+		EmbedderProvider: "fixture",
 		ConfigResolution: &configResolution{
 			SelectedBy: configSourceDiscovery,
 			Reason:     "working-directory search found /tmp/repo/pituitary.toml",
@@ -144,23 +145,25 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"━━◈ status",
 		"workspace: /tmp/repo",
 		"config resolution: working-directory search found /tmp/repo/pituitary.toml",
-		"config candidates:",
+		"CONFIG CANDIDATES",
 		"1. command-local --config | not_set",
 		"4. working-directory search | selected | /tmp/repo/pituitary.toml",
 		"index: present",
 		"index freshness: fresh",
+		"fixture embedder",
 		"artifact index dir: /tmp/repo/.pituitary",
 		"artifact discover --write default: /tmp/repo/.pituitary/pituitary.toml",
 		"artifact canonicalize default: /tmp/repo/.pituitary/canonicalized",
 		"artifact ignore patterns: .pituitary/",
-		"artifact relocation: set [workspace].index_path to move the SQLite index",
+		"set [workspace].index_path to move the SQLite index",
 		"runtime probe: all",
-		"runtime: runtime.embedder | ready | provider: openai_compatible | model: pituitary-embed | endpoint: http://localhost:1234/v1",
-		"runtime: runtime.analysis | disabled | provider: disabled",
+		"runtime: ✓ runtime.embedder | ready | provider: openai_compatible | model: pituitary-embed | endpoint: http://localhost:1234/v1",
+		"runtime: ℹ runtime.analysis | disabled | provider: disabled",
 		"runtime note: runtime.analysis is disabled in config",
-		`guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
+		`runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderStatusResult() output %q does not contain %q", output, want)
@@ -222,10 +225,11 @@ func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
 			EdgeCount:     8,
 		},
 		Status: &statusResult{
-			Freshness:  &index.FreshnessStatus{State: "fresh"},
-			SpecCount:  3,
-			DocCount:   2,
-			ChunkCount: 17,
+			EmbedderProvider: "fixture",
+			Freshness:        &index.FreshnessStatus{State: "fresh"},
+			SpecCount:        3,
+			DocCount:         2,
+			ChunkCount:       17,
 			Guidance: []string{
 				`runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
 			},
@@ -234,12 +238,17 @@ func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"━━◈ init",
+		"3 sources",
+		"5 artifacts",
+		"17 chunks",
+		"fresh",
+		"fixture embedder",
 		"workspace: /tmp/repo",
-		"config action: wrote",
-		"discovered sources: 3",
-		"index: 5 artifact(s), 17 chunk(s), 8 edge(s)",
-		"status: fresh | specs: 3 | docs: 2 | chunks: 17",
-		`guidance: runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
+		"config: /tmp/repo/.pituitary/pituitary.toml",
+		"action: wrote",
+		"index: 3 specs · 2 docs",
+		`runtime.embedder is still "fixture" on 5 indexed artifact(s); for better retrieval quality on a real corpus, switch to "openai_compatible", rebuild the index, then run ` + "`pituitary status --check-runtime embedder`",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderInitResult() output %q does not contain %q", output, want)
@@ -326,11 +335,12 @@ func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"━━◈ check-compliance",
 		"paths: src/api/middleware/tenant_limiter.go",
-		"unspecified: 1",
-		"traceability: semantic_neighbor_without_applies_to",
-		"limiting factor: spec_metadata_gap",
-		`suggestion: If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
+		"UNSPECIFIED: 1",
+		"traceability semantic_neighbor_without_applies_to",
+		"limiting factor spec_metadata_gap",
+		`If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderComplianceResult() output %q does not contain %q", output, want)
@@ -440,14 +450,15 @@ func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"status: drift | confidence: high (0.911)",
-		"status: aligned | confidence: medium (0.744)",
-		"rationale:",
-		"spec evidence: SPEC-042 | Defaults",
-		"doc evidence: Quickstart",
-		"finding: default_limit_mismatch | confidence: high",
-		"confidence basis:",
-		"suggested edit: replace \"100 requests per minute\" with \"200 requests per minute\"",
+		"━━◈ check-doc-drift",
+		"docs/guides/api-rate-limits.md",
+		"██ DRIFT",
+		"default limit mismatch",
+		"expected 200",
+		"got 100",
+		"pituitary fix --path docs/guides/api-rate-limits.md",
+		"docs/runbooks/rate-limit-rollout.md",
+		"██ OK",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderDocDriftResult() output %q does not contain %q", output, want)
@@ -475,12 +486,11 @@ func TestRenderReviewResultIncludesTopImpactSummaries(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"impact: 2 spec(s), 0 ref(s), 2 doc(s)",
-		"top impacted specs:",
-		"- SPEC-055 | Tenant Overrides Rollout | depends_on",
-		"- SPEC-008 | Legacy Rate Limiting | supersedes | historical",
-		"top impacted docs:",
-		"- doc://guides/api-rate-limits | API Rate Limits | 0.912 | file://docs/guides/api-rate-limits.md",
+		"━━◈ review-spec · SPEC-042",
+		"IMPACT    2 specs · 0 refs · 2 docs",
+		"SPEC-055  Tenant Overrides Rollout · depends_on",
+		"SPEC-008  Legacy Rate Limiting · supersedes · historical",
+		"doc://guides/api-rate-limits  0.912",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderReviewResult() output %q does not contain %q", output, want)
@@ -509,9 +519,13 @@ func TestRenderOverlapResultShowsBoundaryReviewGuidance(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"candidate: SPEC-055 | Burst Handling",
-		"SPEC-042 | Per-Tenant Rate Limiting | 0.811 | high | adjacent | boundary review",
-		"recommendation: review_boundaries | real overlap, but clarify boundaries before merging",
+		"━━◈ check-overlap · SPEC-055",
+		"Burst Handling",
+		"SPEC-042",
+		"0.811",
+		"Per-Tenant Rate Limiting",
+		"boundary review",
+		"real overlap detected — review scope boundaries before merging",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderOverlapResult() output %q does not contain %q", output, want)
@@ -535,8 +549,9 @@ func TestRenderReviewResultShowsOverlapGuidance(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"overlaps: 1 | recommendation: review_boundaries | real overlap, but clarify boundaries before merging",
-		"top overlap: SPEC-042 | adjacent | 0.811 | boundary review",
+		"━━◈ review-spec · SPEC-055",
+		"OVERLAP   1 specs · recommendation: review_boundaries",
+		"SPEC-042  0.811  adjacent",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderReviewResult() output %q does not contain %q", output, want)
@@ -674,5 +689,43 @@ func TestRenderCommandMarkdownReviewSpecWithNoFollowUp(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderCommandMarkdown() output %q does not contain %q", output, want)
 		}
+	}
+}
+
+func TestRenderDocDriftResultColorAlwaysEmitsANSI(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderDocDriftResult(wrapCLIWriter(&stdout, colorModeAlways), &analysis.DocDriftResult{
+		Assessments: []analysis.DocDriftAssessment{
+			{DocRef: "doc://guides/api-rate-limits", SourceRef: "docs/guides/api-rate-limits.md", Status: "drift"},
+		},
+	})
+
+	if !strings.Contains(stdout.String(), "\x1b[") {
+		t.Fatalf("renderDocDriftResult() output %q does not contain ANSI escapes in --color=always mode", stdout.String())
+	}
+}
+
+func TestWriteCLISuccessJSONNeverEmitsANSI(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := writeCLISuccess(
+		wrapCLIWriter(&stdout, colorModeAlways),
+		wrapCLIWriter(&stderr, colorModeAlways),
+		commandFormatJSON,
+		"status",
+		struct{}{},
+		&statusResult{ConfigPath: "/tmp/repo/pituitary.toml"},
+		nil,
+	)
+	if exitCode != 0 {
+		t.Fatalf("writeCLISuccess() exit code = %d, want 0", exitCode)
+	}
+	if strings.Contains(stdout.String(), "\x1b[") {
+		t.Fatalf("writeCLISuccess() JSON output %q unexpectedly contains ANSI escapes", stdout.String())
 	}
 }
