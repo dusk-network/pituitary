@@ -127,6 +127,11 @@ type complianceTarget struct {
 	RemovedOnly   bool
 }
 
+type complianceEvaluationTarget struct {
+	Target       complianceTarget
+	ExplicitRefs []string
+}
+
 type complianceAssessment struct {
 	Kind    string
 	Finding ComplianceFinding
@@ -167,12 +172,11 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	defer repo.Close()
 
-	embedder, err := index.NewEmbedder(cfg.Runtime.Embedder)
+	targets, err := loadComplianceTargetsContext(ctx, cfg, request)
 	if err != nil {
 		return nil, err
 	}
-
-	targets, err := loadComplianceTargetsContext(ctx, cfg, request, embedder)
+	evaluationTargets, err := prepareComplianceEvaluationTargetsContext(ctx, repo, cfg, targets)
 	if err != nil {
 		return nil, err
 	}
@@ -185,13 +189,9 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	relevant := map[string]*complianceRelevantAccumulator{}
 
-	for _, target := range targets {
-		explicitRefs, err := repo.specRefsForGovernedRefs(target.RefCandidates)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(explicitRefs) == 0 {
+	for _, item := range evaluationTargets {
+		target := item.Target
+		if len(item.ExplicitRefs) == 0 {
 			suggestions, err := repo.complianceSemanticSuggestions(target.Embedding)
 			if err != nil {
 				return nil, err
@@ -206,11 +206,11 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 			continue
 		}
 
-		specs, err := repo.loadSelectedSpecs(explicitRefs)
+		specs, err := repo.loadSelectedSpecs(item.ExplicitRefs)
 		if err != nil {
 			return nil, err
 		}
-		for _, ref := range explicitRefs {
+		for _, ref := range item.ExplicitRefs {
 			spec, ok := specs[ref]
 			if !ok {
 				continue
@@ -259,16 +259,15 @@ func normalizeComplianceRequest(request ComplianceRequest) (ComplianceRequest, e
 	}
 }
 
-func loadComplianceTargetsContext(ctx context.Context, cfg *config.Config, request ComplianceRequest, embedder index.Embedder) ([]complianceTarget, error) {
+func loadComplianceTargetsContext(ctx context.Context, cfg *config.Config, request ComplianceRequest) ([]complianceTarget, error) {
 	if len(request.Paths) > 0 {
-		return loadPathComplianceTargetsContext(ctx, cfg, request.Paths, embedder)
+		return loadPathComplianceTargetsContext(ctx, cfg, request.Paths)
 	}
-	return loadDiffComplianceTargetsContext(ctx, request.DiffText, embedder)
+	return loadDiffComplianceTargetsContext(ctx, request.DiffText)
 }
 
-func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, paths []string, embedder index.Embedder) ([]complianceTarget, error) {
+func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, paths []string) ([]complianceTarget, error) {
 	targets := make([]complianceTarget, 0, len(paths))
-	texts := make([]string, 0, len(paths))
 
 	for _, rawPath := range paths {
 		relPath, absPath, err := resolveWorkspaceFilePath(cfg.Workspace.RootPath, rawPath)
@@ -294,27 +293,17 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			RefCandidates: governedRefsForPath(relPath),
 			Content:       string(data),
 		})
-		texts = append(texts, textForEmbedding(relPath, relPath, string(data)))
-	}
-
-	vectors, err := embedder.EmbedDocuments(ctx, texts)
-	if err != nil {
-		return nil, fmt.Errorf("embed code paths: %w", err)
-	}
-	for i := range targets {
-		targets[i].Embedding = vectors[i]
 	}
 	return targets, nil
 }
 
-func loadDiffComplianceTargetsContext(ctx context.Context, diffText string, embedder index.Embedder) ([]complianceTarget, error) {
+func loadDiffComplianceTargetsContext(ctx context.Context, diffText string) ([]complianceTarget, error) {
 	parsed, err := parseDiffTargets(diffText)
 	if err != nil {
 		return nil, err
 	}
 
 	targets := make([]complianceTarget, 0, len(parsed))
-	texts := make([]string, 0, len(parsed))
 	for _, item := range parsed {
 		content, removedOnly := parsedDiffTargetContent(item)
 		if stringsTrimSpace(content) == "" && !removedOnly {
@@ -326,20 +315,58 @@ func loadDiffComplianceTargetsContext(ctx context.Context, diffText string, embe
 			Content:       content,
 			RemovedOnly:   removedOnly,
 		})
-		texts = append(texts, textForEmbedding(item.Path, item.Path, content))
 	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("diff_text does not contain any changed paths with readable content")
 	}
+	return targets, nil
+}
+
+func prepareComplianceEvaluationTargetsContext(ctx context.Context, repo *analysisRepository, cfg *config.Config, targets []complianceTarget) ([]complianceEvaluationTarget, error) {
+	prepared := make([]complianceEvaluationTarget, 0, len(targets))
+	fallbackIndexes := make([]int, 0, len(targets))
+	for _, target := range targets {
+		explicitRefs, err := repo.specRefsForGovernedRefs(target.RefCandidates)
+		if err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, complianceEvaluationTarget{
+			Target:       target,
+			ExplicitRefs: explicitRefs,
+		})
+		if len(explicitRefs) == 0 {
+			fallbackIndexes = append(fallbackIndexes, len(prepared)-1)
+		}
+	}
+	if len(fallbackIndexes) == 0 {
+		return prepared, nil
+	}
+	if err := embedComplianceFallbackTargetsContext(ctx, cfg, prepared, fallbackIndexes); err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+func embedComplianceFallbackTargetsContext(ctx context.Context, cfg *config.Config, targets []complianceEvaluationTarget, indexes []int) error {
+	embedder, err := index.NewEmbedder(cfg.Runtime.Embedder)
+	if err != nil {
+		return err
+	}
+
+	texts := make([]string, 0, len(indexes))
+	for _, idx := range indexes {
+		target := targets[idx].Target
+		texts = append(texts, textForEmbedding(target.Path, target.Path, target.Content))
+	}
 
 	vectors, err := embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
-		return nil, fmt.Errorf("embed diff paths: %w", err)
+		return fmt.Errorf("embed compliance fallback targets: %w", err)
 	}
-	for i := range targets {
-		targets[i].Embedding = vectors[i]
+	for i, idx := range indexes {
+		targets[idx].Target.Embedding = vectors[i]
 	}
-	return targets, nil
+	return nil
 }
 
 func resolveWorkspaceFilePath(rootPath, rawPath string) (string, string, error) {

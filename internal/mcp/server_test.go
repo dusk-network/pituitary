@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +33,23 @@ func TestValidateStartupAcceptsReadyWorkspace(t *testing.T) {
 	configPath := writeMCPWorkspace(t)
 	if err := validateStartup(Options{ConfigPath: configPath}); err != nil {
 		t.Fatalf("validateStartup() error = %v", err)
+	}
+}
+
+func TestValidateStartupDoesNotRequireLiveEmbedderEndpointWhenIndexAlreadyExists(t *testing.T) {
+	server := newOpenAICompatibleEmbeddingServer(t)
+	configPath := writeMCPWorkspaceWithRuntime(t, fmt.Sprintf(`
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = %q
+timeout_ms = 1000
+max_retries = 0
+`, server.URL+"/v1"))
+	server.Close()
+
+	if err := validateStartup(Options{ConfigPath: configPath}); err != nil {
+		t.Fatalf("validateStartup() error = %v, want startup to rely on stored metadata", err)
 	}
 }
 
@@ -625,6 +645,16 @@ func shippedToolNames() []string {
 }
 
 func writeMCPWorkspace(t *testing.T) string {
+	return writeMCPWorkspaceWithRuntime(t, `
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+`)
+}
+
+func writeMCPWorkspaceWithRuntime(t *testing.T, runtimeEmbedder string) string {
 	t.Helper()
 
 	repoRoot := mcpRepoRoot(t)
@@ -638,11 +668,7 @@ func writeMCPWorkspace(t *testing.T) string {
 root = "."
 index_path = ".pituitary/pituitary.db"
 
-[runtime.embedder]
-provider = "fixture"
-model = "fixture-8d"
-timeout_ms = 1000
-max_retries = 0
+`+strings.TrimSpace(runtimeEmbedder)+`
 
 [[sources]]
 name = "specs"
@@ -671,6 +697,35 @@ include = ["guides/*.md", "runbooks/*.md"]
 	}
 
 	return configPath
+}
+
+func newOpenAICompatibleEmbeddingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("request path = %q, want /v1/embeddings", r.URL.Path)
+		}
+
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		response := map[string]any{"data": []map[string]any{}}
+		for i := range request.Input {
+			response["data"] = append(response["data"].([]map[string]any), map[string]any{
+				"index":     i,
+				"embedding": []float64{float64(i + 1), float64(i + 2), float64(i + 3)},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
 }
 
 func writeMCPServeWorkspace(t *testing.T, content string) string {

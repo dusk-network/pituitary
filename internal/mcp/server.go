@@ -1,11 +1,9 @@
 package mcp
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -78,7 +76,7 @@ func validateStartup(options Options) error {
 		return fmt.Errorf("load config %s: %w", options.ConfigPath, err)
 	}
 
-	embedder, err := index.NewEmbedder(cfg.Runtime.Embedder)
+	configuredFingerprint, err := index.ConfiguredEmbedderFingerprint(cfg.Runtime.Embedder)
 	if err != nil {
 		return err
 	}
@@ -99,40 +97,19 @@ func validateStartup(options Options) error {
 	}
 	defer db.Close()
 
-	dimension, err := embedder.Dimension(context.Background())
-	if err != nil {
-		return err
-	}
-	if err := validateIndexReady(db, embedder.Fingerprint(), dimension); err != nil {
+	if err := validateIndexReady(db, configuredFingerprint); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateIndexReady(db *sql.DB, configuredFingerprint string, configuredDimension int) error {
-	var raw string
-	err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("index metadata is missing embedder_dimension; run `pituitary index --rebuild`")
-	}
-	if err != nil {
-		return fmt.Errorf("read index metadata: %w", err)
-	}
-
-	stored, err := strconv.Atoi(raw)
-	if err != nil {
-		return fmt.Errorf("parse embedder_dimension %q: %w", raw, err)
-	}
-	if stored != configuredDimension {
-		return fmt.Errorf("index embedder dimension %d does not match configured embedder dimension %d; run `pituitary index --rebuild`", stored, configuredDimension)
-	}
-
+func validateIndexReady(db *sql.DB, configuredFingerprint string) error {
 	if strings.TrimSpace(configuredFingerprint) == "" {
 		return nil
 	}
 
 	var storedFingerprint string
-	err = db.QueryRow(`SELECT value FROM metadata WHERE key = 'embedder_fingerprint'`).Scan(&storedFingerprint)
+	err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'embedder_fingerprint'`).Scan(&storedFingerprint)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("index metadata is missing embedder_fingerprint; run `pituitary index --rebuild`")
 	}

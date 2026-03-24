@@ -245,6 +245,78 @@ max_retries = 0
 	}
 }
 
+func TestCheckComplianceUsesExplicitTraceabilityWithoutLiveEmbedder(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("request path = %q, want /v1/embeddings", r.URL.Path)
+		}
+
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		response := map[string]any{"data": []map[string]any{}}
+		for i := range request.Input {
+			response["data"] = append(response["data"].([]map[string]any), map[string]any{
+				"index":     i,
+				"embedding": []float64{float64(i + 1), float64(i + 2), float64(i + 3)},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+
+	configPath := writeOperationWorkspaceWithRuntime(t, fmt.Sprintf(`
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = %q
+timeout_ms = 1000
+max_retries = 0
+`, server.URL+"/v1"), "")
+	server.Close()
+
+	repoRoot := filepath.Dir(configPath)
+	codePath := filepath.Join(repoRoot, "src", "api", "middleware", "ratelimiter.go")
+	if err := os.MkdirAll(filepath.Dir(codePath), 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(codePath, []byte(strings.TrimSpace(`
+package middleware
+
+// Apply limits per tenant rather than per API key.
+// Enforce a default limit of 200 requests per minute.
+// Allow short bursts above the steady-state tenant limit.
+// Use a sliding-window limiter and tenant-specific overrides.
+func buildLimiter() {}
+`)+"\n"), 0o644); err != nil {
+		t.Fatalf("write code path: %v", err)
+	}
+
+	operation := CheckCompliance(context.Background(), configPath, analysis.ComplianceRequest{
+		Paths: []string{"src/api/middleware/ratelimiter.go"},
+	})
+	if operation.Issue != nil {
+		t.Fatalf("CheckCompliance() issue = %+v, want success without live embedder", operation.Issue)
+	}
+	if operation.Result == nil {
+		t.Fatal("CheckCompliance() result = nil, want structured result")
+	}
+	if len(operation.Result.Conflicts) != 0 {
+		t.Fatalf("CheckCompliance() conflicts = %+v, want none", operation.Result.Conflicts)
+	}
+	if len(operation.Result.Compliant) == 0 {
+		t.Fatal("CheckCompliance() compliant = empty, want explicit compliance findings")
+	}
+}
+
 func TestCheckDocDriftClassifiesAnalysisProviderDependencyFailures(t *testing.T) {
 	t.Parallel()
 
