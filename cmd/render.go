@@ -12,8 +12,8 @@ import (
 )
 
 func renderCommandResult(w io.Writer, command string, result any) error {
-	description, ok := commands[command]
-	if !ok {
+	description := commandDescription(command)
+	if description == "" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 
@@ -60,8 +60,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 }
 
 func renderCommandTable(w io.Writer, command string, result any) error {
-	description, ok := commands[command]
-	if !ok {
+	description := commandDescription(command)
+	if description == "" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 

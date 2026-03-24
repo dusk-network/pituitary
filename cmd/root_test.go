@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunKnownCommandsStayCallable(t *testing.T) {
-	for name, description := range commands {
+	for name := range commands {
 		if name == "help" {
 			continue
 		}
@@ -28,7 +28,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				args = []string{name, "--help"}
 				expectBootstrapStatus = false
 				exitCode := run()
-				assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+				assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 				return
 			}
 
@@ -41,14 +41,14 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 					args = []string{name, "--path", "rfcs/service-sla.md"}
 					expectBootstrapStatus = false
 					exitCode := withWorkingDir(t, repoRoot, run)
-					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 					return
 				}
 				if name == "discover" {
 					args = []string{name, "--path", "."}
 					expectBootstrapStatus = false
 					exitCode := withWorkingDir(t, repoRoot, run)
-					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 					return
 				}
 				if name == "migrate-config" {
@@ -63,7 +63,7 @@ specs_dir = "specs"
 					args = []string{name}
 					expectBootstrapStatus = false
 					exitCode := withWorkingDir(t, repoRoot, run)
-					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 					return
 				}
 				if name == "index" {
@@ -123,13 +123,26 @@ func buildLimiter() {}
 				}
 				expectBootstrapStatus = false
 				exitCode := withWorkingDir(t, repoRoot, run)
-				assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+				assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 				return
 			}
 
 			exitCode := run()
-			assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+			assertKnownCommandResult(t, name, commandDescription(name), exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
 		})
+	}
+}
+
+func TestCommandsRegistryHasRunners(t *testing.T) {
+	t.Parallel()
+
+	for name, command := range commands {
+		if commandDescription(name) == "" {
+			t.Fatalf("command %q description is empty", name)
+		}
+		if command.Run == nil {
+			t.Fatalf("command %q has no runner", name)
+		}
 	}
 }
 
