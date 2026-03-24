@@ -149,12 +149,11 @@ func buildLimiter() {}
 	}
 }
 
-func TestRunCheckCompliancePathJSONNoGoverningSpec(t *testing.T) {
+func TestRunCheckCompliancePathJSONWeakTraceability(t *testing.T) {
 	repo := writeSearchWorkspace(t)
-	writeComplianceSourceFile(t, repo, "src/worker/jobs/reconciler.go", `
-package jobs
-
-func Run() {}
+	writeComplianceSourceFile(t, repo, "notes/ungoverned.txt", `
+zxqv aurora lattice
+plinth ember quartz
 `)
 
 	var stdout bytes.Buffer
@@ -163,7 +162,7 @@ func Run() {}
 	exitCode := withWorkingDir(t, repo, func() int {
 		rebuildSearchWorkspaceIndex(t)
 		return runCheckCompliance([]string{
-			"--path", "src/worker/jobs/reconciler.go",
+			"--path", "notes/ungoverned.txt",
 			"--format", "json",
 		}, &stdout, &stderr)
 	})
@@ -179,9 +178,11 @@ func Run() {}
 			Compliant   []any `json:"compliant"`
 			Conflicts   []any `json:"conflicts"`
 			Unspecified []struct {
-				Path    string `json:"path"`
-				Code    string `json:"code"`
-				Message string `json:"message"`
+				Path         string `json:"path"`
+				Code         string `json:"code"`
+				Message      string `json:"message"`
+				Traceability string `json:"traceability"`
+				Suggestion   string `json:"suggestion"`
 			} `json:"unspecified"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -198,11 +199,138 @@ func Run() {}
 	if len(payload.Result.Unspecified) != 1 {
 		t.Fatalf("result.unspecified = %+v, want one no-spec finding", payload.Result.Unspecified)
 	}
-	if payload.Result.Unspecified[0].Code != "no_governing_spec" {
-		t.Fatalf("unspecified finding = %+v, want no_governing_spec", payload.Result.Unspecified[0])
+	if payload.Result.Unspecified[0].Code != "weak_traceability" {
+		t.Fatalf("unspecified finding = %+v, want weak_traceability", payload.Result.Unspecified[0])
 	}
-	if payload.Result.Unspecified[0].Path != "src/worker/jobs/reconciler.go" {
-		t.Fatalf("unspecified finding = %+v, want reconciler path", payload.Result.Unspecified[0])
+	if payload.Result.Unspecified[0].Path != "notes/ungoverned.txt" {
+		t.Fatalf("unspecified finding = %+v, want ungoverned path", payload.Result.Unspecified[0])
+	}
+	if payload.Result.Unspecified[0].Traceability != "weak_semantic_retrieval" {
+		t.Fatalf("unspecified finding = %+v, want weak_semantic_retrieval traceability", payload.Result.Unspecified[0])
+	}
+	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://notes/ungoverned.txt"]`) {
+		t.Fatalf("unspecified finding = %+v, want applies_to suggestion", payload.Result.Unspecified[0])
+	}
+}
+
+func TestRunCheckCompliancePathJSONTraceabilityGap(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "src/api/middleware/tenant_limiter.go", `
+package middleware
+
+// Apply limits per tenant rather than per API key.
+// Enforce a default limit of 200 requests per minute.
+// Allow short bursts above the steady-state tenant limit.
+func buildTenantLimiter() {}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "src/api/middleware/tenant_limiter.go",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Unspecified []struct {
+				Path         string `json:"path"`
+				SpecRef      string `json:"spec_ref"`
+				Code         string `json:"code"`
+				Traceability string `json:"traceability"`
+				Suggestion   string `json:"suggestion"`
+			} `json:"unspecified"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal traceability-gap payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Unspecified) != 1 {
+		t.Fatalf("result.unspecified = %+v, want one traceability gap finding", payload.Result.Unspecified)
+	}
+	if payload.Result.Unspecified[0].Code != "traceability_gap" {
+		t.Fatalf("unspecified finding = %+v, want traceability_gap", payload.Result.Unspecified[0])
+	}
+	if payload.Result.Unspecified[0].SpecRef == "" {
+		t.Fatalf("unspecified finding = %+v, want nearest accepted spec ref", payload.Result.Unspecified[0])
+	}
+	if payload.Result.Unspecified[0].Traceability != "semantic_neighbor_without_applies_to" {
+		t.Fatalf("unspecified finding = %+v, want semantic_neighbor_without_applies_to", payload.Result.Unspecified[0])
+	}
+	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://src/api/middleware/tenant_limiter.go"]`) {
+		t.Fatalf("unspecified finding = %+v, want applies_to suggestion for tenant_limiter", payload.Result.Unspecified[0])
+	}
+}
+
+func TestRunCheckCompliancePathJSONInsufficientEvidenceExplainsTraceability(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", `
+package middleware
+
+func buildLimiter() {}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "src/api/middleware/ratelimiter.go",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Unspecified []struct {
+				SpecRef      string `json:"spec_ref"`
+				Code         string `json:"code"`
+				Traceability string `json:"traceability"`
+				Suggestion   string `json:"suggestion"`
+			} `json:"unspecified"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal insufficient-evidence payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Unspecified) == 0 {
+		t.Fatal("result.unspecified is empty, want insufficient_evidence findings")
+	}
+	for _, item := range payload.Result.Unspecified {
+		if item.Code != "insufficient_evidence" {
+			t.Fatalf("unspecified finding = %+v, want insufficient_evidence", item)
+		}
+		if item.Traceability != "explicit_applies_to" {
+			t.Fatalf("unspecified finding = %+v, want explicit_applies_to", item)
+		}
+		if !strings.Contains(item.Suggestion, "already governs") {
+			t.Fatalf("unspecified finding = %+v, want explicit guidance", item)
+		}
 	}
 }
 

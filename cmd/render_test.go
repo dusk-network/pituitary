@@ -259,6 +259,37 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 	}
 }
 
+func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderComplianceResult(&stdout, &analysis.ComplianceResult{
+		Paths: []string{"src/api/middleware/tenant_limiter.go"},
+		Unspecified: []analysis.ComplianceFinding{
+			{
+				Path:         "src/api/middleware/tenant_limiter.go",
+				SpecRef:      "SPEC-042",
+				Code:         "traceability_gap",
+				Message:      "src/api/middleware/tenant_limiter.go is not explicitly governed by any accepted applies_to ref; nearest accepted match is SPEC-042",
+				Traceability: "semantic_neighbor_without_applies_to",
+				Suggestion:   `If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"paths: src/api/middleware/tenant_limiter.go",
+		"unspecified: 1",
+		"traceability: semantic_neighbor_without_applies_to",
+		`suggestion: If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderComplianceResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
 	t.Parallel()
 

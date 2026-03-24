@@ -264,6 +264,30 @@ $ ./pituitary check-terminology \
 #   - canonical spec evidence that reflects the replacement language
 ```
 
+### Example: compliance traceability
+
+`check-compliance` is strongest when accepted specs declare the governed code or config surfaces explicitly through `applies_to`.
+
+```toml
+id = "SPEC-042"
+title = "Per-Tenant Rate Limiting for Public API Endpoints"
+status = "accepted"
+body = "body.md"
+
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+]
+```
+
+If a changed path has no explicit governance yet, `check-compliance` now distinguishes:
+
+- missing `applies_to` coverage with no strong accepted spec match
+- a likely traceability gap where a nearby accepted spec exists but does not govern the path explicitly
+- explicitly governed paths where deterministic evidence is still too weak to confirm or deny compliance
+
+Each `unspecified` finding includes traceability guidance plus a concrete `applies_to` suggestion so you can tighten the accepted spec and rebuild the index.
+
 ## MCP Server
 
 Pituitary ships an optional MCP server over stdio, exposing the same analysis tools to any MCP-compatible client (Claude Code, Cursor, Cowork, etc.):
