@@ -23,20 +23,30 @@ func (e *DependencyUnavailableError) Error() string {
 	return e.Message
 }
 
+func (e *DependencyUnavailableError) RuntimeName() string {
+	return strings.TrimSpace(e.Runtime)
+}
+
 // IsDependencyUnavailable reports whether err wraps a dependency-unavailable failure.
 func IsDependencyUnavailable(err error) bool {
-	var target *DependencyUnavailableError
+	var target interface {
+		error
+		RuntimeName() string
+	}
 	return errors.As(err, &target)
 }
 
 // DependencyUnavailableRuntime reports the runtime surface associated with a
 // dependency-unavailable failure, if one was recorded.
 func DependencyUnavailableRuntime(err error) string {
-	var target *DependencyUnavailableError
+	var target interface {
+		error
+		RuntimeName() string
+	}
 	if !errors.As(err, &target) {
 		return ""
 	}
-	return strings.TrimSpace(target.Runtime)
+	return strings.TrimSpace(target.RuntimeName())
 }
 
 // Embedder generates embeddings for rebuild and query-time retrieval.

@@ -2,7 +2,6 @@ package source
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -74,64 +73,26 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 			})
 		}
 	case config.SourceKindMarkdownDocs:
-		err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() || filepath.Ext(path) != ".md" {
-				return nil
-			}
-
-			relPath, err := filepath.Rel(source.ResolvedPath, path)
-			if err != nil {
-				return fmt.Errorf("source %q doc %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-			}
-			allowed, err := sourcePathAllowed(source, relPath)
-			if err != nil {
-				return fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-			}
-			if !allowed {
-				return nil
-			}
-
-			preview.Items = append(preview.Items, PreviewItem{
-				ArtifactKind: "doc",
-				Path:         workspaceRelative(workspaceRoot, path),
-			})
-			return nil
-		})
+		matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "doc")
 		if err != nil {
 			return SourcePreview{}, err
 		}
-	case config.SourceKindMarkdownContract:
-		err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() || filepath.Ext(path) != ".md" {
-				return nil
-			}
-
-			relPath, err := filepath.Rel(source.ResolvedPath, path)
-			if err != nil {
-				return fmt.Errorf("source %q contract %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-			}
-			allowed, err := sourcePathAllowed(source, relPath)
-			if err != nil {
-				return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-			}
-			if !allowed {
-				return nil
-			}
-
+		for _, match := range matches {
 			preview.Items = append(preview.Items, PreviewItem{
-				ArtifactKind: "spec",
-				Path:         workspaceRelative(workspaceRoot, path),
+				ArtifactKind: "doc",
+				Path:         workspaceRelative(workspaceRoot, match.AbsolutePath),
 			})
-			return nil
-		})
+		}
+	case config.SourceKindMarkdownContract:
+		matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "contract")
 		if err != nil {
 			return SourcePreview{}, err
+		}
+		for _, match := range matches {
+			preview.Items = append(preview.Items, PreviewItem{
+				ArtifactKind: "spec",
+				Path:         workspaceRelative(workspaceRoot, match.AbsolutePath),
+			})
 		}
 	default:
 		return SourcePreview{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)

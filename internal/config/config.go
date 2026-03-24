@@ -99,8 +99,8 @@ type rawRuntimeProvider struct {
 	model      string
 	endpoint   string
 	apiKeyEnv  string
-	timeoutMS  int
-	maxRetries int
+	timeoutMS  *int
+	maxRetries *int
 }
 
 type validationErrors struct {
@@ -163,16 +163,16 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 				Model:      raw.runtimeEmbedder.model,
 				Endpoint:   raw.runtimeEmbedder.endpoint,
 				APIKeyEnv:  raw.runtimeEmbedder.apiKeyEnv,
-				TimeoutMS:  defaultInt(raw.runtimeEmbedder.timeoutMS, 1000),
-				MaxRetries: raw.runtimeEmbedder.maxRetries,
+				TimeoutMS:  defaultOptionalInt(raw.runtimeEmbedder.timeoutMS, 1000),
+				MaxRetries: defaultOptionalInt(raw.runtimeEmbedder.maxRetries, 0),
 			},
 			Analysis: RuntimeProvider{
 				Provider:   defaultString(raw.runtimeAnalysis.provider, RuntimeProviderDisabled),
 				Model:      raw.runtimeAnalysis.model,
 				Endpoint:   raw.runtimeAnalysis.endpoint,
 				APIKeyEnv:  raw.runtimeAnalysis.apiKeyEnv,
-				TimeoutMS:  defaultInt(raw.runtimeAnalysis.timeoutMS, 1000),
-				MaxRetries: raw.runtimeAnalysis.maxRetries,
+				TimeoutMS:  defaultOptionalInt(raw.runtimeAnalysis.timeoutMS, 1000),
+				MaxRetries: defaultOptionalInt(raw.runtimeAnalysis.maxRetries, 0),
 			},
 		},
 		Sources: make([]Source, 0, len(raw.sources)),
@@ -479,9 +479,9 @@ func parseRuntimeField(runtime *rawRuntimeProvider, key, value string, lineNo in
 			return fmt.Errorf("line %d: %s.%s: expected integer", lineNo, section, key)
 		}
 		if key == "timeout_ms" {
-			runtime.timeoutMS = parsed
+			runtime.timeoutMS = intPtr(parsed)
 		} else {
-			runtime.maxRetries = parsed
+			runtime.maxRetries = intPtr(parsed)
 		}
 		return nil
 	default:
@@ -835,9 +835,13 @@ func defaultString(value, fallback string) string {
 	return value
 }
 
-func defaultInt(value, fallback int) int {
-	if value == 0 {
+func defaultOptionalInt(value *int, fallback int) int {
+	if value == nil {
 		return fallback
 	}
-	return value
+	return *value
+}
+
+func intPtr(value int) *int {
+	return &value
 }

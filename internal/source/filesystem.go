@@ -347,56 +347,64 @@ func isValidSpecStatus(status string) bool {
 
 func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRecord, error) {
 	var records []model.DocRecord
-	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+	matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "doc")
+	if err != nil {
+		return nil, err
+	}
+	for _, match := range matches {
+		bodyBytes, err := os.ReadFile(match.AbsolutePath)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
-		if d.IsDir() || filepath.Ext(path) != ".md" {
-			return nil
-		}
-		relPath, err := filepath.Rel(source.ResolvedPath, path)
+		docRef, err := docRefForPath(source.ResolvedPath, match.AbsolutePath)
 		if err != nil {
-			return fmt.Errorf("source %q doc %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-		}
-		allowed, err := sourcePathAllowed(source, relPath)
-		if err != nil {
-			return fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-		}
-		if !allowed {
-			return nil
-		}
-
-		bodyBytes, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-		}
-		docRef, err := docRefForPath(source.ResolvedPath, path)
-		if err != nil {
-			return fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+			return nil, fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
 		records = append(records, model.DocRecord{
 			Ref:         docRef,
 			Kind:        model.ArtifactKindDoc,
-			Title:       docTitle(path, bodyBytes),
-			SourceRef:   fileSourceRef(workspaceRoot, path),
+			Title:       docTitle(match.AbsolutePath, bodyBytes),
+			SourceRef:   fileSourceRef(workspaceRoot, match.AbsolutePath),
 			BodyFormat:  model.BodyFormatMarkdown,
 			BodyText:    string(bodyBytes),
 			ContentHash: contentHash(bodyBytes),
 			Metadata: map[string]string{
 				"source_name": source.Name,
-				"path":        workspaceRelative(workspaceRoot, path),
+				"path":        workspaceRelative(workspaceRoot, match.AbsolutePath),
 			},
 		})
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	return records, nil
 }
 
 func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
 	var records []model.SpecRecord
+	matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "contract")
+	if err != nil {
+		return nil, err
+	}
+	for _, match := range matches {
+		bodyBytes, err := os.ReadFile(match.AbsolutePath)
+		if err != nil {
+			return nil, fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
+		}
+
+		record, err := inferMarkdownContract(workspaceRoot, source, match.AbsolutePath, bodyBytes)
+		if err != nil {
+			return nil, fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+type selectedMarkdownPath struct {
+	AbsolutePath string
+	RelativePath string
+}
+
+func enumerateSelectedMarkdownPaths(workspaceRoot string, source config.Source, label string) ([]selectedMarkdownPath, error) {
+	matches := make([]selectedMarkdownPath, 0)
 	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -406,32 +414,26 @@ func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.
 		}
 		relPath, err := filepath.Rel(source.ResolvedPath, path)
 		if err != nil {
-			return fmt.Errorf("source %q contract %q: resolve relative path: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+			return fmt.Errorf("source %q %s %q: resolve relative path: %w", source.Name, label, workspaceRelative(workspaceRoot, path), err)
 		}
 		allowed, err := sourcePathAllowed(source, relPath)
 		if err != nil {
-			return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
+			return fmt.Errorf("source %q %s %q: %w", source.Name, label, workspaceRelative(workspaceRoot, path), err)
 		}
 		if !allowed {
 			return nil
 		}
 
-		bodyBytes, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-		}
-
-		record, err := inferMarkdownContract(workspaceRoot, source, path, bodyBytes)
-		if err != nil {
-			return fmt.Errorf("source %q contract %q: %w", source.Name, workspaceRelative(workspaceRoot, path), err)
-		}
-		records = append(records, record)
+		matches = append(matches, selectedMarkdownPath{
+			AbsolutePath: path,
+			RelativePath: filepath.ToSlash(relPath),
+		})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return records, nil
+	return matches, nil
 }
 
 func sourcePathAllowed(source config.Source, relPath string) (bool, error) {

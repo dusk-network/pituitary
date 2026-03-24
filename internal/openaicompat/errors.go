@@ -2,8 +2,33 @@ package openaicompat
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
+
+// DependencyUnavailableError indicates that an OpenAI-compatible runtime could
+// not satisfy the current request.
+type DependencyUnavailableError struct {
+	Runtime string
+	Message string
+}
+
+func (e *DependencyUnavailableError) Error() string {
+	return e.Message
+}
+
+// RuntimeName returns the associated runtime surface.
+func (e *DependencyUnavailableError) RuntimeName() string {
+	return strings.TrimSpace(e.Runtime)
+}
+
+// NewDependencyUnavailable formats a dependency-unavailable runtime error.
+func NewDependencyUnavailable(runtime, format string, args ...any) *DependencyUnavailableError {
+	return &DependencyUnavailableError{
+		Runtime: runtime,
+		Message: fmt.Sprintf(format, args...),
+	}
+}
 
 // ExtractErrorMessage returns a human-readable error message from a full
 // OpenAI-compatible response body.

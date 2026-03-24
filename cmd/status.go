@@ -10,10 +10,8 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/app"
-	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/runtimeprobe"
-	"github.com/dusk-network/pituitary/internal/source"
 )
 
 type statusRequest struct {
@@ -103,85 +101,44 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		}, 2)
 	}
 
-	cfg, err := config.Load(resolvedConfigPath)
-	if err != nil {
+	response := app.Status(ctx, resolvedConfigPath, app.StatusRequest{CheckRuntime: scope})
+	if response.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    "config_error",
-			Message: "invalid config:\n" + err.Error(),
-		}, 2)
+			Code:    response.Issue.Code,
+			Message: response.Issue.Message,
+		}, response.Issue.ExitCode)
 	}
-	records, err := source.LoadFromConfig(cfg)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    "source_error",
-			Message: "source load failed:\n" + err.Error(),
-		}, 2)
-	}
-
-	status, err := index.ReadStatusContext(ctx, cfg.Workspace.ResolvedIndexPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    "index_error",
-			Message: "inspect index failed:\n" + err.Error(),
-		}, 2)
-	}
-	freshness, err := index.InspectFreshnessContext(ctx, cfg)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    "index_error",
-			Message: "inspect index freshness failed:\n" + err.Error(),
-		}, 2)
-	}
-
-	var runtimeResult *runtimeprobe.Result
-	if scope != runtimeprobe.ScopeNone {
-		runtimeResult, err = runtimeprobe.Run(ctx, cfg, scope)
-		if err != nil {
-			code := "internal_error"
-			exitCode := 2
-			message := err.Error()
-			if index.IsDependencyUnavailable(err) {
-				code = app.CodeDependencyUnavailable
-				exitCode = 3
-				message = app.FormatDependencyUnavailableMessage(cfg, err)
-			}
-			return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-				Code:    code,
-				Message: message,
-			}, exitCode)
-		}
-	}
+	result := response.Result
 
 	return writeCLISuccess(stdout, stderr, format, "status", request, &statusResult{
-		WorkspaceRoot:     cfg.Workspace.RootPath,
-		ConfigPath:        cfg.ConfigPath,
+		WorkspaceRoot:     result.WorkspaceRoot,
+		ConfigPath:        result.ConfigPath,
 		ConfigResolution:  resolution,
-		IndexPath:         status.IndexPath,
-		IndexExists:       status.Exists,
-		Freshness:         freshness,
-		SpecCount:         status.SpecCount,
-		DocCount:          status.DocCount,
-		ChunkCount:        status.ChunkCount,
-		ArtifactLocations: buildStatusArtifactLocations(cfg),
-		RelationGraph:     index.InspectRelationGraph(records.Specs),
-		Runtime:           runtimeResult,
+		IndexPath:         result.Index.IndexPath,
+		IndexExists:       result.Index.Exists,
+		Freshness:         result.Freshness,
+		SpecCount:         result.Index.SpecCount,
+		DocCount:          result.Index.DocCount,
+		ChunkCount:        result.Index.ChunkCount,
+		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.Index.IndexPath),
+		RelationGraph:     result.RelationGraph,
+		Runtime:           result.Runtime,
 	}, nil)
 }
 
-func buildStatusArtifactLocations(cfg *config.Config) *statusArtifactLocation {
-	if cfg == nil {
+func buildStatusArtifactLocations(workspaceRoot, indexPath string) *statusArtifactLocation {
+	if strings.TrimSpace(workspaceRoot) == "" || strings.TrimSpace(indexPath) == "" {
 		return nil
 	}
 
-	workspaceRoot := cfg.Workspace.RootPath
-	indexDir := filepath.Dir(cfg.Workspace.ResolvedIndexPath)
+	indexDir := filepath.Dir(indexPath)
 	discoverConfigPath := filepath.Join(workspaceRoot, localConfigDirName, defaultConfigName)
 	canonicalizeBundleRoot := filepath.Join(workspaceRoot, localConfigDirName, "canonicalized")
 
 	ignoreSet := map[string]struct{}{
 		filepath.ToSlash(localConfigDirName) + "/": {},
 	}
-	indexPattern := relativeStatusPath(workspaceRoot, cfg.Workspace.ResolvedIndexPath)
+	indexPattern := relativeStatusPath(workspaceRoot, indexPath)
 	if indexPattern != "" && indexPattern != "." && !strings.HasPrefix(indexPattern, filepath.ToSlash(localConfigDirName)+"/") {
 		ignoreSet[indexPattern] = struct{}{}
 	}

@@ -1,22 +1,13 @@
 package analysis
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/openaicompat"
 )
 
@@ -27,36 +18,11 @@ type qualitativeAnalyzer interface {
 }
 
 type openAICompatibleAnalysisProvider struct {
-	model      string
-	endpoint   string
-	token      string
-	maxRetries int
-	client     *http.Client
+	client *openaicompat.Client
 }
 
-type openAICompatibleChatRequest struct {
-	Model       string                        `json:"model"`
-	Messages    []openAICompatibleChatMessage `json:"messages"`
-	Temperature float64                       `json:"temperature"`
-}
-
-type openAICompatibleChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type openAICompatibleChatResponse struct {
-	Choices []openAICompatibleChoice `json:"choices"`
-	Err     json.RawMessage          `json:"error,omitempty"`
-}
-
-type openAICompatibleChoice struct {
-	Message openAICompatibleChoiceMessage `json:"message"`
-}
-
-type openAICompatibleChoiceMessage struct {
-	Content json.RawMessage `json:"content"`
-}
+type openAICompatibleChatRequest = openaicompat.ChatRequest
+type openAICompatibleChatMessage = openaicompat.ChatMessage
 
 type compareAnalysisPrompt struct {
 	Command     string               `json:"command"`
@@ -131,25 +97,13 @@ func newQualitativeAnalyzer(provider config.RuntimeProvider) (qualitativeAnalyze
 }
 
 func newOpenAICompatibleAnalysisProvider(provider config.RuntimeProvider) (qualitativeAnalyzer, error) {
-	token := ""
-	if envVar := strings.TrimSpace(provider.APIKeyEnv); envVar != "" {
-		token = strings.TrimSpace(os.Getenv(envVar))
-		if token == "" {
-			return nil, analysisDependencyUnavailable("missing API key for %s", openAICompatibleAnalysisRuntime)
-		}
-	}
-
-	client := &http.Client{}
-	if provider.TimeoutMS > 0 {
-		client.Timeout = time.Duration(provider.TimeoutMS) * time.Millisecond
+	client, err := openaicompat.NewClient(provider, openAICompatibleAnalysisRuntime)
+	if err != nil {
+		return nil, err
 	}
 
 	return &openAICompatibleAnalysisProvider{
-		model:      strings.TrimSpace(provider.Model),
-		endpoint:   strings.TrimRight(strings.TrimSpace(provider.Endpoint), "/"),
-		token:      token,
-		maxRetries: provider.MaxRetries,
-		client:     client,
+		client: client,
 	}, nil
 }
 
@@ -231,120 +185,25 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, sys
 		return fmt.Errorf("encode runtime.analysis prompt: %w", err)
 	}
 
-	requestBody, err := json.Marshal(openAICompatibleChatRequest{
-		Model: p.model,
-		Messages: []openAICompatibleChatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: string(body)},
-		},
-		Temperature: 0,
+	responseBody, err := p.requestChatCompletion(ctx, []openaicompat.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: string(body)},
 	})
-	if err != nil {
-		return fmt.Errorf("encode runtime.analysis request: %w", err)
-	}
-
-	responseBody, err := p.requestChatCompletion(ctx, requestBody)
 	if err != nil {
 		return err
 	}
 
 	if err := json.Unmarshal([]byte(responseBody), target); err != nil {
-		return &index.DependencyUnavailableError{
-			Runtime: openAICompatibleAnalysisRuntime,
-			Message: fmt.Sprintf("decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err),
-		}
+		return openaicompat.NewDependencyUnavailable(openAICompatibleAnalysisRuntime, "decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err)
 	}
 	return nil
 }
 
-func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, body []byte) (string, error) {
-	var lastErr error
-
-	for attempt := 0; attempt <= p.maxRetries; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint+"/chat/completions", bytes.NewReader(body))
-		if err != nil {
-			return "", fmt.Errorf("build runtime.analysis request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if p.token != "" {
-			req.Header.Set("Authorization", "Bearer "+p.token)
-		}
-
-		resp, err := p.client.Do(req)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) {
-				return "", err
-			}
-			lastErr = &index.DependencyUnavailableError{
-				Runtime: openAICompatibleAnalysisRuntime,
-				Message: fmt.Sprintf("call %s endpoint %s: %v", openAICompatibleAnalysisRuntime, p.endpoint, err),
-			}
-			if shouldRetryOpenAICompatibleAnalysisRequest(err, 0) && attempt < p.maxRetries {
-				if waitErr := waitBeforeAnalysisRetry(ctx, attempt, 0); waitErr != nil {
-					return "", waitErr
-				}
-				continue
-			}
-			return "", lastErr
-		}
-
-		retryAfter := retryAfterDuration(resp.Header.Get("Retry-After"))
-		payload, err := readOpenAICompatibleChatResponse(resp)
-		resp.Body.Close()
-		if err == nil {
-			return payload, nil
-		}
-		lastErr = err
-		if shouldRetryOpenAICompatibleAnalysisRequest(err, resp.StatusCode) && attempt < p.maxRetries {
-			if waitErr := waitBeforeAnalysisRetry(ctx, attempt, retryAfter); waitErr != nil {
-				return "", waitErr
-			}
-			continue
-		}
+func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, messages []openaicompat.ChatMessage) (string, error) {
+	text, err := p.client.ChatCompletionText(ctx, messages, 0)
+	if err != nil {
 		return "", err
 	}
-
-	if lastErr == nil {
-		lastErr = analysisDependencyUnavailable("%s request failed", openAICompatibleAnalysisRuntime)
-	}
-	return "", lastErr
-}
-
-func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return "", analysisDependencyUnavailable("read %s response: %v", openAICompatibleAnalysisRuntime, err)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		message := openaicompat.ExtractErrorMessage(body)
-		if message == "" {
-			message = strings.TrimSpace(string(body))
-		}
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return "", &index.DependencyUnavailableError{
-			Runtime: openAICompatibleAnalysisRuntime,
-			Message: fmt.Sprintf("%s endpoint %s returned %s: %s", openAICompatibleAnalysisRuntime, resp.Request.URL, resp.Status, message),
-		}
-	}
-
-	var payload openAICompatibleChatResponse
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return "", analysisDependencyUnavailable("decode %s response: %v", openAICompatibleAnalysisRuntime, err)
-	}
-	if message := openaicompat.ExtractErrorValue(payload.Err); message != "" {
-		return "", &index.DependencyUnavailableError{
-			Runtime: openAICompatibleAnalysisRuntime,
-			Message: fmt.Sprintf("%s endpoint %s returned an error: %s", openAICompatibleAnalysisRuntime, resp.Request.URL, message),
-		}
-	}
-	if len(payload.Choices) == 0 {
-		return "", analysisDependencyUnavailable("%s returned no choices", openAICompatibleAnalysisRuntime)
-	}
-
-	text := extractOpenAICompatibleMessageText(payload.Choices[0].Message.Content)
 	if text == "" {
 		return "", analysisDependencyUnavailable("%s returned an empty message", openAICompatibleAnalysisRuntime)
 	}
@@ -353,33 +212,6 @@ func readOpenAICompatibleChatResponse(resp *http.Response) (string, error) {
 		return "", analysisDependencyUnavailable("%s returned no JSON object", openAICompatibleAnalysisRuntime)
 	}
 	return text, nil
-}
-
-func extractOpenAICompatibleMessageText(raw json.RawMessage) string {
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.TrimSpace(text)
-	}
-
-	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(raw, &parts); err == nil {
-		var builder strings.Builder
-		for _, part := range parts {
-			if strings.TrimSpace(part.Text) == "" {
-				continue
-			}
-			if builder.Len() > 0 {
-				builder.WriteString("\n")
-			}
-			builder.WriteString(strings.TrimSpace(part.Text))
-		}
-		return strings.TrimSpace(builder.String())
-	}
-
-	return strings.TrimSpace(string(raw))
 }
 
 func normalizeJSONResponseText(text string) string {
@@ -405,29 +237,8 @@ func normalizeJSONResponseText(text string) string {
 	return ""
 }
 
-func analysisDependencyUnavailable(format string, args ...any) *index.DependencyUnavailableError {
-	return &index.DependencyUnavailableError{
-		Runtime: openAICompatibleAnalysisRuntime,
-		Message: fmt.Sprintf(format, args...),
-	}
-}
-
-func shouldRetryOpenAICompatibleAnalysisRequest(err error, statusCode int) bool {
-	if statusCode == http.StatusTooManyRequests || statusCode >= 500 {
-		return true
-	}
-
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
-	}
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "connection refused") ||
-		strings.Contains(lower, "connection reset") ||
-		strings.Contains(lower, "broken pipe")
+func analysisDependencyUnavailable(format string, args ...any) *openaicompat.DependencyUnavailableError {
+	return openaicompat.NewDependencyUnavailable(openAICompatibleAnalysisRuntime, format, args...)
 }
 
 func analysisSpecsFromMap(specs map[string]specDocument, orderedRefs []string) []analysisSpecPrompt {
@@ -536,48 +347,6 @@ func safePromptPrefix(text string, byteLimit int) string {
 func looksLikeJSONObject(text string) bool {
 	text = strings.TrimSpace(text)
 	return strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}")
-}
-
-func retryAfterDuration(value string) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(value); err == nil {
-		if seconds > 0 {
-			return time.Duration(seconds) * time.Second
-		}
-		return 0
-	}
-	if when, err := http.ParseTime(value); err == nil {
-		if delay := time.Until(when); delay > 0 {
-			return delay
-		}
-	}
-	return 0
-}
-
-func waitBeforeAnalysisRetry(ctx context.Context, attempt int, retryAfter time.Duration) error {
-	delay := retryAfter
-	if delay <= 0 {
-		delay = 200 * time.Millisecond
-		for i := 0; i < attempt; i++ {
-			delay *= 2
-			if delay >= 2*time.Second {
-				delay = 2 * time.Second
-				break
-			}
-		}
-	}
-
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func normalizeProvidedComparison(base, provided Comparison, orderedRefs []string, specs map[string]specDocument) Comparison {
