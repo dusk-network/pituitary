@@ -2,8 +2,10 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -13,6 +15,7 @@ import (
 )
 
 const (
+	CurrentSchemaVersion       = 2
 	AdapterFilesystem          = "filesystem"
 	SourceKindSpecBundle       = "spec_bundle"
 	SourceKindMarkdownDocs     = "markdown_docs"
@@ -24,11 +27,12 @@ const (
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
 type Config struct {
-	ConfigPath string
-	ConfigDir  string
-	Workspace  Workspace
-	Runtime    Runtime
-	Sources    []Source
+	SchemaVersion int
+	ConfigPath    string
+	ConfigDir     string
+	Workspace     Workspace
+	Runtime       Runtime
+	Sources       []Source
 }
 
 // Workspace describes the configured workspace root and index path.
@@ -68,6 +72,7 @@ type RuntimeProvider struct {
 }
 
 type rawConfig struct {
+	schemaVersion   int
 	workspace       rawWorkspace
 	runtimeEmbedder rawRuntimeProvider
 	runtimeAnalysis rawRuntimeProvider
@@ -120,20 +125,34 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 
-	file, err := os.Open(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", configPath, err)
 	}
-	defer file.Close()
 
-	raw, err := parse(file)
+	if legacy, ok, err := detectLegacyProjectConfig(bytes.NewReader(data)); err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	} else if ok {
+		return nil, fmt.Errorf("%s: %s", configPath, legacyConfigLoadMessage(configPath, legacy))
+	}
+
+	raw, err := parse(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", configPath, err)
 	}
 
+	cfg, err := buildFromRaw(configPath, raw, true)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	}
+	return cfg, nil
+}
+
+func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (*Config, error) {
 	cfg := &Config{
-		ConfigPath: configPath,
-		ConfigDir:  configBaseDir(configPath),
+		SchemaVersion: raw.schemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     configBaseDir(configPath),
 		Workspace: Workspace{
 			Root:      raw.workspace.root,
 			IndexPath: raw.workspace.indexPath,
@@ -172,10 +191,21 @@ func Load(path string) (*Config, error) {
 	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
 		cfg.Runtime.Embedder.Model = "fixture-8d"
 	}
+	if cfg.SchemaVersion == 0 {
+		cfg.SchemaVersion = CurrentSchemaVersion
+	} else if enforceSchemaVersion && cfg.SchemaVersion != CurrentSchemaVersion {
+		return nil, fmt.Errorf(
+			"unsupported schema_version %d (supported: %d); run `pituitary migrate-config --path %s --write` if this is an older config",
+			cfg.SchemaVersion,
+			CurrentSchemaVersion,
+			filepath.ToSlash(configPath),
+		)
+	}
 
 	if err := validate(cfg); err != nil {
-		return nil, fmt.Errorf("%s: %w", configPath, err)
+		return nil, err
 	}
+	cfg.SchemaVersion = CurrentSchemaVersion
 	return cfg, nil
 }
 
@@ -187,7 +217,7 @@ func configBaseDir(configPath string) string {
 	return configDir
 }
 
-func parse(file *os.File) (rawConfig, error) {
+func parse(file io.Reader) (rawConfig, error) {
 	var cfg rawConfig
 	var section string
 	var currentSource *rawSource
@@ -258,6 +288,15 @@ func parse(file *os.File) (rawConfig, error) {
 		value = strings.TrimSpace(value)
 
 		switch section {
+		case "":
+			if key != "schema_version" {
+				return rawConfig{}, fmt.Errorf("line %d: key %q is outside a supported section", lineNo, key)
+			}
+			parsed, err := strconv.Atoi(value)
+			if err != nil {
+				return rawConfig{}, fmt.Errorf("line %d: schema_version: expected integer", lineNo)
+			}
+			cfg.schemaVersion = parsed
 		case "workspace":
 			if err := parseWorkspaceField(&cfg.workspace, key, value, lineNo); err != nil {
 				return rawConfig{}, err
@@ -301,8 +340,6 @@ func parse(file *os.File) (rawConfig, error) {
 			if err := parseSourceField(currentSource, key, value, lineNo); err != nil {
 				return rawConfig{}, err
 			}
-		default:
-			return rawConfig{}, fmt.Errorf("line %d: key %q is outside a supported section", lineNo, key)
 		}
 	}
 

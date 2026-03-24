@@ -11,6 +11,7 @@ import (
 var commands = map[string]string{
 	"canonicalize":      "promote an inferred contract into a spec bundle",
 	"discover":          "scan a repo and propose a local config",
+	"migrate-config":    "rewrite a legacy config into the current schema",
 	"index":             "rebuild or validate the local Pituitary index",
 	"status":            "show current index status",
 	"version":           "show Pituitary and Go runtime versions",
@@ -71,6 +72,9 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if name == "canonicalize" {
 		return runCanonicalizeContext(ctx, remainingArgs[1:], stdout, stderr)
+	}
+	if name == "migrate-config" {
+		return runMigrateConfigContext(ctx, remainingArgs[1:], stdout, stderr)
 	}
 	if name == "status" {
 		return runStatusContext(ctx, remainingArgs[1:], stdout, stderr)

@@ -14,6 +14,7 @@ func Render(cfg *Config) (string, error) {
 	}
 
 	var builder strings.Builder
+	fmt.Fprintf(&builder, "schema_version = %d\n\n", CurrentSchemaVersion)
 	fmt.Fprintf(&builder, "[workspace]\n")
 	fmt.Fprintf(&builder, "root = %s\n", strconv.Quote(cfg.Workspace.Root))
 	fmt.Fprintf(&builder, "index_path = %s\n", strconv.Quote(cfg.Workspace.IndexPath))
