@@ -34,6 +34,9 @@ Applies To:
 	mustWriteFile(t, filepath.Join(repo, "docs", "runbooks", "rate-limit-rollout.md"), `
 # Rate Limit Rollout Runbook
 `)
+	mustWriteFile(t, filepath.Join(repo, "docs", "reference", "rate-limit-keys.md"), `
+# Rate Limit Reference
+`)
 	mustWriteFile(t, filepath.Join(repo, "docs", "development", "testing-guide.md"), `
 # Testing Guide
 `)
@@ -58,11 +61,21 @@ Applies To:
 	if got, want := result.Sources[2].Kind, config.SourceKindMarkdownDocs; got != want {
 		t.Fatalf("third source kind = %q, want %q", got, want)
 	}
-	if got := result.Sources[2].ItemCount; got != 2 {
-		t.Fatalf("docs source item count = %d, want 2", got)
+	if got := result.Sources[2].ItemCount; got != 3 {
+		t.Fatalf("docs source item count = %d, want 3", got)
 	}
 	if got := result.Sources[1].Confidence; got != "high" {
 		t.Fatalf("contract source confidence = %q, want high", got)
+	}
+	var foundReferenceDoc bool
+	for _, item := range result.Sources[2].Items {
+		if item.Path == "docs/reference/rate-limit-keys.md" {
+			foundReferenceDoc = true
+			break
+		}
+	}
+	if !foundReferenceDoc {
+		t.Fatalf("docs items = %+v, want docs/reference/rate-limit-keys.md included", result.Sources[2].Items)
 	}
 	if result.Preview == nil || len(result.Preview.Sources) != 3 {
 		t.Fatalf("preview = %+v, want 3 sources", result.Preview)
