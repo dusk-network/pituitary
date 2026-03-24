@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -146,6 +147,55 @@ This guide changed after indexing.
 	}
 	if !strings.Contains(operation.Issue.Message, "pituitary index --rebuild") {
 		t.Fatalf("SearchSpecs() issue.message = %q, want rebuild guidance", operation.Issue.Message)
+	}
+}
+
+func TestClassifyExecutionErrorDefaultsToValidationError(t *testing.T) {
+	t.Parallel()
+
+	issue := classifyExecutionError(nil, errors.New("boom"), operationExecutionPolicy{})
+	if issue.Code != CodeValidationError {
+		t.Fatalf("classifyExecutionError() code = %q, want %q", issue.Code, CodeValidationError)
+	}
+	if issue.ExitCode != 2 {
+		t.Fatalf("classifyExecutionError() exitCode = %d, want 2", issue.ExitCode)
+	}
+	if issue.Message != "boom" {
+		t.Fatalf("classifyExecutionError() message = %q, want raw error", issue.Message)
+	}
+}
+
+func TestOperationsShareNotFoundClassification(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeOperationWorkspace(t, false)
+
+	checks := map[string]*Issue{
+		"compare": CompareSpecs(context.Background(), configPath, analysis.CompareRequest{
+			SpecRefs: []string{"SPEC-404", "SPEC-042"},
+		}).Issue,
+		"impact": AnalyzeImpact(context.Background(), configPath, analysis.AnalyzeImpactRequest{
+			SpecRef:    "SPEC-404",
+			ChangeType: "accepted",
+		}).Issue,
+		"review": ReviewSpec(context.Background(), configPath, analysis.ReviewRequest{
+			SpecRef: "SPEC-404",
+		}).Issue,
+	}
+
+	for name, issue := range checks {
+		if issue == nil {
+			t.Fatalf("%s issue = nil, want not_found classification", name)
+		}
+		if issue.Code != CodeNotFound {
+			t.Fatalf("%s issue.code = %q, want %q", name, issue.Code, CodeNotFound)
+		}
+		if issue.ExitCode != 2 {
+			t.Fatalf("%s issue.exitCode = %d, want 2", name, issue.ExitCode)
+		}
+		if !strings.Contains(issue.Message, "SPEC-404") {
+			t.Fatalf("%s issue.message = %q, want missing spec ref detail", name, issue.Message)
+		}
 	}
 }
 

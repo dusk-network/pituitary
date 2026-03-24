@@ -32,6 +32,62 @@ type Response[Req any, Res any] struct {
 	Issue   *Issue
 }
 
+type operationExecutionPolicy struct {
+	NotFound    func(error) bool
+	DefaultCode string
+}
+
+func executeWithFreshConfig[Req any, Res any](ctx context.Context, configPath string, request Req, policy operationExecutionPolicy, run func(*config.Config) (*Res, error)) Response[Req, Res] {
+	cfg, issue := loadConfig(configPath)
+	if issue != nil {
+		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
+		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+
+	result, err := run(cfg)
+	if err != nil {
+		issue := classifyExecutionError(cfg, err, policy)
+		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
+	}
+
+	return success(request, result)
+}
+
+func classifyExecutionError(cfg *config.Config, err error, policy operationExecutionPolicy) *Issue {
+	switch {
+	case index.IsMissingIndex(err):
+		return &Issue{
+			Code:     CodeConfigError,
+			Message:  missingIndexMessage(err),
+			ExitCode: 2,
+		}
+	case policy.NotFound != nil && policy.NotFound(err):
+		return &Issue{
+			Code:     CodeNotFound,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	case index.IsDependencyUnavailable(err):
+		return &Issue{
+			Code:     CodeDependencyUnavailable,
+			Message:  FormatDependencyUnavailableMessage(cfg, err),
+			ExitCode: 3,
+		}
+	default:
+		code := strings.TrimSpace(policy.DefaultCode)
+		if code == "" {
+			code = CodeValidationError
+		}
+		return &Issue{
+			Code:     code,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	}
+}
+
 // SearchSpecs loads config, normalizes the request, executes search, and classifies failures.
 func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpecRequest) Response[index.SearchSpecRequest, index.SearchSpecResult] {
 	query, err := request.ToQuery()
@@ -45,210 +101,70 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 	limit := query.Limit
 	request.Limit = &limit
 
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[index.SearchSpecRequest, index.SearchSpecResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[index.SearchSpecRequest, index.SearchSpecResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := index.SearchSpecsContext(ctx, cfg, query)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[index.SearchSpecRequest, index.SearchSpecResult](request, CodeInternalError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{}, func(cfg *config.Config) (*index.SearchSpecResult, error) {
+		return index.SearchSpecsContext(ctx, cfg, query)
+	})
 }
 
 // CheckOverlap loads config, executes overlap analysis, and classifies failures.
 func CheckOverlap(ctx context.Context, configPath string, request analysis.OverlapRequest) Response[analysis.OverlapRequest, analysis.OverlapResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.OverlapRequest, analysis.OverlapResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.OverlapRequest, analysis.OverlapResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.CheckOverlapContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeNotFound, err.Error(), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[analysis.OverlapRequest, analysis.OverlapResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.OverlapResult, error) {
+		return analysis.CheckOverlapContext(ctx, cfg, request)
+	})
 }
 
 // CompareSpecs loads config, executes comparison, and classifies failures.
 func CompareSpecs(ctx context.Context, configPath string, request analysis.CompareRequest) Response[analysis.CompareRequest, analysis.CompareResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.CompareRequest, analysis.CompareResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.CompareRequest, analysis.CompareResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.CompareSpecsContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeNotFound, err.Error(), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[analysis.CompareRequest, analysis.CompareResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.CompareResult, error) {
+		return analysis.CompareSpecsContext(ctx, cfg, request)
+	})
 }
 
 // AnalyzeImpact loads config, executes impact analysis, and classifies failures.
 func AnalyzeImpact(ctx context.Context, configPath string, request analysis.AnalyzeImpactRequest) Response[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.AnalyzeImpactContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, CodeNotFound, err.Error(), 2)
-		default:
-			return failure[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.AnalyzeImpactResult, error) {
+		return analysis.AnalyzeImpactContext(ctx, cfg, request)
+	})
 }
 
 // CheckTerminology loads config, executes terminology analysis, and classifies failures.
 func CheckTerminology(ctx context.Context, configPath string, request analysis.TerminologyAuditRequest) Response[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.CheckTerminologyContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeNotFound, err.Error(), 2)
-		default:
-			return failure[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.TerminologyAuditResult, error) {
+		return analysis.CheckTerminologyContext(ctx, cfg, request)
+	})
 }
 
 // CheckDocDrift loads config, executes doc drift analysis, and classifies failures.
 func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocDriftRequest) Response[analysis.DocDriftRequest, analysis.DocDriftResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.CheckDocDriftContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeNotFound, err.Error(), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[analysis.DocDriftRequest, analysis.DocDriftResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.DocDriftResult, error) {
+		return analysis.CheckDocDriftContext(ctx, cfg, request)
+	})
 }
 
 // CheckCompliance loads config, executes compliance analysis, and classifies failures.
 func CheckCompliance(ctx context.Context, configPath string, request analysis.ComplianceRequest) Response[analysis.ComplianceRequest, analysis.ComplianceResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.CheckComplianceContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[analysis.ComplianceRequest, analysis.ComplianceResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{}, func(cfg *config.Config) (*analysis.ComplianceResult, error) {
+		return analysis.CheckComplianceContext(ctx, cfg, request)
+	})
 }
 
 // ReviewSpec loads config, executes the review workflow, and classifies failures.
 func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewRequest) Response[analysis.ReviewRequest, analysis.ReviewResult] {
-	cfg, issue := loadConfig(configPath)
-	if issue != nil {
-		return failure[analysis.ReviewRequest, analysis.ReviewResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-	if issue := ensureFreshIndex(ctx, cfg); issue != nil {
-		return failure[analysis.ReviewRequest, analysis.ReviewResult](request, issue.Code, issue.Message, issue.ExitCode)
-	}
-
-	result, err := analysis.ReviewSpecContext(ctx, cfg, request)
-	if err != nil {
-		switch {
-		case index.IsMissingIndex(err):
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeConfigError, missingIndexMessage(err), 2)
-		case analysis.IsNotFound(err):
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeNotFound, err.Error(), 2)
-		case index.IsDependencyUnavailable(err):
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeDependencyUnavailable, FormatDependencyUnavailableMessage(cfg, err), 3)
-		default:
-			return failure[analysis.ReviewRequest, analysis.ReviewResult](request, CodeValidationError, err.Error(), 2)
-		}
-	}
-
-	return success(request, result)
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.ReviewResult, error) {
+		return analysis.ReviewSpecContext(ctx, cfg, request)
+	})
 }
 
 func loadConfig(configPath string) (*config.Config, *Issue) {
