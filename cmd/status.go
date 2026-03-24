@@ -25,6 +25,7 @@ type statusResult struct {
 	ConfigResolution  *configResolution       `json:"config_resolution,omitempty"`
 	IndexPath         string                  `json:"index_path"`
 	IndexExists       bool                    `json:"index_exists"`
+	Freshness         *index.FreshnessStatus  `json:"freshness,omitempty"`
 	SpecCount         int                     `json:"spec_count"`
 	DocCount          int                     `json:"doc_count"`
 	ChunkCount        int                     `json:"chunk_count"`
@@ -115,6 +116,13 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 			Message: "inspect index failed:\n" + err.Error(),
 		}, 2)
 	}
+	freshness, err := index.InspectFreshnessContext(ctx, cfg)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
+			Code:    "index_error",
+			Message: "inspect index freshness failed:\n" + err.Error(),
+		}, 2)
+	}
 
 	var runtimeResult *runtimeprobe.Result
 	if scope != runtimeprobe.ScopeNone {
@@ -141,6 +149,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		ConfigResolution:  resolution,
 		IndexPath:         status.IndexPath,
 		IndexExists:       status.Exists,
+		Freshness:         freshness,
 		SpecCount:         status.SpecCount,
 		DocCount:          status.DocCount,
 		ChunkCount:        status.ChunkCount,

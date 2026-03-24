@@ -53,8 +53,9 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 8)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 4)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 5)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
+	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
 	assertSections(t, db, "SPEC-042", []string{
 		"Overview",
 		"Requirements",

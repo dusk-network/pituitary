@@ -90,6 +90,8 @@ When you run `pituitary index --rebuild`, Pituitary:
 4. Stores everything — metadata, embeddings, and dependency graph — in a single SQLite database.
 5. Writes to a staging DB first and atomically swaps it in, so a failed rebuild never corrupts your index.
 
+Pituitary also stores source and content fingerprints in the index. Search and analysis commands compare those fingerprints against the current workspace before returning results, so stale or incompatible indexes fail fast with a rebuild hint instead of silently serving outdated findings.
+
 The workspace is configured with a `pituitary.toml` at your project root:
 
 ```toml
@@ -183,7 +185,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
 | `index --rebuild` | Rebuild the SQLite index from all configured sources |
 | `index --dry-run` | Validate config, sources, and rebuild prerequisites without writing the SQLite index |
-| `status [--check-runtime all]` | Report index counts, config resolution, artifact locations, and optionally probe embedder and analysis runtime readiness |
+| `status [--check-runtime all]` | Report index counts, config resolution, freshness, artifact locations, and optionally probe embedder and analysis runtime readiness |
 | `version` | Print Pituitary and Go runtime version information |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --path specs/rate-limit-v2` | Detect specs that cover overlapping ground without looking up refs first |
