@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
+			if name == "canonicalize" || name == "discover" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "review-spec" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "discover" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
@@ -45,6 +46,21 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				}
 				if name == "discover" {
 					args = []string{name, "--path", "."}
+					expectBootstrapStatus = false
+					exitCode := withWorkingDir(t, repoRoot, run)
+					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)
+					return
+				}
+				if name == "migrate-config" {
+					repoRoot = t.TempDir()
+					mustWriteFileCmd(t, filepath.Join(repoRoot, "pituitary.toml"), `
+[project]
+id = "ccd"
+name = "Continuous Context Development"
+specs_dir = "specs"
+`)
+					mustMkdirAllCmd(t, filepath.Join(repoRoot, "specs"))
+					args = []string{name}
 					expectBootstrapStatus = false
 					exitCode := withWorkingDir(t, repoRoot, run)
 					assertKnownCommandResult(t, name, description, exitCode, stdout.String(), stderr.String(), expectBootstrapStatus)

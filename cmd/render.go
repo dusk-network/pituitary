@@ -24,6 +24,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderCanonicalizeResult(w, typed)
 	case *source.DiscoverResult:
 		renderDiscoverResult(w, typed)
+	case *migrateConfigResult:
+		renderMigrateConfigResult(w, typed)
 	case *index.RebuildResult:
 		renderIndexResult(w, typed)
 	case *statusResult:
@@ -149,6 +151,22 @@ func renderCanonicalizeResult(w io.Writer, result *source.CanonicalizeResult) {
 			fmt.Fprintln(w)
 		}
 	}
+}
+
+func renderMigrateConfigResult(w io.Writer, result *migrateConfigResult) {
+	fmt.Fprintf(w, "config path: %s\n", result.ConfigPath)
+	fmt.Fprintf(w, "detected schema: %s\n", result.DetectedSchema)
+	fmt.Fprintf(w, "target schema_version: %d\n", result.TargetSchemaVersion)
+	if result.WroteConfig {
+		fmt.Fprintln(w, "config write: wrote migrated config")
+	} else {
+		fmt.Fprintln(w, "config write: skipped")
+	}
+	for _, note := range result.Notes {
+		fmt.Fprintf(w, "note: %s\n", note)
+	}
+	fmt.Fprintln(w, "migrated config:")
+	fmt.Fprint(w, result.Config)
 }
 
 func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary) {

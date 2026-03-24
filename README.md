@@ -93,6 +93,8 @@ When you run `pituitary index --rebuild`, Pituitary:
 The workspace is configured with a `pituitary.toml` at your project root:
 
 ```toml
+schema_version = 2
+
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
@@ -162,6 +164,12 @@ For an existing repo without a hand-written config yet, the default onboarding f
 ./pituitary index --rebuild
 ```
 
+If you still have a legacy config shaped like `[project]` with `specs_dir = "specs"`, migrate it with:
+
+```sh
+./pituitary migrate-config --path pituitary.toml --write
+```
+
 ## Commands
 
 Every command supports `--format json` for machine-readable output. `search-specs` also supports `--format table` for compact terminal summaries, and `review-spec` also supports `--format markdown` for shareable review reports.
@@ -169,6 +177,7 @@ Every command supports `--format json` for machine-readable output. `search-spec
 | Command | What it does |
 |---|---|
 | `discover --path .` | Scan a repo, propose conservative sources for specs, contracts, guides, runbooks, and reference docs, and show the generated local config |
+| `migrate-config --path pituitary.toml --write` | Rewrite a legacy or unversioned config into the current schema |
 | `preview-sources` | Show which files each configured source will index |
 | `explain-file docs/guides/api-rate-limits.md` | Explain how one file is classified by configured sources |
 | `canonicalize --path rfcs/service-sla.md` | Generate a suggested `spec.toml` + `body.md` bundle from one inferred contract |
