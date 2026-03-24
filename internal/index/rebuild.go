@@ -91,7 +91,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, dimension); err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), options)
+	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), options)
+	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
 	if err != nil {
 		return nil, err
 	}
@@ -661,6 +661,7 @@ func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql
 	if len(texts) > 0 {
 		var err error
 		event.Phase = "embedding"
+		event.ChunkCount = len(texts)
 		reportRebuildProgress(reporter, event)
 		vectors, err = embedder.EmbedDocuments(ctx, texts)
 		if err != nil {

@@ -188,6 +188,71 @@ func TestPrepareRebuildDoesNotLeaveCreatedIndexDirectoriesBehind(t *testing.T) {
 	}
 }
 
+func TestPrepareRebuildDoesNotReuseWhenSourceFingerprintChanges(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Sources[1].Include = []string{"guides/*.md"}
+	records, err = source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() after source change error = %v", err)
+	}
+
+	result, err := PrepareRebuildContextWithOptions(t.Context(), cfg, records, RebuildOptions{})
+	if err != nil {
+		t.Fatalf("PrepareRebuildContextWithOptions() error = %v", err)
+	}
+	if result.ReusedArtifactCount != 0 || result.ReusedChunkCount != 0 {
+		t.Fatalf("result = %+v, want reuse disabled when source fingerprint changes", result)
+	}
+	if result.EmbeddedChunkCount != result.ChunkCount {
+		t.Fatalf("result = %+v, want all chunks re-embedded when source fingerprint changes", result)
+	}
+}
+
+func TestPrepareRebuildDoesNotReuseWhenStoredEmbedderDimensionDiffers(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite3", cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`UPDATE metadata SET value = '999' WHERE key = 'embedder_dimension'`); err != nil {
+		t.Fatalf("update embedder_dimension: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	result, err := PrepareRebuildContextWithOptions(t.Context(), cfg, records, RebuildOptions{})
+	if err != nil {
+		t.Fatalf("PrepareRebuildContextWithOptions() error = %v", err)
+	}
+	if result.ReusedArtifactCount != 0 || result.ReusedChunkCount != 0 {
+		t.Fatalf("result = %+v, want reuse disabled when stored embedder dimension changes", result)
+	}
+	if result.EmbeddedChunkCount != result.ChunkCount {
+		t.Fatalf("result = %+v, want all chunks re-embedded when stored embedder dimension changes", result)
+	}
+}
+
 func TestPrepareRebuildValidatesIndexPathFilesystemPreconditions(t *testing.T) {
 	t.Parallel()
 

@@ -2,9 +2,12 @@ package index
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/chunk"
@@ -34,7 +37,7 @@ type artifactChunkPlan struct {
 	artifactUnchanged  bool
 }
 
-func loadReuseStateContext(ctx context.Context, indexPath, embedderFingerprint string, options RebuildOptions) (*reuseState, error) {
+func loadReuseStateContext(ctx context.Context, indexPath, embedderFingerprint string, embedderDimension int, currentSourceFingerprint string, options RebuildOptions) (*reuseState, error) {
 	if options.Full {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
@@ -55,7 +58,7 @@ func loadReuseStateContext(ctx context.Context, indexPath, embedderFingerprint s
 	}
 	defer db.Close()
 
-	metadata, err := readMetadataContext(ctx, db, "schema_version", "embedder_fingerprint")
+	metadata, err := readMetadataContext(ctx, db, "schema_version", "embedder_fingerprint", "embedder_dimension", "source_fingerprint")
 	if err != nil {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
@@ -63,6 +66,12 @@ func loadReuseStateContext(ctx context.Context, indexPath, embedderFingerprint s
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
 	if strings.TrimSpace(metadata["embedder_fingerprint"]) != embedderFingerprint {
+		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+	}
+	if strings.TrimSpace(metadata["embedder_dimension"]) != strconv.Itoa(embedderDimension) {
+		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+	}
+	if strings.TrimSpace(metadata["source_fingerprint"]) != currentSourceFingerprint {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
 
@@ -143,8 +152,8 @@ func planArtifactReuse(title, contentHash, body string, stored storedArtifact) a
 
 	for _, section := range sections {
 		key := reuseChunkKey(title, section.Heading, section.Body)
-		if chunk, ok := stored.chunks[key]; ok {
-			plan.reusedEmbeddings[key] = chunk.embedding
+		if storedChunk, ok := stored.chunks[key]; ok {
+			plan.reusedEmbeddings[key] = storedChunk.embedding
 			plan.reusedChunkCount++
 		}
 	}
@@ -154,7 +163,13 @@ func planArtifactReuse(title, contentHash, body string, stored storedArtifact) a
 }
 
 func reuseChunkKey(title, heading, body string) string {
-	return title + "\x00" + heading + "\x00" + body
+	hasher := sha256.New()
+	_, _ = hasher.Write([]byte(title))
+	_, _ = hasher.Write([]byte{0})
+	_, _ = hasher.Write([]byte(heading))
+	_, _ = hasher.Write([]byte{0})
+	_, _ = hasher.Write([]byte(body))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func storedArtifactForRecord(state *reuseState, ref string) storedArtifact {
