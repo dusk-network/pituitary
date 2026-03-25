@@ -63,7 +63,7 @@ See the [cheatsheet](docs/cheatsheet.md) for every command, or the [full referen
 
 ## Use It From Your Editor
 
-Pituitary ships an MCP server. Add it to Claude Code, Cursor, Windsurf, or any MCP-compatible client:
+Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add it to Claude Code, Cursor, Windsurf, or any MCP-compatible client:
 
 ```json
 {
@@ -76,7 +76,7 @@ Pituitary ships an MCP server. Add it to Claude Code, Cursor, Windsurf, or any M
 }
 ```
 
-Your agent gets 6 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`.
+Your agent gets 6 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, or planning changes that touch governed code.
 
 ## Use It in CI
 
@@ -96,7 +96,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 ## Project Status
 
-Active development. Core analysis surface is functional end-to-end. Pituitary is specification-first; compliance is a supporting feature, not a code-analysis pivot. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records — code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 ## Contributing
 
