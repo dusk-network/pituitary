@@ -73,7 +73,7 @@ pituitary migrate-config --path pituitary.toml --write  # upgrade legacy config
 ## MCP Server
 
 ```sh
-pituitary serve --config pituitary.toml         # start MCP server over stdio
+pituitary serve --config .pituitary/pituitary.toml  # start MCP server over stdio
 ```
 
 Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`.

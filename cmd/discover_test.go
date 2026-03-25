@@ -50,13 +50,13 @@ func TestRunDiscoverJSON(t *testing.T) {
 	if payload.Request.Path != "." || payload.Request.Write {
 		t.Fatalf("request = %+v, want path-only discover request", payload.Request)
 	}
-	if got, want := len(payload.Result.Sources), 3; got != want {
+	if got, want := len(payload.Result.Sources), 4; got != want {
 		t.Fatalf("source count = %d, want %d", got, want)
 	}
-	if got := payload.Result.Sources[2].ItemCount; got != 3 {
-		t.Fatalf("docs item count = %d, want 3", got)
+	if got := payload.Result.Sources[2].ItemCount; got != 2 {
+		t.Fatalf("docs item count = %d, want 2", got)
 	}
-	if got, want := len(payload.Result.Preview.Sources), 3; got != want {
+	if got, want := len(payload.Result.Preview.Sources), 4; got != want {
 		t.Fatalf("preview source count = %d, want %d", got, want)
 	}
 	if !strings.Contains(payload.Result.Config, "kind = \"markdown_contract\"") {

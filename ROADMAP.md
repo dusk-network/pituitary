@@ -17,12 +17,12 @@ The core analysis surface is functional end-to-end:
 - **Multi-format output** — JSON, Markdown, HTML reports with evidence chains
 - **One-shot onboarding** — `pituitary init` discovers sources, writes config, builds index
 - **Deterministic mode** — no API keys required; fixture embedder for reproducible CI
+- **Broader discovery defaults** — auto-detect CLAUDE.md, AGENTS.md, ARCHITECTURE.md as indexable sources
 
 ## Next
 
 Near-term work driven by the positioning direction (spec-centric, intent-focused):
 
-- **Broader discovery defaults** — auto-detect CLAUDE.md, AGENTS.md, ARCHITECTURE.md as indexable sources
 - **Stronger spec review workflows** — richer comparison output, better evidence presentation
 - **Clearer onboarding** — better error messages, progress indicators during index rebuilds
 - **CI recipe polish** — tested GitHub Actions workflow, pre-commit hook example

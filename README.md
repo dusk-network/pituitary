@@ -70,7 +70,7 @@ Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add
   "mcpServers": {
     "pituitary": {
       "command": "pituitary",
-      "args": ["serve", "--config", "pituitary.toml"]
+      "args": ["serve", "--config", ".pituitary/pituitary.toml"]
     }
   }
 }

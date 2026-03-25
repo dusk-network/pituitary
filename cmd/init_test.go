@@ -49,7 +49,7 @@ func TestRunInitDryRunJSON(t *testing.T) {
 	if got, want := payload.Result.ConfigAction, "preview"; got != want {
 		t.Fatalf("config_action = %q, want %q", got, want)
 	}
-	if got, want := len(payload.Result.Discover.Sources), 3; got != want {
+	if got, want := len(payload.Result.Discover.Sources), 4; got != want {
 		t.Fatalf("discover sources = %d, want %d", got, want)
 	}
 	if payload.Result.Index != nil {

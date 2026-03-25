@@ -43,7 +43,7 @@ In MCP-compatible editors, your agent gets 6 spec-awareness tools mid-session. A
   "mcpServers": {
     "pituitary": {
       "command": "pituitary",
-      "args": ["serve", "--config", "pituitary.toml"]
+      "args": ["serve", "--config", ".pituitary/pituitary.toml"]
     }
   }
 }

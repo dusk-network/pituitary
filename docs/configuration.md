@@ -83,7 +83,7 @@ path = "."
 files = ["CLAUDE.md", "AGENTS.md", "ARCHITECTURE.md"]
 ```
 
-This indexes them alongside your specs so drift detection and overlap checks cover the full intent corpus.
+This indexes them alongside your specs so drift detection and search cover them. Note: `markdown_docs` sources participate in drift checks and semantic search, not overlap or review — for that, use `markdown_contract` or promote to a spec bundle with `pituitary canonicalize`.
 
 ## Source Kinds
 

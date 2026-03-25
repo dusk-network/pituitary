@@ -52,7 +52,7 @@ Applies To:
 		t.Fatalf("DiscoverWorkspace() error = %v", err)
 	}
 
-	if got, want := len(result.Sources), 3; got != want {
+	if got, want := len(result.Sources), 4; got != want {
 		t.Fatalf("source count = %d, want %d", got, want)
 	}
 	if got, want := result.Sources[0].Kind, config.SourceKindSpecBundle; got != want {
@@ -64,8 +64,17 @@ Applies To:
 	if got, want := result.Sources[2].Kind, config.SourceKindMarkdownDocs; got != want {
 		t.Fatalf("third source kind = %q, want %q", got, want)
 	}
-	if got := result.Sources[2].ItemCount; got != 4 {
-		t.Fatalf("docs source item count = %d, want 4", got)
+	if got := result.Sources[2].ItemCount; got != 3 {
+		t.Fatalf("docs source item count = %d, want 3", got)
+	}
+	if got, want := result.Sources[3].Kind, config.SourceKindMarkdownDocs; got != want {
+		t.Fatalf("fourth source kind = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[3].Name, "project-docs"; got != want {
+		t.Fatalf("fourth source name = %q, want %q", got, want)
+	}
+	if got := result.Sources[3].ItemCount; got != 1 {
+		t.Fatalf("project-docs source item count = %d, want 1", got)
 	}
 	if got := result.Sources[1].Confidence; got != "high" {
 		t.Fatalf("contract source confidence = %q, want high", got)
@@ -80,8 +89,8 @@ Applies To:
 	if !foundReferenceDoc {
 		t.Fatalf("docs items = %+v, want docs/reference/rate-limit-keys.md included", result.Sources[2].Items)
 	}
-	if result.Preview == nil || len(result.Preview.Sources) != 3 {
-		t.Fatalf("preview = %+v, want 3 sources", result.Preview)
+	if result.Preview == nil || len(result.Preview.Sources) != 4 {
+		t.Fatalf("preview = %+v, want 4 sources", result.Preview)
 	}
 	if got := result.ConfigPath; got != filepath.Join(repo, ".pituitary", "pituitary.toml") {
 		t.Fatalf("config path = %q, want local .pituitary config", got)
@@ -152,20 +161,29 @@ func TestDiscoverDetectsIntentArtifacts(t *testing.T) {
 		t.Fatalf("DiscoverWorkspace() error = %v", err)
 	}
 
-	// Collect all markdown_docs items.
-	docItems := map[string]bool{}
-	for _, src := range result.Sources {
-		if src.Kind != config.SourceKindMarkdownDocs {
-			continue
-		}
-		for _, item := range src.Items {
-			docItems[item.Path] = true
+	// Well-known files should appear in their own "project-docs" source,
+	// separate from regular docs, to avoid shifting the common source root.
+	var projectDocsSrc *DiscoveredSource
+	for i, src := range result.Sources {
+		if src.Name == "project-docs" {
+			projectDocsSrc = &result.Sources[i]
+			break
 		}
 	}
+	if projectDocsSrc == nil {
+		t.Fatalf("expected a 'project-docs' source, got sources: %+v", result.Sources)
+	}
+	if projectDocsSrc.Kind != config.SourceKindMarkdownDocs {
+		t.Fatalf("project-docs kind = %q, want %q", projectDocsSrc.Kind, config.SourceKindMarkdownDocs)
+	}
 
+	projectItems := map[string]bool{}
+	for _, item := range projectDocsSrc.Items {
+		projectItems[item.Path] = true
+	}
 	for name := range wellKnown {
-		if !docItems[name] {
-			t.Errorf("expected %s to be discovered as markdown_docs, got items: %v", name, docItems)
+		if !projectItems[name] {
+			t.Errorf("expected %s to be in project-docs source, got items: %v", name, projectItems)
 		}
 	}
 }

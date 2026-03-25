@@ -385,14 +385,40 @@ func buildDiscoveredSources(workspaceRoot string, specs, contracts, docs []disco
 	}, usedNames); ok {
 		sources = append(sources, source)
 	}
-	if source, ok := buildDiscoveredSource(workspaceRoot, "docs", config.SourceKindMarkdownDocs, docs, []string{
-		fmt.Sprintf("discovered %d likely guide, runbook, operations, or reference-doc file(s)", len(docs)),
+
+	// Partition docs: root-level well-known files go into their own source
+	// to avoid shifting the common root for regular docs.
+	var intentDocs, regularDocs []discoveredCandidate
+	for _, doc := range docs {
+		if !strings.Contains(doc.path, "/") && isWellKnownIntentArtifact(filepath.Base(doc.path)) {
+			intentDocs = append(intentDocs, doc)
+		} else {
+			regularDocs = append(regularDocs, doc)
+		}
+	}
+
+	if source, ok := buildDiscoveredSource(workspaceRoot, "docs", config.SourceKindMarkdownDocs, regularDocs, []string{
+		fmt.Sprintf("discovered %d likely guide, runbook, operations, or reference-doc file(s)", len(regularDocs)),
 		"uses exact file selectors to avoid indexing unrelated markdown",
+	}, usedNames); ok {
+		sources = append(sources, source)
+	}
+	if source, ok := buildDiscoveredSource(workspaceRoot, "project-docs", config.SourceKindMarkdownDocs, intentDocs, []string{
+		fmt.Sprintf("discovered %d well-known intent artifact(s)", len(intentDocs)),
+		"root-level project documentation kept as separate source to preserve doc ref stability",
 	}, usedNames); ok {
 		sources = append(sources, source)
 	}
 
 	return sources
+}
+
+func isWellKnownIntentArtifact(filename string) bool {
+	wellKnown := map[string]bool{
+		"claude.md": true, "agents.md": true, "architecture.md": true,
+		"contributing.md": true, "readme.md": true,
+	}
+	return wellKnown[strings.ToLower(filename)]
 }
 
 func buildDiscoveredSource(workspaceRoot, fallbackName, kind string, candidates []discoveredCandidate, defaultRationale []string, usedNames map[string]struct{}) (DiscoveredSource, bool) {
@@ -428,7 +454,7 @@ func buildDiscoveredSource(workspaceRoot, fallbackName, kind string, candidates 
 	})
 
 	name := filepath.Base(sourceRoot)
-	if name == "." || name == string(filepath.Separator) || name == "" {
+	if name == "." || name == string(filepath.Separator) || name == "" || relativeRoot == "." {
 		name = fallbackName
 	}
 	name = uniqueDiscoverySourceName(name, kind, usedNames)

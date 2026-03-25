@@ -89,7 +89,7 @@ Additional formats:
 Pituitary ships an optional MCP server over stdio:
 
 ```sh
-pituitary serve --config pituitary.toml
+pituitary serve --config .pituitary/pituitary.toml
 ```
 
 Typical client config:

@@ -8,7 +8,7 @@
 
 **Transport:** stdio
 
-**Command:** `pituitary serve --config pituitary.toml`
+**Command:** `pituitary serve --config .pituitary/pituitary.toml`
 
 ## Tools
 
@@ -36,7 +36,7 @@ No API keys required in deterministic mode. Optional local embedding server (e.g
   "mcpServers": {
     "pituitary": {
       "command": "pituitary",
-      "args": ["serve", "--config", "/path/to/pituitary.toml"]
+      "args": ["serve", "--config", ".pituitary/pituitary.toml"]
     }
   }
 }
