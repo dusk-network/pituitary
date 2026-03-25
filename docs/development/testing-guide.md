@@ -50,7 +50,7 @@ Supporting expectations live in:
 - `testdata/README.md`
 - malformed fixture cases under `testdata/invalid-spec-bundle/`
 
-The repo-level fixture checks live in [fixtures_test.go](/Users/emanuele/devel/pituitary/fixtures_test.go).
+The repo-level fixture checks live in [fixtures_test.go](../../fixtures_test.go).
 
 If you change expected fixture behavior, update both the fixtures and the expectation files together.
 
