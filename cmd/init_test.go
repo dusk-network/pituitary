@@ -97,6 +97,7 @@ func TestRunInitWritesConfigRebuildsAndSummarizes(t *testing.T) {
 		"config: ",
 		"action: wrote",
 		"index: 2 specs · 3 docs",
+		"pituitary check-doc-drift --scope all",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("runInit() output %q does not contain %q", output, want)
