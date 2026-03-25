@@ -2,30 +2,22 @@
 
 Install Pituitary from a release binary for normal use. Build from source only if you are contributing to Pituitary itself.
 
-## Homebrew
+## Homebrew (macOS)
 
 ```sh
-export HOMEBREW_GITHUB_API_TOKEN="$(gh auth token)"
 brew install dusk-network/tap/pituitary
 ```
 
-## One-Line Installer
+## Linux / macOS (binary)
 
 ```sh
-gh api repos/dusk-network/pituitary/contents/scripts/install.sh?ref=main \
-  -H 'Accept: application/vnd.github.raw' \
-  | sh
+curl -fsSL https://github.com/dusk-network/pituitary/releases/latest/download/pituitary_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz | tar xz
+sudo install pituitary /usr/local/bin/
 ```
 
-The installer downloads the latest released archive for the current platform through `gh release download`, verifies it against the published checksum manifest, and installs `pituitary` to `/usr/local/bin` when that path is writable or `~/.local/bin` otherwise.
+## Windows
 
-You can also pin the release or install directory:
-
-```sh
-gh api repos/dusk-network/pituitary/contents/scripts/install.sh?ref=main \
-  -H 'Accept: application/vnd.github.raw' \
-  | PITUITARY_VERSION=v1.0.0-alpha PITUITARY_INSTALL_DIR="$HOME/.local/bin" sh
-```
+Download from [GitHub Releases](https://github.com/dusk-network/pituitary/releases) and add to your PATH.
 
 ## Manual Releases
 
@@ -52,7 +44,7 @@ If your repo already has a config, skip `init` and go straight to `status`, `ind
 
 ## Build from Source
 
-If you are contributing to Pituitary itself or want to try the bundled example workspace in this repo:
+**Prerequisites:** Go 1.25+, a C toolchain (required for the sqlite-vec extension). For platform-specific setup, see [prerequisites.md](development/prerequisites.md).
 
 ```sh
 git clone https://github.com/dusk-network/pituitary.git
@@ -61,7 +53,6 @@ go build -o pituitary .
 
 ./pituitary index --rebuild
 ./pituitary review-spec --path specs/rate-limit-v2
-./pituitary analyze-impact --path specs/rate-limit-v2/body.md
 ./pituitary check-doc-drift --scope all
 ```
 
