@@ -1,20 +1,20 @@
 # Pituitary: catch spec drift before it catches you
 
-Human+AI continuously produce records of intent, decisions, and documentation — specs, architecture docs, CLAUDE.md files, AGENTS.md, API contracts, runbooks, roadmaps. These accumulate across sessions. They overlap, contradict each other, and drift from the code. Nobody's watching the whole corpus.
+Human+AI continuously produce records of intent, decisions, and documentation. Specs, architecture docs, CLAUDE.md files, AGENTS.md, API contracts, runbooks, roadmaps. These accumulate across sessions. They overlap, contradict each other, and drift from the code. Nobody's watching the whole corpus.
 
-Every AI session makes it worse. Each session starts fresh. The records pile up but nobody catches the contradictions. What you wrote down and should be the source of truth becomes unreliable — silently.
+Every AI session makes it worse. Each session starts fresh. The records pile up but nobody catches the contradictions. What you wrote down and should be the source of truth becomes unreliable. Silently.
 
-You find out in a PR review that the doc you're referencing was outdated two sprints ago. Or you spend an hour writing a decision only to discover someone already wrote one covering the same ground. Or worse — you don't find out, and it ships.
+You find out in a PR review that the doc you're referencing was outdated two sprints ago. Or you spend an hour writing a decision only to discover someone already wrote one covering the same ground. Or worse, you don't find out, and it ships.
 
 ## What it does
 
 Point Pituitary at your repo. It indexes your specs, docs, and decision records, then catches what you can't track by hand:
 
-- **Overlapping decisions** — a new spec covers ground an existing one already handles
-- **Stale docs** — a spec changed, but the docs that reference it weren't updated
-- **Code that contradicts specs** — flag diffs that conflict with accepted decisions before merge
-- **Terminology drift** — the team adopted new language but old terms persist
-- **Impact chains** — trace which specs, docs, and code paths are affected when a decision changes
+- **Overlapping decisions.** A new spec covers ground an existing one already handles.
+- **Stale docs.** A spec changed, but the docs that reference it weren't updated.
+- **Code that contradicts specs.** Flag diffs that conflict with accepted decisions before merge.
+- **Terminology drift.** The team adopted new language but old terms persist.
+- **Impact chains.** Trace which specs, docs, and code paths are affected when a decision changes.
 
 What you wrote down should still be true. Pituitary makes sure it is.
 

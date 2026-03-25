@@ -6,10 +6,16 @@
 
 **Text:**
 
-Every AI session produces more text -- specs, architecture docs, CLAUDE.md, AGENTS.md, decision records. Each session starts fresh. The records pile up, contradict each other, and drift from the code. Nobody catches it until something breaks.
+I kept writing specs and decision docs with AI, then discovering they contradicted each other three sessions later. CLAUDE.md said one thing, the architecture doc said another, and the code did a third. Grep doesn't catch semantic drift. Nothing I found watched the whole corpus.
 
-Pituitary is a CLI that indexes your specs and docs, then catches what you can't track by hand: decisions that overlap, docs that contradict accepted intent, code diffs that conflict with specs, and terminology that went stale.
+So I built Pituitary. It's a Go CLI that builds a SQLite index over your local markdown files and catches what you miss:
 
-Single Go binary, one SQLite file, no API keys needed. Ships an MCP server so Claude Code, Cursor, and Windsurf can query the spec index mid-session.
+    pituitary init --path .
+    pituitary check-doc-drift --scope all
+    git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 
-We built it because we hit this problem ourselves -- tens of markdown files drifting from each other, GitHub issues replacing specs as source of truth. Nothing we found watched the whole corpus.
+It finds overlapping decisions, stale docs, code that contradicts specs, and terminology that drifted. One binary, one SQLite file, no API keys needed. Deterministic by default.
+
+It also ships an MCP server (6 tools) so Claude Code, Cursor, and Windsurf can query the spec index mid-session. It runs in CI too.
+
+Would love feedback, especially from anyone managing 20+ specs and docs across repos.
