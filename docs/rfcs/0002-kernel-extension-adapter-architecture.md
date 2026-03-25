@@ -11,7 +11,6 @@ Proposed
 ## Related
 
 - RFC 0001: Spec-Centric Compliance Direction
-- Positioning design: `docs/superpowers/specs/2026-03-25-positioning-design.md`
 
 ## Summary
 
@@ -51,64 +50,98 @@ Adopt Option C.
 
 ### The boundary
 
+Go's `internal/` package convention prevents cross-module imports. Third-party adapters (in separate Go modules) cannot import `internal/source` or `internal/model`. The adapter interface and canonical types must therefore live in a **public package** that both the kernel and extensions import.
+
 ```
 pituitary/
+├── sdk/                   # PUBLIC — the extension contract
+│   ├── adapter.go         # Adapter interface, AdapterResult, AdapterFactory
+│   ├── model.go           # SpecRecord, DocRecord (re-exported or moved here)
+│   └── config.go          # Source config types extensions need
 ├── internal/              # KERNEL — never imports extensions/
 │   ├── source/
-│   │   ├── registry.go    # Adapter interface + registry
+│   │   ├── registry.go    # registry implementation (imports sdk/)
 │   │   ├── filesystem.go  # built-in filesystem adapter (kernel)
 │   │   ├── discover.go
 │   │   └── ...
-│   ├── config/            # config parsing, validation
-│   ├── model/             # SpecRecord, DocRecord (the contract)
+│   ├── config/            # full config parsing, validation
+│   ├── model/             # may re-export or alias sdk/model types
 │   ├── analysis/          # overlap, drift, impact, compliance
 │   ├── index/             # SQLite, embeddings, rebuild
 │   ├── mcp/               # MCP server
 │   └── ...
-├── extensions/            # EXTENSIONS — import only kernel interfaces
+├── extensions/            # EXTENSIONS — import only sdk/
 │   └── github/
-│       ├── adapter.go     # implements source.Adapter
+│       ├── adapter.go     # implements sdk.Adapter
 │       ├── client.go      # GitHub API client (imports go-github)
 │       └── ...
 ├── cmd/                   # CLI commands
 └── main.go                # blank-imports: import _ "extensions/github"
 ```
 
-**Rule:** `internal/` never imports `extensions/`. The dependency arrow is strictly one-way: extensions depend on kernel interfaces, never the reverse.
+**Rules:**
+- `internal/` never imports `extensions/`. The dependency arrow is strictly one-way.
+- Both `internal/` and `extensions/` import `sdk/`. The `sdk/` package is the shared contract.
+- `sdk/` is minimal: only types and interfaces that extensions need. No business logic.
+- Third-party adapters in separate Go modules import `github.com/dusk-network/pituitary/sdk`.
 
 ### The adapter interface
 
+The interface lives in `sdk/` so both kernel and third-party extensions can import it:
+
 ```go
-// internal/source/registry.go
+// sdk/adapter.go
+package sdk
+
+import "context"
 
 // Adapter loads canonical records from one configured source.
 type Adapter interface {
     // Load returns specs and docs from this source.
-    Load(ctx context.Context, cfg config.Source, workspace config.Workspace) (*AdapterResult, error)
+    Load(ctx context.Context, cfg SourceConfig) (*AdapterResult, error)
 }
 
 // AdapterResult is what an adapter returns.
 type AdapterResult struct {
-    Specs []model.SpecRecord
-    Docs  []model.DocRecord
+    Specs []SpecRecord
+    Docs  []DocRecord
 }
 
 // AdapterFactory creates an adapter instance.
 type AdapterFactory func() Adapter
 
-// registry holds registered adapter factories, keyed by adapter name.
-var registry = map[string]AdapterFactory{}
+// SourceConfig is the subset of source configuration that adapters receive.
+type SourceConfig struct {
+    Name    string            `json:"name"`
+    Adapter string            `json:"adapter"`
+    Kind    string            `json:"kind"`
+    Path    string            `json:"path"`
+    Files   []string          `json:"files,omitempty"`
+    Options map[string]any    `json:"options,omitempty"`
 
-// Register adds an adapter factory. Called from extension init() functions.
-func Register(name string, factory AdapterFactory) {
+    // WorkspaceRoot is the absolute path to the workspace root.
+    WorkspaceRoot string      `json:"-"`
+}
+```
+
+The registry lives in the kernel, since it wires adapters at startup:
+
+```go
+// internal/source/registry.go
+package source
+
+import "github.com/dusk-network/pituitary/sdk"
+
+var registry = map[string]sdk.AdapterFactory{}
+
+func Register(name string, factory sdk.AdapterFactory) {
     if _, exists := registry[name]; exists {
         panic(fmt.Sprintf("source adapter %q already registered", name))
     }
     registry[name] = factory
 }
 
-// LookupAdapter returns the factory for a named adapter, or nil.
-func LookupAdapter(name string) AdapterFactory {
+func LookupAdapter(name string) sdk.AdapterFactory {
     return registry[name]
 }
 ```
@@ -130,12 +163,17 @@ func init() {
 // extensions/github/adapter.go
 package github
 
-import "github.com/dusk-network/pituitary/internal/source"
+import (
+    "github.com/dusk-network/pituitary/internal/source"
+    "github.com/dusk-network/pituitary/sdk"
+)
 
 func init() {
-    source.Register("github", func() source.Adapter { return &githubAdapter{} })
+    source.Register("github", func() sdk.Adapter { return &githubAdapter{} })
 }
 ```
+
+Note: in-repo extensions under `extensions/` can import `internal/source` for registration because they are part of the same Go module. Third-party extensions in separate modules cannot — see the third-party section below.
 
 ### Main binary wires extensions via blank imports
 
@@ -193,18 +231,52 @@ state = "open"
 
 The `options` table is opaque to the kernel — each adapter parses its own options from the config. The kernel validates only the fields it owns (`name`, `adapter`, `kind`, `path`, `files`, `include`, `exclude`). Extension-specific fields live in `options`.
 
+**Config schema changes required:** The current config parser (`internal/config/config.go`) hard-codes the allowed adapter names (`filesystem`) and kind values (`spec_bundle`, `markdown_docs`, `markdown_contract`). Phase 1 must:
+
+- Add an `Options map[string]any` field to `config.Source`
+- Relax the adapter validation to accept any registered adapter name (not just `filesystem`)
+- Relax the kind validation to accept adapter-defined kinds (each adapter declares which kinds it supports)
+- Bump `schema_version` to 3 to signal the extended config format
+
 ### Custom builds for third-party adapters
 
-Anyone can write an adapter in a separate Go module:
+Third-party adapters live in separate Go modules. They import `sdk/` for the interface and types, and `internal/source` for registration is NOT available to them (Go's `internal/` convention). Instead, the kernel exposes a public registration function via `sdk/`:
+
+```go
+// sdk/register.go
+package sdk
+
+// RegisterFunc is set by the kernel at startup. Extensions call it to register.
+var RegisterFunc func(name string, factory AdapterFactory)
+
+// Register registers an adapter factory. Safe to call from init().
+func Register(name string, factory AdapterFactory) {
+    if RegisterFunc == nil {
+        panic("sdk.Register called before kernel initialized RegisterFunc")
+    }
+    RegisterFunc(name, factory)
+}
+```
+
+The kernel wires this at program start:
+
+```go
+// internal/source/registry.go init()
+func init() {
+    sdk.RegisterFunc = Register
+}
+```
+
+Third-party adapters use `sdk.Register`:
 
 ```go
 // In github.com/someone/pituitary-jira-adapter
 package jira
 
-import "github.com/dusk-network/pituitary/internal/source"
+import "github.com/dusk-network/pituitary/sdk"
 
 func init() {
-    source.Register("jira", func() source.Adapter { return &jiraAdapter{} })
+    sdk.Register("jira", func() sdk.Adapter { return &jiraAdapter{} })
 }
 ```
 
@@ -243,11 +315,14 @@ One `go build`, one binary, all adapters included.
 
 ### Phase 1: Extract the adapter interface (kernel change)
 
-- Create `internal/source/registry.go` with the `Adapter` interface and registry
+- Create `sdk/` package with `Adapter` interface, `AdapterResult`, `SourceConfig`, canonical model types, and public `Register` function
+- Create `internal/source/registry.go` with registry implementation wired to `sdk.RegisterFunc`
+- Extend `config.Source` with `Options map[string]any` field; relax adapter/kind validation to accept registered adapters
 - Refactor `LoadFromConfig` to dispatch through the registry
 - Register the filesystem adapter via `init()`
 - Add CI check: `internal/` must not import `extensions/`
-- Zero behavior change — all existing tests pass
+- Bump `schema_version` to 3
+- Zero behavior change for existing configs — all existing tests pass
 
 ### Phase 2: GitHub issues adapter (first extension)
 
