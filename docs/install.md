@@ -10,14 +10,18 @@ brew install dusk-network/tap/pituitary
 
 ## Linux / macOS (binary)
 
+Download the latest release from [GitHub Releases](https://github.com/dusk-network/pituitary/releases) for your platform (`linux_amd64` or `macOS_arm64`), extract, and install:
+
 ```sh
-curl -fsSL https://github.com/dusk-network/pituitary/releases/latest/download/pituitary_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz | tar xz
+tar xzf pituitary_*_*.tar.gz
 sudo install pituitary /usr/local/bin/
 ```
 
+If you prefer a user-level install: `install pituitary ~/.local/bin/` (make sure `~/.local/bin` is in your PATH).
+
 ## Windows
 
-Download from [GitHub Releases](https://github.com/dusk-network/pituitary/releases) and add to your PATH.
+Download the `.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
 
 ## Manual Releases
 

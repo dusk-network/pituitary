@@ -25,14 +25,14 @@ Single binary. No Docker. No API keys required. One SQLite file.
 brew install dusk-network/tap/pituitary
 ```
 
-**Linux / macOS** (binary):
+**Linux / macOS** (binary): download from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), then:
 
 ```sh
-curl -fsSL https://github.com/dusk-network/pituitary/releases/latest/download/pituitary_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').tar.gz | tar xz
+tar xzf pituitary_*_*.tar.gz
 sudo install pituitary /usr/local/bin/
 ```
 
-**Windows**: download from [GitHub Releases](https://github.com/dusk-network/pituitary/releases) and add to your PATH.
+**Windows**: download the `.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
 
 **Build from source** (contributors): see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 
