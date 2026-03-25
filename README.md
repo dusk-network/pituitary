@@ -11,7 +11,7 @@
 
 Point Pituitary at your repo. It indexes your specs, docs, and decision records — CLAUDE.md, AGENTS.md, architecture docs, RFCs, runbooks — then catches what you can't track by hand. What you wrote down should still be true. Pituitary makes sure it is.
 
-[![demo](https://asciinema.org/a/4NBiD3tUyuwMWooT.svg)](https://asciinema.org/a/4NBiD3tUyuwMWooT)
+[![demo](https://asciinema.org/a/4NBiD3tUyuwMWooT.png)](https://asciinema.org/a/4NBiD3tUyuwMWooT)
 
 Single binary. No Docker. No API keys required. One SQLite file.
 
