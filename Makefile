@@ -5,7 +5,7 @@ CACHE_DIR ?= $(CURDIR)/.cache
 UNAME_S := $(shell uname -s)
 export GOCACHE := $(CACHE_DIR)/go-build
 
-.PHONY: fmt fmt-check smoke-sqlite-vec test vet bench ci clean
+.PHONY: fmt fmt-check docs-check smoke-sqlite-vec test vet bench ci clean
 
 CGO_ENABLED ?= 1
 export CGO_ENABLED
@@ -25,6 +25,9 @@ fmt-check:
 		exit 1; \
 	fi
 
+docs-check:
+	python3 scripts/check-doc-links.py README.md docs
+
 smoke-sqlite-vec:
 	$(GO) test ./internal/index -run TestCheckSQLiteReadyPasses -count=1
 
@@ -37,7 +40,7 @@ vet:
 bench:
 	$(GO) test ./internal/index ./internal/analysis -run '^$$' -bench . -benchmem
 
-ci: fmt-check smoke-sqlite-vec test vet
+ci: fmt-check docs-check smoke-sqlite-vec test vet
 
 clean:
 	rm -rf $(CACHE_DIR)

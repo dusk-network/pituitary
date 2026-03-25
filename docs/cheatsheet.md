@@ -1,6 +1,6 @@
 # Pituitary Cheatsheet
 
-Quick command map for the common workflows. For the full install, config, runtime, and spec-format details, see the [reference](reference.md).
+Quick command map for the common workflows. For the full install, config, runtime, and workflow details, start with the [reference index](reference.md).
 
 ## Onboarding
 

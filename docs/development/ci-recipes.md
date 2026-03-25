@@ -18,7 +18,7 @@ jobs:
   pituitary:
     runs-on: ubuntu-latest
     env:
-      PITUITARY_VERSION: v0.3.0
+      PITUITARY_VERSION: v1.0.0-alpha
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -58,5 +58,6 @@ Keep that step out of deterministic fixture-only CI. In fixture mode, there is n
 ## Notes
 
 - Prefer the release binary in consumer CI. This repo's own `main` CI builds from source because it is testing Pituitary itself, not consuming it.
+- Pin `PITUITARY_VERSION` to the exact release you want your repo to consume rather than floating on latest.
 - `check-compliance --diff-file` is best for change-scoped policy. `check-doc-drift --scope all` is best for workspace-wide spec hygiene.
 - If you only want a deterministic CI baseline, keep the default fixture embedder and skip runtime preflight entirely.

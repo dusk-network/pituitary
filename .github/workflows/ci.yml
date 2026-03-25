@@ -33,6 +33,9 @@ jobs:
       - name: Run formatting check
         run: make fmt-check
 
+      - name: Run docs link check
+        run: make docs-check
+
       - name: Run SQLite readiness smoke test
         run: make smoke-sqlite-vec
 
