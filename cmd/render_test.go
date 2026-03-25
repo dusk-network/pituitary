@@ -466,6 +466,53 @@ func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
 	}
 }
 
+func TestRenderDocDriftResultShowsGuidanceWhenNoFixAvailable(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderDocDriftResult(&stdout, &analysis.DocDriftResult{
+		Assessments: []analysis.DocDriftAssessment{
+			{
+				DocRef:    "doc://guides/api-rate-limits",
+				Title:     "API Rate Limits",
+				SourceRef: "docs/guides/api-rate-limits.md",
+				Status:    "drift",
+				SpecRefs:  []string{"SPEC-042"},
+				Rationale: "doc contradicts spec but no deterministic fix is available",
+			},
+		},
+		DriftItems: []analysis.DriftItem{
+			{
+				DocRef:    "doc://guides/api-rate-limits",
+				Title:     "API Rate Limits",
+				SourceRef: "docs/guides/api-rate-limits.md",
+				SpecRefs:  []string{"SPEC-042"},
+				Findings: []analysis.DriftFinding{
+					{
+						SpecRef: "SPEC-042",
+						Code:    "semantic_mismatch",
+						Message: "doc meaning diverges from spec",
+					},
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"██ DRIFT",
+		"review-spec --format html --path <spec>",
+		"no deterministic fix available",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderDocDriftResult() output %q does not contain %q", output, want)
+		}
+	}
+	if strings.Contains(output, "pituitary fix --path") {
+		t.Fatalf("renderDocDriftResult() should not suggest fix when no remediation available, got %q", output)
+	}
+}
+
 func TestRenderReviewResultIncludesTopImpactSummaries(t *testing.T) {
 	t.Parallel()
 
