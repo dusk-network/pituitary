@@ -146,11 +146,11 @@ func TestDiscoverDetectsIntentArtifacts(t *testing.T) {
 	repo := t.TempDir()
 
 	wellKnown := map[string]string{
-		"CLAUDE.md":        "# CLAUDE\n\nAgent instructions.",
-		"AGENTS.md":        "# AGENTS\n\nCanonical AI policy.",
-		"ARCHITECTURE.md":  "# Architecture\n\nSystem design overview.",
-		"CONTRIBUTING.md":  "# Contributing\n\nHow to contribute.",
-		"README.md":        "# README\n\nProject landing page.",
+		"CLAUDE.md":       "# CLAUDE\n\nAgent instructions.",
+		"AGENTS.md":       "# AGENTS\n\nCanonical AI policy.",
+		"ARCHITECTURE.md": "# Architecture\n\nSystem design overview.",
+		"CONTRIBUTING.md": "# Contributing\n\nHow to contribute.",
+		"README.md":       "# README\n\nProject landing page.",
 	}
 	for name, content := range wellKnown {
 		mustWriteFile(t, filepath.Join(repo, name), content)
