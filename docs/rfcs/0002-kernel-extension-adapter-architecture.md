@@ -85,6 +85,12 @@ pituitary/
 - `sdk/` is minimal: only types and interfaces that extensions need. No business logic.
 - Third-party adapters in separate Go modules import `github.com/dusk-network/pituitary/sdk`.
 
+**SpecRecord/DocRecord placement:** These types currently live in `internal/model` and are imported throughout the kernel. Phase 1 uses type aliases (`type SpecRecord = sdk.SpecRecord`) in `internal/model` to maintain backward compatibility for all internal consumers while making the types available to extensions via `sdk/`. This is a smaller delta than moving the types and rewriting all internal imports.
+
+**sdk/ stability:** The `sdk/` package is the stability boundary. Adding a method to the `Adapter` interface breaks all extensions. Changes to `sdk/` types or interfaces require a deprecation path, not free refactoring. The `Adapter` interface is intentionally one method (`Load`) to minimize this surface.
+
+**CI enforcement:** The `internal/` → `extensions/` import ban is enforced by adding a grep check to `make vet`: `! grep -r '"github.com/dusk-network/pituitary/extensions' internal/`. This fails the build if any kernel file imports an extension package.
+
 ### The adapter interface
 
 The interface lives in `sdk/` so both kernel and third-party extensions can import it:
@@ -202,7 +208,12 @@ func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
             return nil, fmt.Errorf("source %q: unknown adapter %q", src.Name, src.Adapter)
         }
         adapter := factory()
-        adapterResult, err := adapter.Load(ctx, src, cfg.Workspace)
+        srcCfg := sdk.SourceConfig{
+            Name: src.Name, Adapter: src.Adapter, Kind: src.Kind,
+            Path: src.Path, Files: src.Files, Options: src.Options,
+            WorkspaceRoot: cfg.Workspace.RootPath,
+        }
+        adapterResult, err := adapter.Load(ctx, srcCfg)
         if err != nil {
             return nil, fmt.Errorf("source %q: %w", src.Name, err)
         }
@@ -231,41 +242,72 @@ state = "open"
 
 The `options` table is opaque to the kernel — each adapter parses its own options from the config. The kernel validates only the fields it owns (`name`, `adapter`, `kind`, `path`, `files`, `include`, `exclude`). Extension-specific fields live in `options`.
 
-**Config schema changes required:** The current config parser (`internal/config/config.go`) hard-codes the allowed adapter names (`filesystem`) and kind values (`spec_bundle`, `markdown_docs`, `markdown_contract`). Phase 1 must:
+**Config schema changes required:** The current config parser (`internal/config/config.go`) is a hand-rolled line-by-line TOML parser that hard-codes allowed adapter names (`filesystem`) and kind values (`spec_bundle`, `markdown_docs`, `markdown_contract`). It rejects unknown keys and does not support nested tables under `[[sources]]`. Phase 1 must:
 
 - Add an `Options map[string]any` field to `config.Source`
+- Recognize `[sources.options]` as a valid nested section inside `[[sources]]` blocks
+- Parse typed TOML values (int, bool, string, arrays) into `map[string]any` for options
 - Relax the adapter validation to accept any registered adapter name (not just `filesystem`)
 - Relax the kind validation to accept adapter-defined kinds (each adapter declares which kinds it supports)
+- Keep the "reject unknown keys" behavior for top-level `[[sources]]` fields — only the `options` nested table is exempt from kernel validation
 - Bump `schema_version` to 3 to signal the extended config format
+
+**Parser strategy:** The hand-rolled parser requires non-trivial extension to support nested tables and typed values. Phase 1 should evaluate switching to `BurntSushi/toml` (or `pelletier/go-toml`) which handles this for free, versus extending the hand-rolled parser. The choice should be made at implementation time based on the blast radius of each approach.
 
 ### Custom builds for third-party adapters
 
-Third-party adapters live in separate Go modules. They import `sdk/` for the interface and types, and `internal/source` for registration is NOT available to them (Go's `internal/` convention). Instead, the kernel exposes a public registration function via `sdk/`:
+Third-party adapters live in separate Go modules. They import `sdk/` for the interface and types, and `internal/source` for registration is NOT available to them (Go's `internal/` convention). Instead, `sdk/` provides a public `Register` function with a deferred queue to handle `init()` ordering safely:
 
 ```go
 // sdk/register.go
 package sdk
 
-// RegisterFunc is set by the kernel at startup. Extensions call it to register.
-var RegisterFunc func(name string, factory AdapterFactory)
+var (
+    registerFunc func(name string, factory AdapterFactory)
+    pendingQueue []pendingRegistration
+)
 
-// Register registers an adapter factory. Safe to call from init().
+type pendingRegistration struct {
+    name    string
+    factory AdapterFactory
+}
+
+// Register registers an adapter factory. Safe to call from init() regardless
+// of import order — if the kernel hasn't initialized yet, the registration
+// is queued and drained when the kernel calls SetRegisterFunc.
 func Register(name string, factory AdapterFactory) {
-    if RegisterFunc == nil {
-        panic("sdk.Register called before kernel initialized RegisterFunc")
+    if registerFunc != nil {
+        registerFunc(name, factory)
+        return
     }
-    RegisterFunc(name, factory)
+    pendingQueue = append(pendingQueue, pendingRegistration{name, factory})
+}
+
+// SetRegisterFunc is called by the kernel to wire the registry.
+// Drains any queued registrations from init() calls that ran before
+// the kernel initialized.
+func SetRegisterFunc(f func(string, AdapterFactory)) {
+    if registerFunc != nil {
+        panic("sdk.SetRegisterFunc called twice")
+    }
+    registerFunc = f
+    for _, p := range pendingQueue {
+        f(p.name, p.factory)
+    }
+    pendingQueue = nil
 }
 ```
 
 The kernel wires this at program start:
 
 ```go
-// internal/source/registry.go init()
+// internal/source/registry.go
 func init() {
-    sdk.RegisterFunc = Register
+    sdk.SetRegisterFunc(Register)
 }
 ```
+
+This deferred queue pattern avoids a latent init-ordering bug: Go makes no ordering guarantee between `init()` functions in packages that don't import each other. Without the queue, a third-party adapter's `init()` could run before the kernel's `init()`, panicking on a nil function pointer. The queue ensures registrations are safe regardless of order.
 
 Third-party adapters use `sdk.Register`:
 
@@ -311,6 +353,8 @@ One `go build`, one binary, all adapters included.
 
 6. **Extensions must not widen the analysis contract.** An extension that returns records with new fields in `Metadata` is fine. An extension that requires changes to the analysis engine is a kernel change and needs its own RFC.
 
+7. **Credentials use env var references, never literal tokens.** Extension adapters that need API tokens (GitHub, GitLab, Jira) follow the existing `api_key_env` pattern from `runtime.embedder`: config names the env var, never the secret. No secrets in tracked files.
+
 ## Implementation Sequence
 
 ### Phase 1: Extract the adapter interface (kernel change)
@@ -349,4 +393,4 @@ One `go build`, one binary, all adapters included.
 - **Adapter discovery/listing:** Should `pituitary status` list registered adapters so users can see what's available? Useful for debugging "unknown adapter" errors.
 - **Adapter versioning:** If an extension's record schema evolves, how does the kernel handle version skew? Likely answer: the canonical model is the contract; extensions must produce valid records or fail.
 - **Extension testing:** Should the kernel provide test helpers (fake config, assertions) for extension authors? Likely useful once third-party adapters emerge.
-- **Credential management:** Extension adapters (GitHub, GitLab, Jira) need API tokens. These should follow the existing `api_key_env` pattern from `runtime.embedder` — env var name in config, never the token itself.
+- **Credential management:** Promoted to guardrail 7. Extensions use env var references (`api_key_env`), never literal tokens.
