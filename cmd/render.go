@@ -244,6 +244,8 @@ func renderInitResult(w io.Writer, result *initResult) {
 	}
 	if result.ConfigAction == "preview" {
 		fmt.Fprintf(w, "  %s %s\n", p.arrow(), "run `pituitary init` without --dry-run to write the config and build the index")
+	} else if docCount > 0 {
+		fmt.Fprintf(w, "\n  %s run `pituitary check-doc-drift --scope all` to see findings\n", p.arrow())
 	}
 }
 
@@ -718,6 +720,8 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 			}
 			fmt.Fprintf(w, "\n    %s pituitary fix --path %s %s\n", p.green("fix:"), pathArg, p.dim(fmt.Sprintf("(%d edits)", len(suggestions))))
 			fmt.Fprintf(w, "    %s  run review-spec --format html for the full evidence report\n", p.info())
+		} else if assessment.Status == "drift" || assessment.Status == "possible_drift" {
+			fmt.Fprintf(w, "\n    %s  run review-spec --format html for the full evidence chain (no deterministic fix available)\n", p.info())
 		}
 	}
 }
