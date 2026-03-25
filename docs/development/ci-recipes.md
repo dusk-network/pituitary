@@ -2,7 +2,7 @@
 
 Pituitary should run in CI as a consumer, not as a separate CI product. The CLI already exposes the right primitives; these recipes show how to compose them in a normal pipeline.
 
-These examples assume your repo already has a committed `pituitary.toml`. If it does not, run `pituitary init --path .` locally first and commit the generated config before you wire CI around it.
+These examples assume your repo already has a committed config (`.pituitary/pituitary.toml`). If it does not, run `pituitary init --path .` locally first and commit the generated config before you wire CI around it.
 
 ## GitHub Actions: diff compliance plus doc drift
 

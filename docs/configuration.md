@@ -40,7 +40,7 @@ applies_to = [                    # optional: governed code/config paths
 
 ## Workspace Configuration
 
-`pituitary init` generates a `pituitary.toml` at your project root. You can also hand-write one:
+`pituitary init` generates `.pituitary/pituitary.toml` inside your project. You can also hand-write one:
 
 ```toml
 schema_version = 2

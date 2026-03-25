@@ -24,7 +24,7 @@
 ## Requirements
 
 - Pituitary binary on PATH ([releases](https://github.com/dusk-network/pituitary/releases))
-- A `pituitary.toml` config file (generate one with `pituitary init --path .`)
+- A config file (generate one with `pituitary init --path .`, writes `.pituitary/pituitary.toml`)
 - A built index (`pituitary index --rebuild`)
 
 No API keys required in deterministic mode. Optional local embedding server (e.g., LM Studio + nomic-embed-text) for improved retrieval quality on larger corpora.
