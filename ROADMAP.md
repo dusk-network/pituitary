@@ -21,22 +21,28 @@ The core analysis surface is functional end-to-end:
 
 ## Next
 
-Near-term work driven by the positioning direction (spec-centric, intent-focused):
+Enabling architecture and the highest-impact source expansion:
 
+- **Kernel/extension adapter architecture** — separate Pituitary's core from external source adapters using Go's registry pattern. The kernel stays pure (local filesystem, SQLite, deterministic, no vendor dependencies). Extensions are separate Go packages that compile into the same single binary. See [RFC 0002](docs/rfcs/0002-kernel-extension-adapter-architecture.md).
+- **GitHub issues as sources** — first extension adapter. Teams use issues to propose and modify specs (BIP/EIP pattern). This shifts Pituitary from end-of-workflow (CI catches drift at merge) to beginning-of-workflow (catch contradictions when an issue is created).
+- **`pituitary new`** — scaffold a spec bundle from a template. Bridges the gap from loose markdown to structured specs.
+- **GitHub Action** — run `review-spec` on PRs that touch specs, post results as a comment. Makes Pituitary invisible infrastructure.
+
+## Soon After
+
+Broadening source coverage and deepening governance workflows:
+
+- **JSON config indexing** — extension adapter for structured JSON files as intent artifacts. Agents increasingly persist structured output that becomes de facto source of truth.
 - **Stronger spec review workflows** — richer comparison output, better evidence presentation
-- **Clearer onboarding** — better error messages, progress indicators during index rebuilds
 - **CI recipe polish** — tested GitHub Actions workflow, pre-commit hook example
+- **Clearer onboarding** — better error messages, progress indicators during index rebuilds
 
 ## Later
 
-Extending coverage to match the full problem space:
+Extending coverage to the full problem space:
 
-- **PDF ingestion** — index PDF decision records alongside markdown
-- **JSON config indexing** — treat structured config files as intent artifacts
-- **GitHub issues as sources** — index issue bodies when they carry decision context
-- **Non-filesystem adapters** — Notion, Confluence, GitHub repo sources
-- **`pituitary new`** — scaffold a spec bundle from a template
-- **GitHub Action** — run `review-spec` on PRs that touch specs, post results as a comment
+- **PDF ingestion** — extension adapter for PDF decision records
+- **Non-filesystem adapters** — Notion, Confluence, GitLab, Jira (each as an extension adapter)
 - **Shell completion** — `pituitary completion bash/zsh/fish`
 
 ## Not on the roadmap
