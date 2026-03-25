@@ -53,8 +53,8 @@ func TestRunDiscoverJSON(t *testing.T) {
 	if got, want := len(payload.Result.Sources), 3; got != want {
 		t.Fatalf("source count = %d, want %d", got, want)
 	}
-	if got := payload.Result.Sources[2].ItemCount; got != 2 {
-		t.Fatalf("docs item count = %d, want 2", got)
+	if got := payload.Result.Sources[2].ItemCount; got != 3 {
+		t.Fatalf("docs item count = %d, want 3", got)
 	}
 	if got, want := len(payload.Result.Preview.Sources), 3; got != want {
 		t.Fatalf("preview source count = %d, want %d", got, want)

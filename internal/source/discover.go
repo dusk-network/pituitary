@@ -270,7 +270,7 @@ func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCa
 
 	lines := strings.Split(string(body), "\n")
 	contractScore, contractReasons := scoreMarkdownContractCandidate(pathSet, titleLower, lines)
-	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower, titleTokens)
+	docScore, docReasons := scoreMarkdownDocCandidate(pathSet, titleLower, titleTokens, filepath.Base(relPath))
 
 	switch {
 	case contractScore >= 3 && contractScore >= docScore+1:
@@ -334,11 +334,21 @@ func scoreMarkdownContractCandidate(pathTokens map[string]struct{}, titleLower s
 	return score, reasons
 }
 
-func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string, titleTokens map[string]struct{}) (int, []string) {
+func scoreMarkdownDocCandidate(pathTokens map[string]struct{}, titleLower string, titleTokens map[string]struct{}, filename string) (int, []string) {
 	var (
 		score   int
 		reasons []string
 	)
+
+	// Well-known intent artifacts get a strong doc signal regardless of directory.
+	wellKnownDocFiles := map[string]bool{
+		"claude.md": true, "agents.md": true, "architecture.md": true,
+		"contributing.md": true, "readme.md": true,
+	}
+	if wellKnownDocFiles[strings.ToLower(filename)] {
+		score += 3
+		reasons = append(reasons, "well-known intent artifact")
+	}
 
 	if hasAnyDiscoveryToken(pathTokens, "guides", "guide", "runbooks", "runbook", "playbooks", "playbook", "handbook", "manuals", "manual", "operations", "ops", "reference", "references") {
 		score += 3

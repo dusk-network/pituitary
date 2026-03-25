@@ -64,8 +64,8 @@ Applies To:
 	if got, want := result.Sources[2].Kind, config.SourceKindMarkdownDocs; got != want {
 		t.Fatalf("third source kind = %q, want %q", got, want)
 	}
-	if got := result.Sources[2].ItemCount; got != 3 {
-		t.Fatalf("docs source item count = %d, want 3", got)
+	if got := result.Sources[2].ItemCount; got != 4 {
+		t.Fatalf("docs source item count = %d, want 4", got)
 	}
 	if got := result.Sources[1].Confidence; got != "high" {
 		t.Fatalf("contract source confidence = %q, want high", got)
@@ -130,5 +130,42 @@ body = "body.md"
 	}
 	if got, want := cfg.Workspace.ResolvedIndexPath, filepath.Join(repo, ".pituitary", "pituitary.db"); got != want {
 		t.Fatalf("resolved index path = %q, want %q", got, want)
+	}
+}
+
+func TestDiscoverDetectsIntentArtifacts(t *testing.T) {
+	repo := t.TempDir()
+
+	wellKnown := map[string]string{
+		"CLAUDE.md":        "# CLAUDE\n\nAgent instructions.",
+		"AGENTS.md":        "# AGENTS\n\nCanonical AI policy.",
+		"ARCHITECTURE.md":  "# Architecture\n\nSystem design overview.",
+		"CONTRIBUTING.md":  "# Contributing\n\nHow to contribute.",
+		"README.md":        "# README\n\nProject landing page.",
+	}
+	for name, content := range wellKnown {
+		mustWriteFile(t, filepath.Join(repo, name), content)
+	}
+
+	result, err := DiscoverWorkspace(DiscoverOptions{RootPath: repo})
+	if err != nil {
+		t.Fatalf("DiscoverWorkspace() error = %v", err)
+	}
+
+	// Collect all markdown_docs items.
+	docItems := map[string]bool{}
+	for _, src := range result.Sources {
+		if src.Kind != config.SourceKindMarkdownDocs {
+			continue
+		}
+		for _, item := range src.Items {
+			docItems[item.Path] = true
+		}
+	}
+
+	for name := range wellKnown {
+		if !docItems[name] {
+			t.Errorf("expected %s to be discovered as markdown_docs, got items: %v", name, docItems)
+		}
 	}
 }
