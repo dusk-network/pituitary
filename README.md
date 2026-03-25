@@ -32,7 +32,7 @@ tar xzf pituitary_*_*.tar.gz
 sudo install pituitary /usr/local/bin/
 ```
 
-**Windows**: download the `.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
+**Windows**: download `pituitary_<version>_windows_amd64.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
 
 **Build from source** (contributors): see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 

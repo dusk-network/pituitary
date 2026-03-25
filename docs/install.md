@@ -21,15 +21,15 @@ If you prefer a user-level install: `install pituitary ~/.local/bin/` (make sure
 
 ## Windows
 
-Download the `.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
+Download `pituitary_<version>_windows_amd64.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
 
 ## Manual Releases
 
 Prebuilt archives are published on [GitHub Releases](https://github.com/dusk-network/pituitary/releases) for:
 
-- `linux/amd64`
-- `darwin/arm64`
-- `windows/amd64`
+- `pituitary_<version>_linux_amd64.tar.gz`
+- `pituitary_<version>_macOS_arm64.tar.gz`
+- `pituitary_<version>_windows_amd64.zip`
 
 If you need a different platform or want full manual control, download and extract the matching archive from Releases directly.
 
