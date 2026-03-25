@@ -98,6 +98,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records — code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
+See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The codebase has clear package boundaries so you can contribute to one area without understanding the whole system.
