@@ -457,6 +457,7 @@ func TestRenderDocDriftResultIncludesEvidenceAndConfidence(t *testing.T) {
 		"expected 200",
 		"got 100",
 		"pituitary fix --path docs/guides/api-rate-limits.md",
+		"review-spec --format html --path <spec>",
 		"docs/runbooks/rate-limit-rollout.md",
 		"██ OK",
 	} {
