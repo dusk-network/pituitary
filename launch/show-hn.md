@@ -16,6 +16,6 @@ So I built Pituitary. It's a Go CLI that builds a SQLite index over your local m
 
 It finds overlapping decisions, stale docs, code that contradicts specs, and terminology that drifted. One binary, one SQLite file, no API keys needed. Deterministic by default.
 
-It also ships an MCP server (6 tools) so Claude Code, Cursor, and Windsurf can query the spec index mid-session. We use it in CI too.
+It also ships an MCP server (6 tools) so Claude Code, Cursor, and Windsurf can query the spec index mid-session. It runs in CI too.
 
 Would love feedback, especially from anyone managing 20+ specs and docs across repos.
