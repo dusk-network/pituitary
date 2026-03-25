@@ -36,9 +36,9 @@ sudo install pituitary /usr/local/bin/
 
 ## What It Catches
 
-**Overlapping specs** — a new spec covers ground an existing one already handles, and nobody noticed.
+**Overlapping decisions** — a new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
 
-**Stale docs** — a spec changed, but the three docs that reference it weren't updated.
+**Stale docs** — a spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
 
 **Code that contradicts specs** — pipe your diff in before you merge:
 
@@ -46,7 +46,7 @@ sudo install pituitary /usr/local/bin/
 git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 ```
 
-**Terminology drift** — the team moved to new language but old terms persist across the corpus.
+**Terminology drift** — the team adopted new language but old terms persist across your docs and specs.
 
 ## Quick Start
 
