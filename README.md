@@ -61,6 +61,33 @@ All commands output JSON with `--format json`. `review-spec` also supports `--fo
 
 See the [cheatsheet](docs/cheatsheet.md) for every command, or the [full reference](docs/reference.md) for configuration, runtime setup, and spec format details.
 
+## Semantic Retrieval
+
+Pituitary works out of the box with no API keys and no external dependencies. If you work in a professional context with higher standards for accuracy, you can enable deeper semantic support. This improves how precisely overlap detection, drift checks, and search match related content across your specs and docs.
+
+**Cloud: OpenAI** (if you already have a key)
+
+```toml
+[runtime.embedder]
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+endpoint = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+```
+
+**Local: LM Studio or Ollama** (no data leaves your machine)
+
+```toml
+[runtime.embedder]
+provider = "openai_compatible"
+model = "nomic-embed-text-v1.5"
+endpoint = "http://127.0.0.1:1234/v1"
+```
+
+Then rebuild: `pituitary index --rebuild`
+
+Any OpenAI-compatible embedding API works. See [runtime docs](docs/runtime.md) for full setup including analysis providers.
+
 ## Use It From Your Editor
 
 Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add it to Claude Code, Cursor, Windsurf, or any MCP-compatible client:
