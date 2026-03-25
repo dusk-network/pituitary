@@ -70,6 +70,21 @@ path = "rfcs"
 include = ["**/*.md"]
 ```
 
+### Example: Indexing AI agent instructions
+
+If your repo uses CLAUDE.md, AGENTS.md, or similar AI-policy files, add them as a `markdown_docs` or `markdown_contract` source:
+
+```toml
+[[sources]]
+name = "agent-instructions"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "."
+files = ["CLAUDE.md", "AGENTS.md", "ARCHITECTURE.md"]
+```
+
+This indexes them alongside your specs so drift detection and overlap checks cover the full intent corpus.
+
 ## Source Kinds
 
 **`spec_bundle`**: `spec.toml` + `body.md` pairs. The structured, high-rigor format.
