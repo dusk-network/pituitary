@@ -78,7 +78,7 @@ Most command files follow this pattern:
 4. call the shared app operation
 5. render success or error through shared helpers
 
-The command should also be registered in [cmd/root.go](/Users/emanuele/devel/pituitary/cmd/root.go) so it appears in `help` and dispatch works.
+The command should also be registered in [cmd/root.go](../../cmd/root.go) so it appears in `help` and dispatch works.
 
 ## Step 4: Add MCP Exposure If Appropriate
 

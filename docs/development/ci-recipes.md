@@ -2,7 +2,7 @@
 
 Pituitary should run in CI as a consumer, not as a separate CI product. The CLI already exposes the right primitives; these recipes show how to compose them in a normal pipeline.
 
-These examples assume your repo already has a committed `pituitary.toml`. If it does not, run `pituitary init --path .` locally first and commit the generated config before you wire CI around it.
+These examples assume your repo already has a committed config (`.pituitary/pituitary.toml`). If it does not, run `pituitary init --path .` locally first and commit the generated config before you wire CI around it.
 
 ## GitHub Actions: diff compliance plus doc drift
 
@@ -18,7 +18,7 @@ jobs:
   pituitary:
     runs-on: ubuntu-latest
     env:
-      PITUITARY_VERSION: v0.3.0
+      PITUITARY_VERSION: v1.0.0-alpha
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -58,5 +58,6 @@ Keep that step out of deterministic fixture-only CI. In fixture mode, there is n
 ## Notes
 
 - Prefer the release binary in consumer CI. This repo's own `main` CI builds from source because it is testing Pituitary itself, not consuming it.
+- Pin `PITUITARY_VERSION` to the exact release you want your repo to consume rather than floating on latest.
 - `check-compliance --diff-file` is best for change-scoped policy. `check-doc-drift --scope all` is best for workspace-wide spec hygiene.
 - If you only want a deterministic CI baseline, keep the default fixture embedder and skip runtime preflight entirely.

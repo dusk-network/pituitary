@@ -58,6 +58,7 @@ docker run --rm -it pituitary-dev
 Contributor docs:
 
 - [docs/development/prerequisites.md](docs/development/prerequisites.md)
+- [docs/development/documentation-guide.md](docs/development/documentation-guide.md)
 - [docs/development/architecture-guide.md](docs/development/architecture-guide.md)
 - [docs/development/ci-recipes.md](docs/development/ci-recipes.md)
 - [docs/development/testing-guide.md](docs/development/testing-guide.md)
@@ -93,6 +94,9 @@ If you're adding a new feature, start by identifying which layer it belongs to.
 ```sh
 # Format your code
 make fmt
+
+# Check local documentation links
+make docs-check
 
 # Run tests (uses fixture providers — no API keys needed)
 make test

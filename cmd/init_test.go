@@ -49,7 +49,7 @@ func TestRunInitDryRunJSON(t *testing.T) {
 	if got, want := payload.Result.ConfigAction, "preview"; got != want {
 		t.Fatalf("config_action = %q, want %q", got, want)
 	}
-	if got, want := len(payload.Result.Discover.Sources), 3; got != want {
+	if got, want := len(payload.Result.Discover.Sources), 4; got != want {
 		t.Fatalf("discover sources = %d, want %d", got, want)
 	}
 	if payload.Result.Index != nil {
@@ -96,7 +96,7 @@ func TestRunInitWritesConfigRebuildsAndSummarizes(t *testing.T) {
 		"━━◈ init",
 		"config: ",
 		"action: wrote",
-		"index: 2 specs · 2 docs",
+		"index: 2 specs · 3 docs",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("runInit() output %q does not contain %q", output, want)
@@ -120,7 +120,7 @@ func TestRunInitReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, `runtime.embedder is still "fixture" on 5 indexed artifact(s)`) {
+	if !strings.Contains(output, `runtime.embedder is still "fixture" on 6 indexed artifact(s)`) {
 		t.Fatalf("runInit() output %q does not contain fixture guidance", output)
 	}
 	if !strings.Contains(output, "`pituitary status --check-runtime embedder`") {
