@@ -1,0 +1,27 @@
+# Runtime Dockerfile for Smithery MCP server distribution
+# Builds the pituitary binary and serves it over stdio.
+
+# Use latest stable Go. The go.mod language version directive
+# ensures the correct language features are available.
+FROM golang:1.24-bookworm AS builder
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential libsqlite3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -trimpath -o /usr/local/bin/pituitary .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libsqlite3-0 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/bin/pituitary /usr/local/bin/pituitary
+
+ENTRYPOINT ["pituitary"]
+CMD ["serve"]

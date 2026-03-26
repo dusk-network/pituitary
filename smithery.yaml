@@ -1,0 +1,28 @@
+# Smithery.ai MCP server configuration
+# See: https://smithery.ai/docs
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      configPath:
+        type: string
+        description: "Path to pituitary.toml config file"
+        default: ".pituitary/pituitary.toml"
+    required: []
+  commandFunction: |-
+    (config) => {
+      const args = ["serve"];
+      if (config.configPath) {
+        args.push("--config", config.configPath);
+      }
+      return {
+        command: "pituitary",
+        args,
+      };
+    }
+
+build:
+  dockerfile: Dockerfile.smithery
+  dockerBuildContext: .
