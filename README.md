@@ -30,14 +30,6 @@
 
 Single binary. No Docker. No API keys required. One SQLite file.
 
-## What People Say
-
-> "We had specs everywhere. CLAUDE.md said one thing, the architecture doc said another, and the code did a third. Pituitary caught contradictions we'd been shipping for weeks."
-
-> "It's the missing piece between writing decisions and actually enforcing them. We plugged it into CI and it immediately flagged three stale runbooks."
-
-> "I was mass-producing specs with Claude across sessions. After a while they started contradicting each other and I had no way to catch it. Pituitary watches the whole corpus so I don't have to."
-
 ## What It Catches
 
 **Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
