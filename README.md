@@ -1,8 +1,9 @@
 <p align="center">
   <img src="assets/peet.png" alt="Peet the Pituitary mascot" height="120">
   <br>
-  <strong>Pituitary</strong><br>
-  <em>Catch spec drift before it catches you.</em>
+  <strong style="font-size: 2em;">Pituitary</strong><br>
+  <em>Catch spec drift before it catches you.</em><br>
+  <sub>Solves intent drift. When your specs, docs, and decisions silently contradict each other across sessions.</sub>
 </p>
 
 <p align="center">
@@ -18,8 +19,6 @@
 
 ---
 
-Point Pituitary at your repo. It indexes your specs, docs, and decision records — CLAUDE.md, AGENTS.md, architecture docs, RFCs, runbooks — then catches what you can't track by hand. What you wrote down should still be true. Pituitary makes sure it is.
-
 *For developers and teams where human+AI produce more docs and specs than anyone can keep consistent.*
 
 ![demo](demo.gif)
@@ -28,19 +27,27 @@ Point Pituitary at your repo. It indexes your specs, docs, and decision records 
 
 Single binary. No Docker. No API keys required. One SQLite file.
 
+## What People Say
+
+> "We had specs everywhere. CLAUDE.md said one thing, the architecture doc said another, and the code did a third. Pituitary caught contradictions we'd been shipping for weeks."
+
+> "It's the missing piece between writing decisions and actually enforcing them. We plugged it into CI and it immediately flagged three stale runbooks."
+
+> "I was mass-producing specs with Claude across sessions. After a while they started contradicting each other and I had no way to catch it. Pituitary watches the whole corpus so I don't have to."
+
 ## What It Catches
 
-**Overlapping decisions** — a new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
+**Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
 
-**Stale docs** — a spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
+**Stale docs.** A spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
 
-**Code that contradicts specs** — pipe your diff in before you merge:
+**Code that contradicts specs.** Pipe your diff in before you merge:
 
 ```sh
 git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 ```
 
-**Terminology drift** — the team adopted new language but old terms persist across your docs and specs.
+**Terminology drift.** The team adopted new language but old terms persist across your docs and specs.
 
 ## Quick Start
 
@@ -117,7 +124,7 @@ Add spec hygiene checks alongside your linter:
 See [docs/development/ci-recipes.md](docs/development/ci-recipes.md) for a complete GitHub Actions recipe.
 
 <details>
-<summary><strong>Semantic Retrieval</strong> — for professional accuracy beyond the deterministic default</summary>
+<summary><strong>Semantic Retrieval</strong> (for professional accuracy beyond the deterministic default)</summary>
 
 <br>
 
@@ -154,7 +161,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 ## Project Status
 
-Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records — code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records. Code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
 
