@@ -1,27 +1,74 @@
 <p align="center">
-  <strong>Pituitary</strong><br>
-  <em>Catch spec drift before it catches you.</em>
+  <img src="assets/peet.png" alt="Peet the Pituitary mascot" height="120">
+</p>
+
+<h1 align="center">Pituitary</h1>
+
+<p align="center">
+  <em>Catch spec drift before it catches you.</em><br><br>
+  Solves intent drift. When your specs, docs, and decisions<br>silently contradict each other across sessions.
 </p>
 
 <p align="center">
   <a href="https://github.com/dusk-network/pituitary/actions/workflows/ci.yml"><img src="https://github.com/dusk-network/pituitary/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://goreportcard.com/report/github.com/dusk-network/pituitary"><img src="https://goreportcard.com/badge/github.com/dusk-network/pituitary" alt="Go Report Card"></a>
   <a href="https://github.com/dusk-network/pituitary/releases/latest"><img src="https://img.shields.io/github/v/release/dusk-network/pituitary?include_prereleases" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> · <a href="#what-it-catches">What It Catches</a> · <a href="#use-it-from-your-editor">Editor</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
+  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#use-it-from-your-editor">Editor</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
 </p>
 
 ---
 
-Point Pituitary at your repo. It indexes your specs, docs, and decision records — CLAUDE.md, AGENTS.md, architecture docs, RFCs, runbooks — then catches what you can't track by hand. What you wrote down should still be true. Pituitary makes sure it is.
+*For developers and teams where human+AI produce more docs and specs than anyone can keep consistent.*
 
 ![demo](demo.gif)
 
 [Watch on asciinema](https://asciinema.org/a/4NBiD3tUyuwMWooT) for the interactive version.
 
 Single binary. No Docker. No API keys required. One SQLite file.
+
+## What It Catches
+
+**Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
+
+**Stale docs.** A spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
+
+**Code that contradicts specs.** Pipe your diff in before you merge:
+
+```sh
+git diff origin/main...HEAD | pituitary check-compliance --diff-file -
+```
+
+**Terminology drift.** The team adopted new language but old terms persist across your docs and specs.
+
+## Quick Start
+
+```sh
+pituitary init --path .              # discover, index, report
+pituitary check-doc-drift --scope all  # find stale docs
+pituitary review-spec --path specs/X   # full review of one spec
+pituitary status                       # index health at a glance
+```
+
+## Command Reference
+
+| What you want to do | Command |
+|---|---|
+| First run on a repo | `pituitary init --path .` |
+| Find stale docs | `pituitary check-doc-drift --scope all` |
+| Check a PR diff against specs | `git diff origin/main...HEAD \| pituitary check-compliance --diff-file -` |
+| Full spec review | `pituitary review-spec --path specs/X` |
+| Auto-fix deterministic drift | `pituitary fix --scope all --dry-run` |
+| Search specs semantically | `pituitary search-specs --query "rate limiting"` |
+| Trace impact of a spec change | `pituitary analyze-impact --path specs/X` |
+| Compare two specs | `pituitary compare-specs --path specs/A --path specs/B` |
+
+All commands output JSON with `--format json`. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
+
+See the [cheatsheet](docs/cheatsheet.md) for every command, or the [full reference](docs/reference.md) for configuration, runtime setup, and spec format details.
 
 ## Install
 
@@ -41,60 +88,6 @@ sudo install pituitary /usr/local/bin/
 **Windows**: download `pituitary_<version>_windows_amd64.zip` from [GitHub Releases](https://github.com/dusk-network/pituitary/releases), extract `pituitary.exe`, and add its location to your PATH.
 
 **Build from source** (contributors): see [docs/development/prerequisites.md](docs/development/prerequisites.md).
-
-## What It Catches
-
-**Overlapping decisions** — a new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
-
-**Stale docs** — a spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
-
-**Code that contradicts specs** — pipe your diff in before you merge:
-
-```sh
-git diff origin/main...HEAD | pituitary check-compliance --diff-file -
-```
-
-**Terminology drift** — the team adopted new language but old terms persist across your docs and specs.
-
-## Quick Start
-
-```sh
-pituitary init --path .              # discover, index, report
-pituitary check-doc-drift --scope all  # find stale docs
-pituitary review-spec --path specs/X   # full review of one spec
-pituitary status                       # index health at a glance
-```
-
-All commands output JSON with `--format json`. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
-
-See the [cheatsheet](docs/cheatsheet.md) for every command, or the [full reference](docs/reference.md) for configuration, runtime setup, and spec format details.
-
-## Semantic Retrieval
-
-Pituitary works out of the box with no API keys and no external dependencies. If you work in a professional context with higher standards for accuracy, you can enable deeper semantic support. This improves how precisely overlap detection, drift checks, and search match related content across your specs and docs.
-
-**Cloud: OpenAI** (if you already have a key)
-
-```toml
-[runtime.embedder]
-provider = "openai_compatible"
-model = "text-embedding-3-small"
-endpoint = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-```
-
-**Local: LM Studio or Ollama** (no data leaves your machine)
-
-```toml
-[runtime.embedder]
-provider = "openai_compatible"
-model = "nomic-embed-text-v1.5"
-endpoint = "http://127.0.0.1:1234/v1"
-```
-
-Then rebuild: `pituitary index --rebuild`
-
-Any OpenAI-compatible embedding API works. See [runtime docs](docs/runtime.md) for full setup including analysis providers.
 
 ## Use It From Your Editor
 
@@ -125,13 +118,45 @@ Add spec hygiene checks alongside your linter:
 
 See [docs/development/ci-recipes.md](docs/development/ci-recipes.md) for a complete GitHub Actions recipe.
 
+<details>
+<summary><strong>Semantic Retrieval</strong> (for professional accuracy beyond the deterministic default)</summary>
+
+<br>
+
+Pituitary works out of the box with no API keys and no external dependencies. If you work in a professional context with higher standards for accuracy, you can enable deeper semantic support. This improves how precisely overlap detection, drift checks, and search match related content across your specs and docs.
+
+**Cloud: OpenAI** (if you already have a key)
+
+```toml
+[runtime.embedder]
+provider = "openai_compatible"
+model = "text-embedding-3-small"
+endpoint = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+```
+
+**Local: LM Studio or Ollama** (no data leaves your machine)
+
+```toml
+[runtime.embedder]
+provider = "openai_compatible"
+model = "nomic-embed-text-v1.5"
+endpoint = "http://127.0.0.1:1234/v1"
+```
+
+Then rebuild: `pituitary index --rebuild`
+
+Any OpenAI-compatible embedding API works. See [runtime docs](docs/runtime.md) for full setup including analysis providers.
+
+</details>
+
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions: deterministic retrieval first, tools-only (no embedded agent), single SQLite file with atomic rebuilds.
 
 ## Project Status
 
-Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records — code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records. Code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
 
