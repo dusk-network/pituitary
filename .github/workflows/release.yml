@@ -116,6 +116,8 @@ jobs:
         run: |
           VERSION="${TAG#v}"
 
+          # Windows MCPB bundle is deferred: the MCPB ecosystem primarily targets
+          # Unix platforms. Windows users install via the .zip from GitHub Releases.
           for archive_info in "linux_amd64:pituitary-linux-amd64" "macOS_arm64:pituitary-darwin-arm64"; do
             os_arch="${archive_info%%:*}"
             bundle_name="${archive_info##*:}"
@@ -134,7 +136,7 @@ jobs:
             cp LICENSE "$workdir/"
             cp README.md "$workdir/"
 
-            npx @anthropic-ai/mcpb pack "$workdir" "dist/release/${bundle_name}.mcpb"
+            npx @anthropic-ai/mcpb@2.1.2 pack "$workdir" "dist/release/${bundle_name}.mcpb"
             rm -rf "$workdir"
           done
 
@@ -152,7 +154,12 @@ jobs:
         run: |
           VERSION="${TAG#v}"
 
-          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz
+          # Pin mcp-publisher to a specific version with integrity check.
+          MCP_PUBLISHER_VERSION="v1.5.0"
+          MCP_PUBLISHER_SHA256="79bbb73ba048c5906034f73ef6286d7763bd53cf368ea0b358fc593ed360cbd5"
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" -o mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c
+          tar xzf mcp-publisher.tar.gz
           chmod +x mcp-publisher
 
           PACKAGES="[]"
