@@ -4,6 +4,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/dusk-network/pituitary/actions/workflows/ci.yml"><img src="https://github.com/dusk-network/pituitary/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/dusk-network/pituitary/releases/latest"><img src="https://img.shields.io/github/v/release/dusk-network/pituitary?include_prereleases" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
+</p>
+
+<p align="center">
   <a href="#install">Install</a> · <a href="#what-it-catches">What It Catches</a> · <a href="#use-it-from-your-editor">Editor</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
 </p>
 

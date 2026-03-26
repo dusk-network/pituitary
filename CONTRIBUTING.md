@@ -158,4 +158,4 @@ When in doubt, read [ARCHITECTURE.md](ARCHITECTURE.md) — it's the canonical so
 
 ## Questions?
 
-Open an issue with the `question` label, or start a discussion on GitHub Discussions (if enabled). We're happy to help you find the right area to contribute.
+Open an issue with the `question` label. We're happy to help you find the right area to contribute.

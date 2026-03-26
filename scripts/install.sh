@@ -3,6 +3,7 @@
 set -eu
 
 REPO="dusk-network/pituitary"
+RELEASES_URL="https://github.com/${REPO}/releases"
 
 log() {
   printf '%s\n' "$*" >&2
@@ -20,7 +21,7 @@ need_cmd() {
 resolve_version() {
   version_input="${PITUITARY_VERSION:-${1:-latest}}"
   if [ "$version_input" = "latest" ]; then
-    tag="$(gh api "repos/${REPO}/releases/latest" -q .tag_name)" \
+    tag="$(curl -fsSL -o /dev/null -w '%{redirect_url}' "${RELEASES_URL}/latest" | sed 's|.*/||')" \
       || fail "failed to resolve the latest release tag"
     [ -n "$tag" ] || fail "failed to resolve the latest release tag"
   else
@@ -52,7 +53,7 @@ detect_platform() {
   case "${os_slug}/${arch_slug}" in
     linux/amd64|macOS/arm64) ;;
     *)
-      fail "unsupported release target: ${os_slug}/${arch_slug}. Supported targets are linux/amd64 and macOS/arm64. For other platforms, install pituitary manually from GitHub Releases: https://github.com/${REPO}/releases"
+      fail "unsupported release target: ${os_slug}/${arch_slug}. Supported targets are linux/amd64 and macOS/arm64. For other platforms, install pituitary manually from GitHub Releases: ${RELEASES_URL}"
       ;;
   esac
 
@@ -111,13 +112,12 @@ install_binary() {
 }
 
 main() {
-  need_cmd gh
+  need_cmd curl
   need_cmd tar
   need_cmd awk
   need_cmd uname
   need_cmd mktemp
   need_cmd id
-  gh auth status >/dev/null 2>&1 || fail "GitHub CLI authentication is required; run 'gh auth login' first"
 
   resolve_version "${1:-latest}"
   detect_platform
@@ -126,19 +126,18 @@ main() {
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/pituitary-install.XXXXXX")"
   trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
-  archive_path="${tmpdir}/${archive}"
-  checksum_path="${tmpdir}/${checksums}"
+  archive_url="${RELEASES_URL}/download/${tag}/${archive}"
+  checksums_url="${RELEASES_URL}/download/${tag}/${checksums}"
 
   log "pituitary install: downloading ${tag} for ${os_slug}/${arch_slug}"
-  gh release download "$tag" \
-    --repo "$REPO" \
-    --pattern "$archive" \
-    --pattern "$checksums" \
-    --dir "$tmpdir" \
-    --clobber
-  verify_checksum "$archive_path" "$checksum_path"
+  curl -fsSL -o "$tmpdir/$archive" "$archive_url" \
+    || fail "failed to download ${archive_url}"
+  curl -fsSL -o "$tmpdir/$checksums" "$checksums_url" \
+    || fail "failed to download ${checksums_url}"
 
-  tar -xzf "$archive_path" -C "$tmpdir"
+  verify_checksum "$tmpdir/$archive" "$tmpdir/$checksums"
+
+  tar -xzf "$tmpdir/$archive" -C "$tmpdir"
   [ -f "$tmpdir/pituitary" ] || fail "archive did not contain a pituitary binary"
 
   install_binary

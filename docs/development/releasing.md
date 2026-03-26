@@ -43,14 +43,13 @@ After the tagged release is published, update the tap formula from a local check
 
 ```sh
 git clone https://github.com/dusk-network/homebrew-tap.git /tmp/homebrew-tap
-gh auth login
-./scripts/update-homebrew-formula.sh v0.4.0 /tmp/homebrew-tap
-git -C /tmp/homebrew-tap add Formula/pituitary.rb lib/github_private_repository_release_download_strategy.rb
-git -C /tmp/homebrew-tap commit -m "Update pituitary to v0.4.0"
+./scripts/update-homebrew-formula.sh v1.0.0-beta /tmp/homebrew-tap
+git -C /tmp/homebrew-tap add Formula/pituitary.rb
+git -C /tmp/homebrew-tap commit -m "Update pituitary to v1.0.0-beta"
 git -C /tmp/homebrew-tap push
 ```
 
-`scripts/update-homebrew-formula.sh` uses authenticated `gh release download` access to pull the published checksum manifest from GitHub Releases, rewrites `Formula/pituitary.rb` for the requested tag, and refreshes the custom private-release download strategy in the tap so Homebrew stays aligned with the private release artifacts.
+`scripts/update-homebrew-formula.sh` downloads the published checksum manifest from GitHub Releases via `curl`, rewrites `Formula/pituitary.rb` for the requested tag with the correct SHA-256 hashes, and uses Homebrew's standard download strategy for the public release artifacts.
 
 ## Validation
 
