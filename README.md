@@ -1,9 +1,12 @@
 <p align="center">
   <img src="assets/peet.png" alt="Peet the Pituitary mascot" height="120">
-  <br>
-  <strong style="font-size: 2em;">Pituitary</strong><br>
-  <em>Catch spec drift before it catches you.</em><br>
-  <sub>Solves intent drift. When your specs, docs, and decisions silently contradict each other across sessions.</sub>
+</p>
+
+<h1 align="center">Pituitary</h1>
+
+<p align="center">
+  <em>Catch spec drift before it catches you.</em><br><br>
+  Solves intent drift. When your specs, docs, and decisions<br>silently contradict each other across sessions.
 </p>
 
 <p align="center">
