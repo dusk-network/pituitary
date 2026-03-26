@@ -3,6 +3,7 @@
 set -eu
 
 REPO="dusk-network/pituitary"
+RELEASES_URL="https://github.com/${REPO}/releases"
 
 log() {
   printf '%s\n' "$*" >&2
@@ -44,8 +45,6 @@ read_checksum() {
 write_formula() {
   formula_path="$tap_path/Formula/pituitary.rb"
   cat >"$formula_path" <<EOF
-require_relative "../lib/github_private_repository_release_download_strategy"
-
 class Pituitary < Formula
   desc "Spec management tool for keeping specifications and documentation aligned"
   homepage "https://github.com/${REPO}"
@@ -54,16 +53,14 @@ class Pituitary < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/${REPO}/releases/download/${tag}/pituitary_${version}_macOS_arm64.tar.gz",
-          using: GitHubPrivateRepositoryReleaseDownloadStrategy
+      url "https://github.com/${REPO}/releases/download/${tag}/pituitary_${version}_macOS_arm64.tar.gz"
       sha256 "${darwin_sha}"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/${REPO}/releases/download/${tag}/pituitary_${version}_linux_amd64.tar.gz",
-          using: GitHubPrivateRepositoryReleaseDownloadStrategy
+      url "https://github.com/${REPO}/releases/download/${tag}/pituitary_${version}_linux_amd64.tar.gz"
       sha256 "${linux_sha}"
     end
   end
@@ -75,45 +72,14 @@ class Pituitary < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/pituitary version")
   end
-
-  def caveats
-    <<~EOS
-      Pituitary release artifacts are published from the private ${REPO} repository.
-      Set HOMEBREW_GITHUB_API_TOKEN to a token with access to that repository
-      before installing or upgrading this formula.
-    EOS
-  end
-end
-EOF
-}
-
-write_strategy() {
-  strategy_path="$tap_path/lib/github_private_repository_release_download_strategy.rb"
-  mkdir -p "$tap_path/lib"
-  cat >"$strategy_path" <<'EOF'
-require "download_strategy"
-
-class GitHubPrivateRepositoryReleaseDownloadStrategy < CurlDownloadStrategy
-  def initialize(url, name, version, **meta)
-    token = ENV.fetch("HOMEBREW_GITHUB_API_TOKEN", "").strip
-    if token.empty?
-      raise CurlDownloadStrategyError,
-            "HOMEBREW_GITHUB_API_TOKEN is required to install pituitary from the private dusk-network/pituitary repo"
-    end
-
-    meta[:headers] ||= []
-    meta[:headers] << "Authorization: Bearer #{token}"
-    super
-  end
 end
 EOF
 }
 
 main() {
-  need_cmd gh
+  need_cmd curl
   need_cmd awk
   need_cmd mktemp
-  gh auth status >/dev/null 2>&1 || fail "GitHub CLI authentication is required; run 'gh auth login' first"
 
   resolve_tag "$@"
   resolve_tap_path "$@"
@@ -122,11 +88,9 @@ main() {
   trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
   checksum_path="${tmpdir}/pituitary_${tag}_checksums.txt"
-  gh release download "$tag" \
-    --repo "$REPO" \
-    --pattern "pituitary_${tag}_checksums.txt" \
-    --dir "$tmpdir" \
-    --clobber
+  curl -fsSL -o "$checksum_path" \
+    "${RELEASES_URL}/download/${tag}/pituitary_${tag}_checksums.txt" \
+    || fail "failed to download checksums for ${tag}"
 
   linux_sha="$(read_checksum "pituitary_${version}_linux_amd64.tar.gz")"
   darwin_sha="$(read_checksum "pituitary_${version}_macOS_arm64.tar.gz")"
@@ -134,13 +98,11 @@ main() {
   [ -n "$linux_sha" ] || fail "missing linux checksum for ${tag}"
   [ -n "$darwin_sha" ] || fail "missing macOS checksum for ${tag}"
 
-  write_strategy
   write_formula
 
   log "pituitary tap update: wrote ${tap_path}/Formula/pituitary.rb for ${tag}"
-  log "pituitary tap update: wrote ${tap_path}/lib/github_private_repository_release_download_strategy.rb"
   log "pituitary tap update: next step:"
-  log "  git -C ${tap_path} add Formula/pituitary.rb lib/github_private_repository_release_download_strategy.rb && git -C ${tap_path} commit -m \"Update pituitary to ${tag}\" && git -C ${tap_path} push"
+  log "  git -C ${tap_path} add Formula/pituitary.rb && git -C ${tap_path} commit -m \"Update pituitary to ${tag}\" && git -C ${tap_path} push"
 }
 
 main "$@"
