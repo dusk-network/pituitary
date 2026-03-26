@@ -12,10 +12,16 @@ startCommand:
         default: ".pituitary/pituitary.toml"
     required: []
   commandFunction: |-
-    (config) => ({
-      command: "pituitary",
-      args: ["serve", "--config", config.configPath || ".pituitary/pituitary.toml"]
-    })
+    (config) => {
+      const args = ["serve"];
+      if (config.configPath) {
+        args.push("--config", config.configPath);
+      }
+      return {
+        command: "pituitary",
+        args,
+      };
+    }
 
 build:
   dockerfile: Dockerfile.smithery
