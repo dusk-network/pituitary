@@ -5,24 +5,22 @@ title: "[feature] "
 labels: ["enhancement"]
 ---
 
-## Problem Statement
+## What workflow are you trying to improve?
 
-What problem are you trying to solve?
+Describe the problem from your perspective. What are you trying to do, and where does Pituitary fall short?
 
-## Proposed Solution
+## What do you do today to work around this?
 
-Describe the solution you would like to see.
+How do you handle this currently? Manual steps, scripts, other tools?
 
-## Alternatives Considered
+## Proposed solution
 
-What alternatives have you considered?
+Describe what you would like Pituitary to do instead.
 
-## Scope
+## Which commands are involved?
 
-- Affected command(s):
-- Affected package(s):
-- Docs needed:
+Which Pituitary commands (if any) relate to this request? For example: `check-doc-drift`, `review-spec`, `init`, etc.
 
-## Additional Context
+## Additional context
 
-Anything else that would help evaluate the request.
+Anything else that helps: example output, config snippets, repo structure, screenshots.
