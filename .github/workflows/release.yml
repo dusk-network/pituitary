@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   package:
@@ -86,11 +87,18 @@ jobs:
   publish:
     needs: package
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Download packaged artifacts
         uses: actions/download-artifact@v6
@@ -100,19 +108,76 @@ jobs:
           path: dist/release
 
       - name: Generate release checksums
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           cd dist/release
           sha256sum *.tar.gz *.zip > "pituitary_${TAG}_checksums.txt"
 
+      - name: Build MCPB bundles
+        run: |
+          VERSION="${TAG#v}"
+
+          for archive_info in "linux_amd64:pituitary-linux-amd64" "macOS_arm64:pituitary-darwin-arm64"; do
+            os_arch="${archive_info%%:*}"
+            bundle_name="${archive_info##*:}"
+            archive_path="dist/release/pituitary_${VERSION}_${os_arch}.tar.gz"
+
+            if [ ! -f "$archive_path" ]; then
+              echo "Skipping ${os_arch} (archive not found)"
+              continue
+            fi
+
+            echo "Building MCPB bundle: ${bundle_name}"
+            workdir="$(mktemp -d)"
+
+            tar xzf "$archive_path" -C "$workdir"
+            sed "s/\${VERSION}/${VERSION}/g" .mcpb/manifest.template.json > "$workdir/manifest.json"
+            cp LICENSE "$workdir/"
+            cp README.md "$workdir/"
+
+            npx @anthropic-ai/mcpb pack "$workdir" "dist/release/${bundle_name}.mcpb"
+            rm -rf "$workdir"
+          done
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/release/* --clobber
           else
             gh release create "$TAG" --verify-tag --generate-notes dist/release/*
           fi
+
+      - name: Publish to MCP registry
+        run: |
+          VERSION="${TAG#v}"
+
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz
+          chmod +x mcp-publisher
+
+          PACKAGES="[]"
+          for mcpb in dist/release/*.mcpb; do
+            [ -f "$mcpb" ] || continue
+            filename="$(basename "$mcpb")"
+            sha256="$(sha256sum "$mcpb" | awk '{print $1}')"
+            url="https://github.com/dusk-network/pituitary/releases/download/${TAG}/${filename}"
+            PACKAGES=$(echo "$PACKAGES" | jq --arg url "$url" --arg sha "$sha256" \
+              '. + [{"registryType":"mcpb","identifier":$url,"fileSha256":$sha,"transport":{"type":"stdio"},"environmentVariables":[]}]')
+          done
+
+          jq -n \
+            --arg version "$VERSION" \
+            --argjson packages "$PACKAGES" \
+            '{
+              "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+              "name": "io.github.dusk-network/pituitary",
+              "description": "Catch spec drift before it catches you. Detect overlap, stale docs, and code drift.",
+              "repository": {"url": "https://github.com/dusk-network/pituitary", "source": "github"},
+              "version": $version,
+              "packages": $packages
+            }' > server.json
+
+          cat server.json
+          ./mcp-publisher validate
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
