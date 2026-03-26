@@ -6,16 +6,6 @@
     "url": "https://github.com/dusk-network/pituitary",
     "source": "github"
   },
-  "version": "1.0.0-beta",
-  "packages": [
-    {
-      "registryType": "mcpb",
-      "identifier": "https://github.com/dusk-network/pituitary/releases/download/v1.0.0-beta/pituitary-darwin-arm64.mcpb",
-      "fileSha256": "e37ceca80fb3c059202b69a426405f29541826843e822457cbc2916bbac9aca0",
-      "transport": {
-        "type": "stdio"
-      },
-      "environmentVariables": []
-    }
-  ]
+  "version": "0.0.0-dev",
+  "packages": []
 }
