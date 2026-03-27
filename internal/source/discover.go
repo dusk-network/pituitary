@@ -144,7 +144,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	preview, err := PreviewFromConfig(cfg)
+	preview, err := PreviewFromConfigWithOptions(cfg, PreviewOptions{Logger: logger})
 	if err != nil {
 		return nil, fmt.Errorf("preview discovered config: %w", err)
 	}
@@ -170,7 +170,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reload written config: %w", err)
 		}
-		preview, err := PreviewFromConfig(loaded)
+		preview, err := PreviewFromConfigWithOptions(loaded, PreviewOptions{Logger: logger})
 		if err != nil {
 			return nil, fmt.Errorf("preview written config: %w", err)
 		}
@@ -352,17 +352,23 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 }
 
 func classifyMarkdownCandidate(workspaceRoot, path string) (markdownCandidateAssessment, error) {
+	relPath := workspaceRelative(workspaceRoot, path)
 	// #nosec G304 -- path comes from filepath.WalkDir rooted at the workspace.
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return markdownCandidateAssessment{}, nil
+		return markdownCandidateAssessment{
+			RelativePath: relPath,
+			Reason:       fmt.Sprintf("read markdown: %v", err),
+		}, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return markdownCandidateAssessment{}, nil
+		return markdownCandidateAssessment{
+			RelativePath: relPath,
+			Reason:       fmt.Sprintf("stat markdown: %v", err),
+		}, nil
 	}
 
-	relPath := workspaceRelative(workspaceRoot, path)
 	title, _ := docTitleWithSource(path, body)
 	titleLower := strings.ToLower(title)
 	pathTokens := discoveryTokens(relPath)
