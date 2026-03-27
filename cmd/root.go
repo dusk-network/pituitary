@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/dusk-network/pituitary/internal/diag"
 )
 
 const (
@@ -101,6 +103,8 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	stdout = wrapCLIWriter(stdout, options.ColorMode)
 	stderr = wrapCLIWriter(stderr, options.ColorMode)
+	logLevel, _ := diag.ParseLevel(options.LogLevel)
+	ctx = withCLILogger(ctx, diag.NewLogger(stderr, logLevel))
 	if len(remainingArgs) == 0 {
 		printHelp(stdout)
 		return 1
@@ -130,6 +134,7 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "global options:")
 	fmt.Fprintln(w, "  --config PATH     path to workspace config")
 	fmt.Fprintln(w, "  --color MODE      terminal color: auto, always, or never")
+	fmt.Fprintln(w, "  --log-level LEVEL diagnostics: off, error, warn, info, or debug")
 	fmt.Fprintln(w)
 	printSharedConfigResolution(w)
 	fmt.Fprintln(w)

@@ -89,6 +89,7 @@ Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact
 ```sh
 --path          # workspace-relative path (accepts dirs, spec.toml, body.md)
 --config        # explicit config file path
+--log-level     # diagnostic verbosity: off, error, warn, info, debug
 --format json   # machine-readable output
 --check-runtime # probe runtime dependencies (embedder, analysis, all)
 --dry-run       # validate without side effects (index, init)

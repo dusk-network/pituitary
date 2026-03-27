@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/diag"
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
@@ -113,6 +114,45 @@ func TestLoadFromConfigNormalizesRepoFixtures(t *testing.T) {
 	}
 	if specsByRef[resultAgain.Specs[0].Ref].ContentHash != resultAgain.Specs[0].ContentHash {
 		t.Fatalf("spec content hash changed across reloads")
+	}
+}
+
+func TestLoadFromConfigWithOptionsLogsEmptySourceMatches(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	cfg := &config.Config{
+		Workspace: config.Workspace{
+			Root:      ".",
+			RootPath:  repo,
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Sources: []config.Source{
+			{
+				Name:         "specs",
+				Adapter:      config.AdapterFilesystem,
+				Kind:         config.SourceKindSpecBundle,
+				Path:         "specs",
+				ResolvedPath: filepath.Join(repo, "specs"),
+			},
+		},
+	}
+	if err := os.MkdirAll(cfg.Sources[0].ResolvedPath, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+
+	var stderr bytes.Buffer
+	result, err := LoadFromConfigWithOptions(cfg, LoadOptions{
+		Logger: diag.NewLogger(&stderr, diag.LevelInfo),
+	})
+	if err != nil {
+		t.Fatalf("LoadFromConfigWithOptions() error = %v", err)
+	}
+	if got, want := len(result.Specs), 0; got != want {
+		t.Fatalf("spec count = %d, want %d", got, want)
+	}
+	if !strings.Contains(stderr.String(), `pituitary warn: source: source "specs" (spec_bundle specs) matched 0 item(s)`) {
+		t.Fatalf("stderr %q does not contain empty-source warning", stderr.String())
 	}
 }
 

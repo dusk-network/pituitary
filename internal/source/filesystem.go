@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/diag"
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
@@ -34,15 +35,28 @@ type LoadSourceSummary struct {
 	DocCount  int    `json:"doc_count,omitempty"`
 }
 
+// LoadOptions controls diagnostic behavior while loading configured sources.
+type LoadOptions struct {
+	Logger *diag.Logger
+}
+
 // LoadFromConfig loads and normalizes all configured filesystem sources.
 func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
+	return LoadFromConfigWithOptions(cfg, LoadOptions{})
+}
+
+// LoadFromConfigWithOptions loads and normalizes all configured filesystem sources.
+func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadResult, error) {
+	logger := options.Logger
 	result := &LoadResult{
 		Sources: make([]LoadSourceSummary, 0, len(cfg.Sources)),
 	}
 	seenSpecs := make(map[string]artifactOrigin)
 	seenDocs := make(map[string]artifactOrigin)
+	logger.Infof("source", "loading %d configured source(s)", len(cfg.Sources))
 
 	for _, source := range cfg.Sources {
+		logger.Debugf("source", "loading source %q (%s %s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
 		summary := LoadSourceSummary{
 			Name:    source.Name,
 			Adapter: source.Adapter,
@@ -88,6 +102,20 @@ func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
 		}
 
 		result.Sources = append(result.Sources, summary)
+		if summary.ItemCount == 0 {
+			logger.Warnf("source", "source %q (%s %s) matched 0 item(s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
+			continue
+		}
+		logger.Infof(
+			"source",
+			"source %q (%s %s) loaded %d item(s) (%d spec(s), %d doc(s))",
+			source.Name,
+			source.Kind,
+			filepath.ToSlash(source.Path),
+			summary.ItemCount,
+			summary.SpecCount,
+			summary.DocCount,
+		)
 	}
 
 	sort.Slice(result.Specs, func(i, j int) bool {

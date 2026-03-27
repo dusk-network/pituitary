@@ -68,7 +68,7 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 		}, 2)
 	}
 
-	result, err := source.PreviewFromConfig(cfg)
+	result, err := source.PreviewFromConfigWithOptions(cfg, source.PreviewOptions{Logger: cliLoggerFromContext(ctx)})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "preview-sources", request, cliIssue{
 			Code:    "source_error",

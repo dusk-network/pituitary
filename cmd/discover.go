@@ -20,7 +20,7 @@ func runDiscover(args []string, stdout, stderr io.Writer) int {
 	return runDiscoverContext(context.Background(), args, stdout, stderr)
 }
 
-func runDiscoverContext(_ context.Context, args []string, stdout, stderr io.Writer) int {
+func runDiscoverContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("discover", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	help := newStandaloneCommandHelp("discover", "pituitary discover [--path PATH] [--config-path PATH] [--write] [--format FORMAT]")
@@ -66,6 +66,7 @@ func runDiscoverContext(_ context.Context, args []string, stdout, stderr io.Writ
 		RootPath:   path,
 		ConfigPath: request.ConfigPath,
 		Write:      write,
+		Logger:     cliLoggerFromContext(ctx),
 	})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "discover", request, cliIssue{

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/diag"
 )
 
 const (
@@ -21,6 +22,7 @@ type DiscoverOptions struct {
 	RootPath   string
 	ConfigPath string
 	Write      bool
+	Logger     *diag.Logger
 }
 
 // DiscoverResult reports a conservative source proposal for one workspace.
@@ -76,9 +78,18 @@ type discoveredCandidate struct {
 	rationale   []string
 }
 
+type markdownCandidateAssessment struct {
+	Kind         string
+	Candidate    discoveredCandidate
+	RelativePath string
+	Selected     bool
+	Reason       string
+}
+
 // DiscoverWorkspace scans one repo-like directory and proposes a starting
 // local config plus a preview of what that config would index.
 func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
+	logger := options.Logger
 	rootPath := strings.TrimSpace(options.RootPath)
 	if rootPath == "" {
 		rootPath = "."
@@ -95,27 +106,45 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	case err != nil:
 		return nil, fmt.Errorf("workspace path %q: %w", filepath.ToSlash(rootPath), err)
 	}
+	logger.Infof("discover", "scanning workspace %s", filepath.ToSlash(workspaceRoot))
 
-	specCandidates, specBundleDirs, err := discoverSpecBundleCandidates(workspaceRoot)
+	specCandidates, specBundleDirs, rejectedSpecBundles, err := discoverSpecBundleCandidates(workspaceRoot, logger)
 	if err != nil {
 		return nil, err
 	}
-	contractCandidates, docCandidates, err := discoverMarkdownCandidates(workspaceRoot, specBundleDirs)
+	contractCandidates, docCandidates, rejectedMarkdown, err := discoverMarkdownCandidates(workspaceRoot, specBundleDirs, logger)
 	if err != nil {
 		return nil, err
 	}
 	specCandidates, contractCandidates, warnings := dedupeDiscoveredSpecCandidates(specCandidates, contractCandidates)
+	logger.Infof(
+		"discover",
+		"accepted %d spec bundle(s), %d markdown contract(s), and %d markdown doc file(s); rejected %d spec bundle candidate(s) and %d markdown file(s)",
+		len(specCandidates),
+		len(contractCandidates),
+		len(docCandidates),
+		rejectedSpecBundles,
+		rejectedMarkdown,
+	)
+	if len(specCandidates) == 0 {
+		logger.Warnf("discover", "discovery selected no spec bundles")
+	}
+	for _, warning := range warnings {
+		logger.Warnf("discover", "%s", warning.Message)
+	}
 
 	sources := buildDiscoveredSources(workspaceRoot, specCandidates, contractCandidates, docCandidates)
 	if len(sources) == 0 {
+		logger.Warnf("discover", "discovery selected no source blocks under %s", filepath.ToSlash(workspaceRoot))
 		return nil, fmt.Errorf("no likely sources discovered under %s", filepath.ToSlash(workspaceRoot))
 	}
+	logger.Infof("discover", "generated %d source block(s)", len(sources))
 
 	cfg, err := buildDiscoveredConfig(workspaceRoot, strings.TrimSpace(options.ConfigPath), sources)
 	if err != nil {
 		return nil, err
 	}
-	preview, err := PreviewFromConfig(cfg)
+	preview, err := PreviewFromConfigWithOptions(cfg, PreviewOptions{Logger: logger})
 	if err != nil {
 		return nil, fmt.Errorf("preview discovered config: %w", err)
 	}
@@ -141,12 +170,13 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reload written config: %w", err)
 		}
-		preview, err := PreviewFromConfig(loaded)
+		preview, err := PreviewFromConfigWithOptions(loaded, PreviewOptions{Logger: logger})
 		if err != nil {
 			return nil, fmt.Errorf("preview written config: %w", err)
 		}
 		result.Preview = preview
 		result.WroteConfig = true
+		logger.Infof("discover", "wrote generated config to %s", filepath.ToSlash(cfg.ConfigPath))
 	}
 
 	return result, nil
@@ -157,9 +187,10 @@ func WriteDiscoveredConfig(path, content string) error {
 	return writeDiscoveredConfig(path, content)
 }
 
-func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, map[string]struct{}, error) {
+func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]discoveredCandidate, map[string]struct{}, int, error) {
 	var candidates []discoveredCandidate
 	bundleDirs := make(map[string]struct{})
+	rejected := 0
 
 	err := filepath.WalkDir(workspaceRoot, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -167,6 +198,7 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 		}
 		if d.IsDir() {
 			if shouldSkipDiscoveryDir(workspaceRoot, path, d.Name()) {
+				logger.Debugf("discover", "skipping directory %s", workspaceRelative(workspaceRoot, path))
 				return filepath.SkipDir
 			}
 			return nil
@@ -176,8 +208,10 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 		}
 
 		bundleDir := filepath.Dir(path)
-		ok, rationale := isValidDiscoveredSpecBundle(workspaceRoot, bundleDir)
+		ok, rationale, rejectionReason := assessDiscoveredSpecBundle(workspaceRoot, bundleDir)
 		if !ok {
+			rejected++
+			logger.Debugf("discover", "rejected spec bundle %s: %s", workspaceRelative(workspaceRoot, path), rejectionReason)
 			return nil
 		}
 		bundleDirs[bundleDir] = struct{}{}
@@ -199,14 +233,15 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 			modifiedAt:  info.ModTime(),
 			rationale:   rationale,
 		})
+		logger.Debugf("discover", "accepted spec bundle %s (%s)", workspaceRelative(workspaceRoot, path), strings.Join(rationale, "; "))
 		return nil
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("scan workspace for spec bundles: %w", err)
+		return nil, nil, 0, fmt.Errorf("scan workspace for spec bundles: %w", err)
 	}
 
 	sortDiscoveredCandidates(candidates)
-	return candidates, bundleDirs, nil
+	return candidates, bundleDirs, rejected, nil
 }
 
 func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
@@ -232,39 +267,43 @@ func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 	return raw.ID, joinedContentHash(specBytes, bodyBytes), nil
 }
 
-func isValidDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string) {
+func assessDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string, string) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
 	// #nosec G304 -- specPath is the fixed bundle manifest inside a discovered workspace directory.
 	specBytes, err := os.ReadFile(specPath)
 	if err != nil {
-		return false, nil
+		return false, nil, fmt.Sprintf("read spec.toml: %v", err)
 	}
 	raw, err := parseSpecBundle(specBytes)
 	if err != nil {
-		return false, nil
+		return false, nil, "invalid spec.toml: " + err.Error()
 	}
 	if err := validateRawSpec(workspaceRoot, "discover", bundleDir, raw); err != nil {
-		return false, nil
+		return false, nil, err.Error()
 	}
 
 	bodyPath := filepath.Clean(filepath.Join(bundleDir, raw.Body))
 	if !pathWithinRoot(bundleDir, bodyPath) {
-		return false, nil
+		return false, nil, fmt.Sprintf("body path %q escapes the bundle directory", raw.Body)
 	}
 	info, err := os.Stat(bodyPath)
-	if err != nil || info.IsDir() {
-		return false, nil
+	switch {
+	case err != nil:
+		return false, nil, fmt.Sprintf("body file %s does not exist", workspaceRelative(workspaceRoot, bodyPath))
+	case info.IsDir():
+		return false, nil, fmt.Sprintf("body path %s is a directory", workspaceRelative(workspaceRoot, bodyPath))
 	}
 
 	return true, []string{
 		"valid spec.toml bundle",
 		fmt.Sprintf("body file %s exists", workspaceRelative(workspaceRoot, bodyPath)),
-	}
+	}, ""
 }
 
-func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]struct{}) ([]discoveredCandidate, []discoveredCandidate, error) {
+func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]struct{}, logger *diag.Logger) ([]discoveredCandidate, []discoveredCandidate, int, error) {
 	var contractCandidates []discoveredCandidate
 	var docCandidates []discoveredCandidate
+	rejected := 0
 
 	err := filepath.WalkDir(workspaceRoot, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -272,6 +311,7 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 		}
 		if d.IsDir() {
 			if shouldSkipDiscoveryDir(workspaceRoot, path, d.Name()) {
+				logger.Debugf("discover", "skipping directory %s", workspaceRelative(workspaceRoot, path))
 				return filepath.SkipDir
 			}
 			return nil
@@ -280,44 +320,55 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 			return nil
 		}
 		if withinAnyDiscoveryRoot(path, specBundleDirs) {
+			logger.Debugf("discover", "skipping markdown %s: inside a discovered spec bundle", workspaceRelative(workspaceRoot, path))
 			return nil
 		}
 
-		kind, candidate, ok, err := classifyMarkdownCandidate(workspaceRoot, path)
+		assessment, err := classifyMarkdownCandidate(workspaceRoot, path)
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !assessment.Selected {
+			rejected++
+			logger.Debugf("discover", "rejected markdown %s: %s", assessment.RelativePath, assessment.Reason)
 			return nil
 		}
-		if kind == config.SourceKindMarkdownContract {
-			contractCandidates = append(contractCandidates, candidate)
+		if assessment.Kind == config.SourceKindMarkdownContract {
+			contractCandidates = append(contractCandidates, assessment.Candidate)
+			logger.Debugf("discover", "accepted markdown contract %s (%s)", assessment.Candidate.path, strings.Join(assessment.Candidate.rationale, "; "))
 			return nil
 		}
-		docCandidates = append(docCandidates, candidate)
+		docCandidates = append(docCandidates, assessment.Candidate)
+		logger.Debugf("discover", "accepted markdown doc %s (%s)", assessment.Candidate.path, strings.Join(assessment.Candidate.rationale, "; "))
 		return nil
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("scan workspace for markdown sources: %w", err)
+		return nil, nil, 0, fmt.Errorf("scan workspace for markdown sources: %w", err)
 	}
 
 	sortDiscoveredCandidates(contractCandidates)
 	sortDiscoveredCandidates(docCandidates)
-	return contractCandidates, docCandidates, nil
+	return contractCandidates, docCandidates, rejected, nil
 }
 
-func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCandidate, bool, error) {
+func classifyMarkdownCandidate(workspaceRoot, path string) (markdownCandidateAssessment, error) {
+	relPath := workspaceRelative(workspaceRoot, path)
 	// #nosec G304 -- path comes from filepath.WalkDir rooted at the workspace.
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return "", discoveredCandidate{}, false, nil
+		return markdownCandidateAssessment{
+			RelativePath: relPath,
+			Reason:       fmt.Sprintf("read markdown: %v", err),
+		}, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", discoveredCandidate{}, false, nil
+		return markdownCandidateAssessment{
+			RelativePath: relPath,
+			Reason:       fmt.Sprintf("stat markdown: %v", err),
+		}, nil
 	}
 
-	relPath := workspaceRelative(workspaceRoot, path)
 	title, _ := docTitleWithSource(path, body)
 	titleLower := strings.ToLower(title)
 	pathTokens := discoveryTokens(relPath)
@@ -338,29 +389,46 @@ func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCa
 	case contractScore >= 3 && contractScore >= docScore+1:
 		ref, contentHash, err := discoverMarkdownContractIdentity(workspaceRoot, path, body)
 		if err != nil {
-			return "", discoveredCandidate{}, false, err
+			return markdownCandidateAssessment{}, err
 		}
-		return config.SourceKindMarkdownContract, discoveredCandidate{
-			path:        relPath,
-			kind:        config.SourceKindMarkdownContract,
-			ref:         ref,
-			contentHash: contentHash,
-			confidence:  discoveryConfidence(contractScore),
-			score:       contractScore,
-			modifiedAt:  info.ModTime(),
-			rationale:   contractReasons,
-		}, true, nil
+		return markdownCandidateAssessment{
+			Kind:         config.SourceKindMarkdownContract,
+			RelativePath: relPath,
+			Selected:     true,
+			Candidate: discoveredCandidate{
+				path:        relPath,
+				kind:        config.SourceKindMarkdownContract,
+				ref:         ref,
+				contentHash: contentHash,
+				confidence:  discoveryConfidence(contractScore),
+				score:       contractScore,
+				modifiedAt:  info.ModTime(),
+				rationale:   contractReasons,
+			},
+		}, nil
 	case docScore >= 2:
-		return config.SourceKindMarkdownDocs, discoveredCandidate{
-			path:       relPath,
-			kind:       config.SourceKindMarkdownDocs,
-			confidence: discoveryConfidence(docScore),
-			score:      docScore,
-			modifiedAt: info.ModTime(),
-			rationale:  docReasons,
-		}, true, nil
+		return markdownCandidateAssessment{
+			Kind:         config.SourceKindMarkdownDocs,
+			RelativePath: relPath,
+			Selected:     true,
+			Candidate: discoveredCandidate{
+				path:       relPath,
+				kind:       config.SourceKindMarkdownDocs,
+				confidence: discoveryConfidence(docScore),
+				score:      docScore,
+				modifiedAt: info.ModTime(),
+				rationale:  docReasons,
+			},
+		}, nil
 	default:
-		return "", discoveredCandidate{}, false, nil
+		return markdownCandidateAssessment{
+			RelativePath: relPath,
+			Reason: fmt.Sprintf(
+				"did not meet discovery thresholds (%s; %s)",
+				discoveryScoreSummary("contract", contractScore, contractReasons),
+				discoveryScoreSummary("doc", docScore, docReasons),
+			),
+		}, nil
 	}
 }
 
@@ -800,6 +868,13 @@ func discoveryConfidence(score int) string {
 	default:
 		return "low"
 	}
+}
+
+func discoveryScoreSummary(label string, score int, reasons []string) string {
+	if len(reasons) == 0 {
+		return fmt.Sprintf("%s score %d", label, score)
+	}
+	return fmt.Sprintf("%s score %d [%s]", label, score, strings.Join(reasons, "; "))
 }
 
 func discoveryCommonRoot(workspaceRoot string, candidates []discoveredCandidate) string {

@@ -92,7 +92,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 			Message: "invalid config:\n" + err.Error(),
 		}, 2)
 	}
-	records, err := source.LoadFromConfig(cfg)
+	records, err := source.LoadFromConfigWithOptions(cfg, source.LoadOptions{Logger: cliLoggerFromContext(ctx)})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "source_error",

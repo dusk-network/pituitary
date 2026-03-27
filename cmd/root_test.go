@@ -229,3 +229,18 @@ func TestRunHelpIncludesColorGlobalOption(t *testing.T) {
 		t.Fatalf("help output %q does not include --color global option", stdout.String())
 	}
 }
+
+func TestRunHelpIncludesLogLevelGlobalOption(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run([]string{"help"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("Run(help) exit code = %d, want 0", exitCode)
+	}
+	if !strings.Contains(stdout.String(), "--log-level LEVEL") {
+		t.Fatalf("help output %q does not include --log-level global option", stdout.String())
+	}
+}

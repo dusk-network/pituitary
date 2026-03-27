@@ -8,12 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/diag"
 )
 
 const (
 	defaultConfigName  = "pituitary.toml"
 	localConfigDirName = ".pituitary"
 	configEnvVar       = "PITUITARY_CONFIG"
+	logLevelEnvVar     = "PITUITARY_LOG_LEVEL"
 
 	colorModeAuto   = "auto"
 	colorModeAlways = "always"
@@ -28,6 +31,7 @@ const (
 type cliGlobalOptions struct {
 	ConfigPath string
 	ColorMode  string
+	LogLevel   string
 }
 
 type configPathOption struct {
@@ -51,6 +55,7 @@ type configResolutionCandidate struct {
 }
 
 type cliConfigPathContextKey struct{}
+type cliLoggerContextKey struct{}
 
 func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 	fs := flag.NewFlagSet("pituitary", flag.ContinueOnError)
@@ -59,6 +64,7 @@ func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 	var options cliGlobalOptions
 	fs.StringVar(&options.ConfigPath, "config", "", "path to workspace config")
 	fs.StringVar(&options.ColorMode, "color", colorModeAuto, "terminal color: auto, always, or never")
+	fs.StringVar(&options.LogLevel, "log-level", "", "diagnostic log level: off, error, warn, info, or debug")
 
 	if err := fs.Parse(args); err != nil {
 		return cliGlobalOptions{}, nil, err
@@ -73,6 +79,16 @@ func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 	case colorModeAuto, colorModeAlways, colorModeNever:
 	default:
 		return cliGlobalOptions{}, nil, fmt.Errorf("invalid --color value %q; expected auto, always, or never", options.ColorMode)
+	}
+	options.LogLevel = strings.TrimSpace(strings.ToLower(options.LogLevel))
+	if options.LogLevel == "" {
+		options.LogLevel = strings.TrimSpace(strings.ToLower(os.Getenv(logLevelEnvVar)))
+	}
+	if options.LogLevel == "" {
+		options.LogLevel = "off"
+	}
+	if _, err := diag.ParseLevel(options.LogLevel); err != nil {
+		return cliGlobalOptions{}, nil, err
 	}
 	return options, fs.Args(), nil
 }
@@ -91,6 +107,21 @@ func cliConfigPathFromContext(ctx context.Context) string {
 	}
 	value, _ := ctx.Value(cliConfigPathContextKey{}).(string)
 	return strings.TrimSpace(value)
+}
+
+func withCLILogger(ctx context.Context, logger *diag.Logger) context.Context {
+	if logger == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, cliLoggerContextKey{}, logger)
+}
+
+func cliLoggerFromContext(ctx context.Context) *diag.Logger {
+	if ctx == nil {
+		return nil
+	}
+	logger, _ := ctx.Value(cliLoggerContextKey{}).(*diag.Logger)
+	return logger
 }
 
 func resolveCommandConfigPath(ctx context.Context, localConfigPath string) (string, error) {

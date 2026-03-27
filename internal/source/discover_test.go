@@ -244,6 +244,25 @@ Domain: api
 	}
 }
 
+func TestClassifyMarkdownCandidateReadFailureIncludesReason(t *testing.T) {
+	repo := t.TempDir()
+	missingPath := filepath.Join(repo, "missing.md")
+
+	assessment, err := classifyMarkdownCandidate(repo, missingPath)
+	if err != nil {
+		t.Fatalf("classifyMarkdownCandidate() error = %v", err)
+	}
+	if assessment.Selected {
+		t.Fatalf("assessment.Selected = true, want false")
+	}
+	if got, want := assessment.RelativePath, "missing.md"; got != want {
+		t.Fatalf("relative path = %q, want %q", got, want)
+	}
+	if !strings.Contains(assessment.Reason, "read markdown:") {
+		t.Fatalf("reason = %q, want read failure context", assessment.Reason)
+	}
+}
+
 func TestDiscoverWorkspaceSilentlySkipsTrueDuplicateMarkdownContractRefs(t *testing.T) {
 	repo := t.TempDir()
 	body := `
