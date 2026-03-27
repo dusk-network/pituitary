@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -148,14 +149,15 @@ func TestRunExplainFileRejectsMissingPath(t *testing.T) {
 	}
 }
 
-func TestResolveExplainPathResolvesRelativePath(t *testing.T) {
+func TestResolveExplainPathResolvesRelativePathFromWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	exitCode := withWorkingDir(t, root, func() int {
-		got, err := resolveExplainPath(filepath.Join("docs", "guide.md"))
+		mustWriteFileCmd(t, filepath.Join(root, "docs", "guide.md"), "# guide\n")
+		got, err := resolveExplainPath(root, filepath.Join("docs", "guide.md"))
 		if err != nil {
 			t.Fatalf("resolveExplainPath() error = %v", err)
 		}
-		want, err := filepath.Abs(filepath.Join("docs", "guide.md"))
+		want, err := filepath.Abs(filepath.Join(root, "docs", "guide.md"))
 		if err != nil {
 			t.Fatalf("filepath.Abs() error = %v", err)
 		}
@@ -166,6 +168,38 @@ func TestResolveExplainPathResolvesRelativePath(t *testing.T) {
 	})
 	if exitCode != 0 {
 		t.Fatalf("withWorkingDir() exit code = %d, want 0", exitCode)
+	}
+}
+
+func TestRunExplainFileRejectsOutsideWorkspacePath(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	mustWriteFileCmd(t, outside, "# outside\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runExplainFile([]string{outside, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runExplainFile() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runExplainFile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal explain error payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "outside workspace root") {
+		t.Fatalf("error message = %q, want workspace-root validation", got)
 	}
 }
 

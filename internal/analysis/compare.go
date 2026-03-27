@@ -7,6 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 // CompareRequest is the normalized comparison input.
@@ -45,9 +46,10 @@ type Comparison struct {
 
 // CompareResult is the structured compare-specs response.
 type CompareResult struct {
-	SpecRefs       []string        `json:"spec_refs"`
-	SpecInferences []SpecInference `json:"spec_inferences,omitempty"`
-	Comparison     Comparison      `json:"comparison"`
+	SpecRefs       []string                 `json:"spec_refs"`
+	SpecInferences []SpecInference          `json:"spec_inferences,omitempty"`
+	Comparison     Comparison               `json:"comparison"`
+	ContentTrust   *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 // CompareSpecs compares exactly two indexed specs or one draft spec against one indexed spec.
@@ -130,6 +132,7 @@ func buildCompareResult(ctx context.Context, analyzer qualitativeAnalyzer, candi
 	result := &CompareResult{
 		SpecRefs:       orderedRefs,
 		SpecInferences: buildSpecInferences(comparisonSpecs, orderedRefs),
+		ContentTrust:   resultmeta.UntrustedWorkspaceText(),
 		Comparison: Comparison{
 			SharedScope:    sharedScope(comparisonSpecs, orderedRefs),
 			Differences:    differences,

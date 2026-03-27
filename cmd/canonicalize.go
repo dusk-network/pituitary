@@ -34,7 +34,7 @@ func runCanonicalizeContext(_ context.Context, args []string, stdout, stderr io.
 	fs.StringVar(&path, "path", "", "workspace-relative or absolute path to a markdown contract")
 	fs.StringVar(&bundleDir, "bundle-dir", "", "bundle directory to preview or write")
 	fs.BoolVar(&write, "write", false, "write the generated bundle")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "canonicalize", nil, cliIssue{

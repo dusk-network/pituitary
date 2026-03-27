@@ -40,7 +40,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	fs.BoolVar(&dryRun, "dry-run", false, "validate config and sources without writing the index")
 	fs.BoolVar(&full, "full", false, "force a full re-embed instead of reusing compatible chunk vectors")
 	fs.BoolVar(&verbose, "verbose", false, "include per-source details for index planning and rebuild output")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {

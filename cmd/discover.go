@@ -34,7 +34,7 @@ func runDiscoverContext(ctx context.Context, args []string, stdout, stderr io.Wr
 	fs.StringVar(&path, "path", ".", "workspace path to scan")
 	fs.StringVar(&configPath, "config-path", "", "where discover --write should place the generated config")
 	fs.BoolVar(&write, "write", false, "write the generated config")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "discover", nil, cliIssue{

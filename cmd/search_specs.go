@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 )
 
@@ -29,18 +30,20 @@ func runSearchSpecs(args []string, stdout, stderr io.Writer) int {
 func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("search-specs", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("search-specs", "pituitary [--config PATH] search-specs --query TEXT [--domain VALUE] [--status VALUE]... [--limit N] [--format FORMAT]")
+	help := newCommandHelp("search-specs", "pituitary [--config PATH] search-specs (--query TEXT | --request-file PATH|-) [--domain VALUE] [--status VALUE]... [--limit N] [--format FORMAT]")
 
 	var (
-		query      string
-		format     string
-		domain     string
-		configPath string
-		statuses   searchSpecsFlagList
-		limit      int
+		query       string
+		requestFile string
+		format      string
+		domain      string
+		configPath  string
+		statuses    searchSpecsFlagList
+		limit       int
 	)
 	fs.StringVar(&query, "query", "", "semantic query")
-	fs.StringVar(&format, "format", "text", "output format (text, json, table)")
+	fs.StringVar(&requestFile, "request-file", "", "path to search request JSON, or - for stdin")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format (text, json, table)")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&domain, "domain", "", "filter by domain")
 	fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
@@ -61,13 +64,52 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 		}, 2)
 	}
 
-	request := index.SearchSpecRequest{
-		Query: strings.TrimSpace(query),
-		Filters: index.SearchSpecFilters{
-			Domain:   strings.TrimSpace(domain),
-			Statuses: []string(statuses),
-		},
-		Limit: &limit,
+	if err := validateCLIFormat("search-specs", format); err != nil {
+		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
+			Code:    "validation_error",
+			Message: err.Error(),
+		}, 2)
+	}
+	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	if err != nil {
+		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
+		}, 2)
+	}
+
+	trimmedRequestFile := strings.TrimSpace(requestFile)
+	var request index.SearchSpecRequest
+	switch {
+	case trimmedRequestFile != "" && (strings.TrimSpace(query) != "" || strings.TrimSpace(domain) != "" || len(statuses) > 0 || flagWasSet(fs, "limit")):
+		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
+			Code:    "validation_error",
+			Message: "use either --request-file or fine-grained search flags",
+		}, 2)
+	case trimmedRequestFile != "":
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = loadWorkspaceScopedJSONFile[index.SearchSpecRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
+	default:
+		request = index.SearchSpecRequest{
+			Query: strings.TrimSpace(query),
+			Filters: index.SearchSpecFilters{
+				Domain:   strings.TrimSpace(domain),
+				Statuses: []string(statuses),
+			},
+			Limit: &limit,
+		}
 	}
 	queryArgs, err := request.ToQuery()
 	if err != nil {
@@ -84,20 +126,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	if request.Query == "" {
 		return writeCLIError(stdout, stderr, format, "search-specs", request, cliIssue{
 			Code:    "validation_error",
-			Message: "--query is required",
-		}, 2)
-	}
-	if err := validateCLIFormat("search-specs", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "search-specs", request, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "search-specs", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
+			Message: "query is required",
 		}, 2)
 	}
 

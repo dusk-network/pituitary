@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -245,6 +246,53 @@ func TestRunCheckDocDriftWarnsOnWeakAcceptedContracts(t *testing.T) {
 	}
 	if len(payload.Warnings) == 0 || payload.Warnings[0].Code != "low_confidence_inference" {
 		t.Fatalf("warnings = %+v, want low_confidence_inference warning", payload.Warnings)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunCheckDocDriftWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "doc-drift-request.json"), map[string]any{
+		"doc_refs": []string{
+			"doc://guides/api-rate-limits",
+			"doc://runbooks/rate-limit-rollout",
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--request-file", "doc-drift-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			DocRefs []string `json:"doc_refs"`
+		} `json:"request"`
+		Result struct {
+			Scope struct {
+				Mode string `json:"mode"`
+			} `json:"scope"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal doc-drift request-file payload: %v", err)
+	}
+	if len(payload.Request.DocRefs) != 2 || payload.Result.Scope.Mode != "doc_refs" {
+		t.Fatalf("payload = %+v, want doc_refs scope", payload)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)

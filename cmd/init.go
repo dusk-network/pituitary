@@ -47,7 +47,7 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 	fs.StringVar(&path, "path", ".", "workspace path to initialize")
 	fs.StringVar(&configPath, "config-path", "", "where init should place the generated config")
 	fs.BoolVar(&dryRun, "dry-run", false, "preview the generated config and discovered sources without writing or indexing")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "init", nil, cliIssue{

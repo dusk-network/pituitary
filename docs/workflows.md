@@ -43,9 +43,22 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `fix --path PATH --dry-run` | Preview deterministic doc-drift remediations before writing |
 | `fix --scope all --yes` | Apply deterministic doc-drift remediations without prompting |
 | `review-spec --path SPEC` | Full review: overlap + comparison + impact + drift + remediation |
+| `schema COMMAND --format json` | Inspect the machine-readable request/response contract for one command |
 | `serve --config FILE` | Start MCP server over stdio |
 
 `fix` is intentionally narrow: it only applies deterministic `replace_claim` remediations that `check-doc-drift` can justify from accepted specs and exact document evidence. Use `--dry-run` first, then rerun with `--yes` when the replacements look correct. After any successful apply, run `pituitary index --rebuild`.
+
+## Agent-Friendly Input
+
+For shell-driven agents, prefer JSON transport instead of long flag lists:
+
+```sh
+pituitary compare-specs --request-file request.json --format json
+pituitary check-doc-drift --request-file request.json --format json
+pituitary check-compliance --request-file request.json --format json
+```
+
+`--request-file PATH|-` keeps requests explicit, avoids shell-escaping mistakes, and is workspace-scoped by default for local file inputs.
 
 ## Review Reports
 

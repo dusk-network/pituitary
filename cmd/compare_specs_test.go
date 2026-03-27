@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -160,5 +161,47 @@ func TestRunCompareSpecsRejectsMoreThanTwoRefs(t *testing.T) {
 	}
 	if !strings.Contains(payload.Errors[0].Message, "exactly two --spec-ref flags or two --path flags are required") {
 		t.Fatalf("error message = %q, want exact-two validation", payload.Errors[0].Message)
+	}
+}
+
+func TestRunCompareSpecsWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "compare-request.json"), map[string]any{
+		"spec_refs": []string{"SPEC-008", "SPEC-042"},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCompareSpecs([]string{"--request-file", "compare-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCompareSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCompareSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRefs []string `json:"spec_refs"`
+		} `json:"request"`
+		Result struct {
+			SpecRefs []string `json:"spec_refs"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compare request-file payload: %v", err)
+	}
+	if len(payload.Request.SpecRefs) != 2 || len(payload.Result.SpecRefs) != 2 {
+		t.Fatalf("payload = %+v, want two request/result spec refs", payload)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }

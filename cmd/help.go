@@ -33,6 +33,16 @@ func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer, help c
 	return false, nil
 }
 
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	seen := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			seen = true
+		}
+	})
+	return seen
+}
+
 func printCommandHelp(w io.Writer, fs *flag.FlagSet, help commandHelp) {
 	description := commandDescription(help.Name)
 	if description == "" {

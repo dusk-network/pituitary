@@ -40,7 +40,7 @@ func runFixContext(ctx context.Context, args []string, stdout, stderr io.Writer)
 	fs.StringVar(&scope, "scope", "", "target scope: accepted spec ref or all")
 	fs.BoolVar(&dryRun, "dry-run", false, "plan deterministic edits without writing files")
 	fs.BoolVar(&yes, "yes", false, "apply all planned edits without prompting")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {

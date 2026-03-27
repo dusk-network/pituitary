@@ -60,6 +60,10 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderFixResult(w, typed)
 	case *analysis.ReviewResult:
 		renderReviewResult(w, typed)
+	case *schemaCatalogResult:
+		renderSchemaCatalogResult(w, typed)
+	case *schemaCommandResult:
+		renderSchemaCommandResult(w, typed)
 	default:
 		return fmt.Errorf("unsupported result type %T", result)
 	}

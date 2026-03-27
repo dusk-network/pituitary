@@ -14,6 +14,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 const (
@@ -87,7 +88,7 @@ type exclusivePhraseFamily struct {
 type ComplianceRequest struct {
 	Paths    []string `json:"paths,omitempty"`
 	DiffFile string   `json:"diff_file,omitempty"`
-	DiffText string   `json:"-"`
+	DiffText string   `json:"diff_text,omitempty"`
 }
 
 // ComplianceRelevantSpec reports one accepted spec considered during evaluation.
@@ -120,6 +121,7 @@ type ComplianceResult struct {
 	Compliant     []ComplianceFinding      `json:"compliant"`
 	Conflicts     []ComplianceFinding      `json:"conflicts"`
 	Unspecified   []ComplianceFinding      `json:"unspecified"`
+	ContentTrust  *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type complianceTarget struct {
@@ -185,10 +187,11 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 
 	result := &ComplianceResult{
-		Paths:       complianceTargetPaths(targets),
-		Compliant:   []ComplianceFinding{},
-		Conflicts:   []ComplianceFinding{},
-		Unspecified: []ComplianceFinding{},
+		Paths:        complianceTargetPaths(targets),
+		Compliant:    []ComplianceFinding{},
+		Conflicts:    []ComplianceFinding{},
+		Unspecified:  []ComplianceFinding{},
+		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}
 	relevant := map[string]*complianceRelevantAccumulator{}
 

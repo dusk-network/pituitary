@@ -19,19 +19,21 @@ func runReviewSpec(args []string, stdout, stderr io.Writer) int {
 func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("review-spec", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("review-spec", "pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("review-spec", "pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]")
 
 	var (
 		specRef        string
 		specPath       string
 		specRecordFile string
+		requestFile    string
 		format         string
 		configPath     string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
 	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&requestFile, "request-file", "", "path to review request JSON, or - for stdin")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -65,26 +67,51 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 	trimmedSpecRef := strings.TrimSpace(specRef)
 	trimmedSpecPath := strings.TrimSpace(specPath)
 	trimmedSpecRecordFile := strings.TrimSpace(specRecordFile)
-	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedSpecRecordFile) > 1 {
+	trimmedRequestFile := strings.TrimSpace(requestFile)
+	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedSpecRecordFile, trimmedRequestFile) > 1 {
 		return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
 			Code:    "validation_error",
-			Message: "exactly one of --path, --spec-ref, or --spec-record-file is allowed",
+			Message: "exactly one of --path, --spec-ref, --spec-record-file, or --request-file is allowed",
 		}, 2)
 	}
-	if trimmedSpecPath != "" {
-		cfg, err := config.Load(resolvedConfigPath)
+	var cfg *config.Config
+	if trimmedSpecPath != "" || trimmedSpecRecordFile != "" || trimmedRequestFile != "" {
+		cfg, err = config.Load(resolvedConfigPath)
 		if err != nil {
 			return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
 				Code:    "config_error",
 				Message: err.Error(),
 			}, 2)
 		}
+	}
+	if trimmedRequestFile != "" {
+		request, err := loadWorkspaceScopedJSONFile[analysis.ReviewRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		operation := app.ReviewSpec(ctx, resolvedConfigPath, request)
+		if operation.Issue != nil {
+			return writeCLIError(stdout, stderr, format, "review-spec", operation.Request, cliIssue{
+				Code:    operation.Issue.Code,
+				Message: operation.Issue.Message,
+			}, operation.Issue.ExitCode)
+		}
+		return writeCLISuccess(stdout, stderr, format, "review-spec", operation.Request, operation.Result, nil)
+	}
+	if trimmedSpecPath != "" {
 		trimmedSpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
 		if err != nil {
 			return writeSpecPathResolutionError(stdout, stderr, format, "review-spec", nil, err)
 		}
 	}
-	request, err := reviewRequestFromFlags(trimmedSpecRef, trimmedSpecRecordFile)
+	workspaceRoot := ""
+	if cfg != nil {
+		workspaceRoot = cfg.Workspace.RootPath
+	}
+	request, err := reviewRequestFromFlags(workspaceRoot, trimmedSpecRef, trimmedSpecRecordFile)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "review-spec", nil, cliIssue{
 			Code:    "validation_error",
@@ -103,7 +130,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 	return writeCLISuccess(stdout, stderr, format, "review-spec", operation.Request, operation.Result, nil)
 }
 
-func reviewRequestFromFlags(specRef, specRecordFile string) (analysis.ReviewRequest, error) {
+func reviewRequestFromFlags(workspaceRoot, specRef, specRecordFile string) (analysis.ReviewRequest, error) {
 	request := analysis.ReviewRequest{SpecRef: specRef}
 	switch {
 	case specRef != "" && specRecordFile != "":
@@ -113,7 +140,7 @@ func reviewRequestFromFlags(specRef, specRecordFile string) (analysis.ReviewRequ
 	case specRef != "":
 		return request, nil
 	default:
-		record, err := loadSpecRecordFile(specRecordFile)
+		record, err := loadSpecRecordFile(workspaceRoot, specRecordFile)
 		if err != nil {
 			return request, err
 		}

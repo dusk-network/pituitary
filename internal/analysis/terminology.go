@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 const terminologyEvidenceThreshold = 0.15
@@ -70,12 +71,13 @@ type TerminologyFinding struct {
 
 // TerminologyAuditResult is the structured terminology-audit response.
 type TerminologyAuditResult struct {
-	Scope          TerminologyAuditScope   `json:"scope"`
-	Terms          []string                `json:"terms"`
-	CanonicalTerms []string                `json:"canonical_terms,omitempty"`
-	AnchorSpecs    []TerminologyAnchorSpec `json:"anchor_specs,omitempty"`
-	Findings       []TerminologyFinding    `json:"findings"`
-	Warnings       []Warning               `json:"warnings,omitempty"`
+	Scope          TerminologyAuditScope    `json:"scope"`
+	Terms          []string                 `json:"terms"`
+	CanonicalTerms []string                 `json:"canonical_terms,omitempty"`
+	AnchorSpecs    []TerminologyAnchorSpec  `json:"anchor_specs,omitempty"`
+	Findings       []TerminologyFinding     `json:"findings"`
+	Warnings       []Warning                `json:"warnings,omitempty"`
+	ContentTrust   *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type terminologyArtifact struct {
@@ -165,6 +167,7 @@ func CheckTerminologyContext(ctx context.Context, cfg *config.Config, request Te
 		AnchorSpecs:    terminologyAnchorSpecs(anchors),
 		Findings:       findings,
 		Warnings:       uniqueWarnings(warnings),
+		ContentTrust:   resultmeta.UntrustedWorkspaceText(),
 	}, nil
 }
 

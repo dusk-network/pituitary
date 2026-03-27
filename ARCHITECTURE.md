@@ -573,6 +573,8 @@ Contract rules:
 
 - `request` echoes the normalized input after CLI parsing, using canonical `ref` values rather than `source_ref`.
 - `result` is command-specific and should be `null` when a command exits with errors before producing a domain result.
+- `pituitary schema <command> --format json` exposes the machine-readable request and response contract for each shipped command.
+- Commands that return raw workspace excerpts or evidence should expose `result.content_trust` so callers can treat returned repo text as untrusted input.
 - `warnings` and `errors` use the same object shape. `path` is optional and should stay workspace-relative when present.
 - Common `errors[].code` values in v1 are `validation_error`, `config_error`, `not_found`, `dependency_unavailable`, and `internal_error`.
 

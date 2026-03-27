@@ -40,7 +40,7 @@ func runVersionContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	help := newStandaloneCommandHelp("version", "pituitary version [--format FORMAT]")
 
 	var format string
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "version", nil, cliIssue{

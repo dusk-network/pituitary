@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -214,6 +215,92 @@ plinth ember quartz
 	}
 	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://notes/ungoverned.txt"]`) {
 		t.Fatalf("unspecified finding = %+v, want applies_to suggestion", payload.Result.Unspecified[0])
+	}
+}
+
+func TestRunCheckComplianceWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", `
+package middleware
+
+// Apply limits per tenant rather than per API key.
+// Enforce a default limit of 200 requests per minute.
+// Allow short bursts above the steady-state tenant limit.
+// Use a sliding-window limiter and tenant-specific overrides.
+func buildLimiter() {}
+`)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "compliance-request.json"), map[string]any{
+		"paths": []string{"src/api/middleware/ratelimiter.go"},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{"--request-file", "compliance-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Paths []string `json:"paths"`
+		} `json:"request"`
+		Result struct {
+			Compliant []struct {
+				Path string `json:"path"`
+			} `json:"compliant"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compliance request-file payload: %v", err)
+	}
+	if len(payload.Request.Paths) != 1 || payload.Request.Paths[0] != "src/api/middleware/ratelimiter.go" {
+		t.Fatalf("request.paths = %v, want ratelimiter path", payload.Request.Paths)
+	}
+	if len(payload.Result.Compliant) == 0 {
+		t.Fatal("result.compliant is empty, want compliant findings")
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunCheckComplianceRejectsDiffFileOutsideWorkspace(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	outside := filepath.Join(t.TempDir(), "change.diff")
+	mustWriteFileCmd(t, outside, "diff --git a/a b/a\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runCheckCompliance([]string{"--diff-file", outside, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compliance outside-workspace payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "outside workspace root") {
+		t.Fatalf("error message = %q, want workspace-root validation", got)
 	}
 }
 

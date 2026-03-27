@@ -3,10 +3,7 @@ package cmd
 import (
 	"context"
 	"flag"
-	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -32,7 +29,7 @@ func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io
 		format     string
 		configPath string
 	)
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -74,7 +71,7 @@ func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io
 		}, 2)
 	}
 
-	targetPath, err := resolveExplainPath(request.Path)
+	targetPath, err := resolveExplainPath(cfg.Workspace.RootPath, request.Path)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
 			Code:    "validation_error",
@@ -127,17 +124,6 @@ func explainFileFlagTakesValue(arg string) bool {
 	}
 }
 
-func resolveExplainPath(path string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", fmt.Errorf("path must not be empty")
-	}
-	if filepath.IsAbs(path) {
-		return path, nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("resolve working directory: %w", err)
-	}
-	return filepath.Join(cwd, path), nil
+func resolveExplainPath(workspaceRoot, path string) (string, error) {
+	return resolveWorkspaceScopedCLIPath(workspaceRoot, path, "file path")
 }

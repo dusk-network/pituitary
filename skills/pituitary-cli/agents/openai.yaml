@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pituitary CLI"
+  short_description: "Spec-aware Pituitary command workflows"
+  default_prompt: "Use $pituitary-cli to inspect this repository with Pituitary and return a JSON-grounded result."

@@ -65,10 +65,13 @@ pituitary status                       # index health at a glance
 | Search specs semantically | `pituitary search-specs --query "rate limiting"` |
 | Trace impact of a spec change | `pituitary analyze-impact --path specs/X` |
 | Compare two specs | `pituitary compare-specs --path specs/A --path specs/B` |
+| Inspect command contracts | `pituitary schema review-spec --format json` |
 
-All commands output JSON with `--format json`. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
+All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=json`, and redirected stdout defaults to JSON automatically. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
 
-See the [cheatsheet](docs/cheatsheet.md) for every command, or the [full reference](docs/reference.md) for configuration, runtime setup, and spec format details.
+For agent integrations, use `pituitary schema <command> --format json` to inspect request/response contracts, and prefer `--request-file PATH|-` on analysis commands when shell escaping would be brittle. Results that include raw repo excerpts or evidence now carry `result.content_trust` metadata so callers can treat returned workspace text as untrusted input instead of executable instructions.
+
+See the [cheatsheet](docs/cheatsheet.md) for every command, the [full reference](docs/reference.md) for configuration/runtime/spec details, the reusable skill package at [skills/pituitary-cli/SKILL.md](skills/pituitary-cli/SKILL.md), and [AGENTS.md](AGENTS.md) for repo-native agent instructions.
 
 ## Install
 
