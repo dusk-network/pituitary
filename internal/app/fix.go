@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -69,6 +70,8 @@ type plannedFixEdit struct {
 type fixNotFoundError struct {
 	message string
 }
+
+var fixPathCaseInsensitive = runtime.GOOS == "windows"
 
 func (e *fixNotFoundError) Error() string {
 	if e == nil {
@@ -249,7 +252,11 @@ func normalizeFixPath(workspaceRoot, path string) string {
 			trimmed = rel
 		}
 	}
-	return filepath.ToSlash(filepath.Clean(trimmed))
+	normalized := filepath.ToSlash(filepath.Clean(trimmed))
+	if fixPathCaseInsensitive {
+		return strings.ToLower(normalized)
+	}
+	return normalized
 }
 
 func docRecordsByRef(records []model.DocRecord) map[string]model.DocRecord {

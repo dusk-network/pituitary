@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestSQLiteURIUsesWindowsSafeDriveLetterForm(t *testing.T) {
+	t.Parallel()
+
+	got := sqliteURI("C:/Users/alice/pituitary.db", "")
+	want := "file:///C:/Users/alice/pituitary.db"
+	if got != want {
+		t.Fatalf("sqliteURI() = %q, want %q", got, want)
+	}
+}
+
+func TestSQLiteURIPreservesModeForWindowsDriveLetterPaths(t *testing.T) {
+	t.Parallel()
+
+	got := sqliteURI("C:/Users/alice/pituitary.db.new", "ro")
+	want := "file:///C:/Users/alice/pituitary.db.new?mode=ro"
+	if got != want {
+		t.Fatalf("sqliteURI() = %q, want %q", got, want)
+	}
+}
+
 func TestCheckSQLiteReadyPasses(t *testing.T) {
 	resetSQLiteReadyForTest(t)
 

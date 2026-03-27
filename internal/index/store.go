@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -77,9 +78,13 @@ func OpenReadOnlyContext(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func sqliteURI(path, mode string) string {
+	normalizedPath := filepath.ToSlash(path)
+	if hasWindowsDrivePrefix(normalizedPath) && !strings.HasPrefix(normalizedPath, "/") {
+		normalizedPath = "/" + normalizedPath
+	}
 	u := url.URL{
 		Scheme: "file",
-		Path:   filepath.ToSlash(path),
+		Path:   normalizedPath,
 	}
 	query := url.Values{}
 	if mode != "" {
@@ -87,6 +92,14 @@ func sqliteURI(path, mode string) string {
 	}
 	u.RawQuery = query.Encode()
 	return u.String()
+}
+
+func hasWindowsDrivePrefix(path string) bool {
+	if len(path) < 2 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
 }
 
 func ensureSQLiteDriver() {

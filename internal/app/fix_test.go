@@ -91,3 +91,27 @@ func TestFixDocDriftAppliesEditsAndMarksIndexStale(t *testing.T) {
 		}
 	}
 }
+
+func TestFixDocDriftMatchesPathCaseInsensitivelyOnWindows(t *testing.T) {
+	t.Parallel()
+
+	previous := fixPathCaseInsensitive
+	fixPathCaseInsensitive = true
+	t.Cleanup(func() {
+		fixPathCaseInsensitive = previous
+	})
+
+	configPath := writeOperationWorkspace(t, false)
+	operation := FixDocDrift(context.Background(), configPath, FixRequest{
+		Path: "DOCS/GUIDES/API-RATE-LIMITS.MD",
+	})
+	if operation.Issue != nil {
+		t.Fatalf("FixDocDrift() issue = %+v, want nil", operation.Issue)
+	}
+	if operation.Result == nil {
+		t.Fatal("FixDocDrift() result = nil, want structured result")
+	}
+	if got, want := operation.Result.PlannedFileCount, 1; got != want {
+		t.Fatalf("planned_file_count = %d, want %d", got, want)
+	}
+}
