@@ -26,7 +26,7 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 		format     string
 		configPath string
 	)
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {

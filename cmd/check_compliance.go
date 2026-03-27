@@ -10,6 +10,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 type compliancePathList []string
@@ -30,17 +31,19 @@ func runCheckCompliance(args []string, stdout, stderr io.Writer) int {
 func runCheckComplianceContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-compliance", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-compliance", "pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("check-compliance", "pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|- | --request-file PATH|-) [--format FORMAT]")
 
 	var (
-		paths      compliancePathList
-		diffFile   string
-		format     string
-		configPath string
+		paths       compliancePathList
+		diffFile    string
+		requestFile string
+		format      string
+		configPath  string
 	)
 	fs.Var(&paths, "path", "workspace-relative or absolute file path; repeat to check multiple files")
 	fs.StringVar(&diffFile, "diff-file", "", "path to a unified diff file, or - for stdin")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&requestFile, "request-file", "", "path to compliance request JSON, or - for stdin")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -58,25 +61,67 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 		}, 2)
 	}
 
-	request, err := complianceRequestFromFlags([]string(paths), strings.TrimSpace(diffFile))
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
 	if err := validateCLIFormat("check-compliance", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-compliance", request, cliIssue{
+		return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-compliance", request, cliIssue{
+		return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
 			Code:    "config_error",
 			Message: err.Error(),
 		}, 2)
+	}
+	trimmedRequestFile := strings.TrimSpace(requestFile)
+
+	var request analysis.ComplianceRequest
+	switch {
+	case trimmedRequestFile != "" && (len(paths) > 0 || strings.TrimSpace(diffFile) != ""):
+		return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
+			Code:    "validation_error",
+			Message: "use either --request-file or the path/diff-file flags",
+		}, 2)
+	case trimmedRequestFile != "":
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = loadWorkspaceScopedJSONFile[analysis.ComplianceRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		if request.DiffText == "" && strings.TrimSpace(request.DiffFile) != "" {
+			request.DiffText, err = loadComplianceDiffFile(cfg.Workspace.RootPath, request.DiffFile)
+			if err != nil {
+				return writeCLIError(stdout, stderr, format, "check-compliance", request, cliIssue{
+					Code:    "validation_error",
+					Message: err.Error(),
+				}, 2)
+			}
+		}
+	default:
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = complianceRequestFromFlags(cfg.Workspace.RootPath, []string(paths), strings.TrimSpace(diffFile))
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
 	}
 
 	operation := app.CheckCompliance(ctx, resolvedConfigPath, request)
@@ -90,7 +135,7 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 	return writeCLISuccess(stdout, stderr, format, "check-compliance", operation.Request, operation.Result, nil)
 }
 
-func complianceRequestFromFlags(paths []string, diffFile string) (analysis.ComplianceRequest, error) {
+func complianceRequestFromFlags(workspaceRoot string, paths []string, diffFile string) (analysis.ComplianceRequest, error) {
 	trimmedPaths := make([]string, 0, len(paths))
 	for _, path := range paths {
 		path = strings.TrimSpace(path)
@@ -108,7 +153,7 @@ func complianceRequestFromFlags(paths []string, diffFile string) (analysis.Compl
 	case len(trimmedPaths) > 0:
 		return analysis.ComplianceRequest{Paths: trimmedPaths}, nil
 	default:
-		diffText, err := loadComplianceDiffFile(diffFile)
+		diffText, err := loadComplianceDiffFile(workspaceRoot, diffFile)
 		if err != nil {
 			return analysis.ComplianceRequest{}, err
 		}
@@ -119,7 +164,7 @@ func complianceRequestFromFlags(paths []string, diffFile string) (analysis.Compl
 	}
 }
 
-func loadComplianceDiffFile(path string) (string, error) {
+func loadComplianceDiffFile(workspaceRoot, path string) (string, error) {
 	var (
 		data []byte
 		err  error
@@ -130,8 +175,12 @@ func loadComplianceDiffFile(path string) (string, error) {
 			return "", fmt.Errorf("read diff from stdin: %w", err)
 		}
 	} else {
-		// #nosec G304 -- path is an explicit CLI diff file supplied by the operator.
-		data, err = os.ReadFile(path)
+		absPath, err := resolveWorkspaceScopedCLIPath(workspaceRoot, path, "diff file")
+		if err != nil {
+			return "", err
+		}
+		// #nosec G304 -- absPath is validated to remain under the configured workspace root.
+		data, err = os.ReadFile(absPath)
 		if err != nil {
 			return "", fmt.Errorf("read diff file %q: %w", path, err)
 		}

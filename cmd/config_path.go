@@ -17,6 +17,7 @@ const (
 	localConfigDirName = ".pituitary"
 	configEnvVar       = "PITUITARY_CONFIG"
 	logLevelEnvVar     = "PITUITARY_LOG_LEVEL"
+	formatEnvVar       = "PITUITARY_FORMAT"
 
 	colorModeAuto   = "auto"
 	colorModeAlways = "always"
@@ -91,6 +92,37 @@ func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 		return cliGlobalOptions{}, nil, err
 	}
 	return options, fs.Args(), nil
+}
+
+func defaultCommandFormat(fallback string) string {
+	format := strings.TrimSpace(strings.ToLower(os.Getenv(formatEnvVar)))
+	if format == "" {
+		return fallback
+	}
+	return format
+}
+
+func defaultCommandFormatForWriter(w io.Writer, fallback string) string {
+	if format := defaultCommandFormat(""); format != "" {
+		return format
+	}
+
+	target := w
+	if wrapped, ok := w.(cliPresentationWriter); ok {
+		target = wrapped.cliUnderlyingWriter()
+	}
+	file, ok := target.(*os.File)
+	if !ok {
+		return fallback
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return fallback
+	}
+	if (info.Mode() & os.ModeCharDevice) == 0 {
+		return commandFormatJSON
+	}
+	return fallback
 }
 
 func withCLIConfigPath(ctx context.Context, configPath string) context.Context {

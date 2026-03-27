@@ -12,6 +12,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 const (
@@ -57,7 +58,8 @@ type SearchSpecMatch struct {
 
 // SearchSpecResult is the ranked retrieval output.
 type SearchSpecResult struct {
-	Matches []SearchSpecMatch `json:"matches"`
+	Matches      []SearchSpecMatch        `json:"matches"`
+	ContentTrust *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type chunkCandidate struct {
@@ -162,7 +164,8 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 	}
 
 	result := &SearchSpecResult{
-		Matches: make([]SearchSpecMatch, 0, len(candidates)),
+		Matches:      make([]SearchSpecMatch, 0, len(candidates)),
+		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}
 	for _, candidate := range candidates {
 		result.Matches = append(result.Matches, SearchSpecMatch{

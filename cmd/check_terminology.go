@@ -30,7 +30,7 @@ func runCheckTerminology(args []string, stdout, stderr io.Writer) int {
 func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-terminology", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology --term TERM... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] [--format FORMAT]")
+	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology (--term TERM... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT]")
 
 	var (
 		terms          stringList
@@ -38,6 +38,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		specRef        string
 		specPath       string
 		scope          string
+		requestFile    string
 		format         string
 		configPath     string
 	)
@@ -46,7 +47,8 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref used to anchor the audit")
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec used to anchor the audit")
 	fs.StringVar(&scope, "scope", "all", "artifact scope: all, docs, or specs")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&requestFile, "request-file", "", "path to terminology audit request JSON, or - for stdin")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -70,12 +72,6 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		SpecRef:        strings.TrimSpace(specRef),
 		Scope:          strings.TrimSpace(scope),
 	}
-	if countNonEmptyStrings(request.Terms) == 0 {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "validation_error",
-			Message: "at least one term is required",
-		}, 2)
-	}
 	if err := validateCLIFormat("check-terminology", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
 			Code:    "validation_error",
@@ -90,14 +86,44 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		}, 2)
 	}
 
+	trimmedRequestFile := strings.TrimSpace(requestFile)
+	if trimmedRequestFile != "" && (countNonEmptyStrings(request.Terms) > 0 || countNonEmptyStrings(request.CanonicalTerms) > 0 || request.SpecRef != "" || strings.TrimSpace(specPath) != "" || flagWasSet(fs, "scope")) {
+		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
+			Code:    "validation_error",
+			Message: "use either --request-file or the terminology flags",
+		}, 2)
+	}
+	if trimmedRequestFile != "" {
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = loadWorkspaceScopedJSONFile[analysis.TerminologyAuditRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
+	}
+	if trimmedRequestFile == "" && countNonEmptyStrings(request.Terms) == 0 {
+		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
+			Code:    "validation_error",
+			Message: "at least one term is required",
+		}, 2)
+	}
+
 	trimmedPath := strings.TrimSpace(specPath)
-	if request.SpecRef != "" && trimmedPath != "" {
+	if trimmedRequestFile == "" && request.SpecRef != "" && trimmedPath != "" {
 		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
 			Code:    "validation_error",
 			Message: "exactly one of --spec-ref or --path is allowed",
 		}, 2)
 	}
-	if trimmedPath != "" {
+	if trimmedRequestFile == "" && trimmedPath != "" {
 		cfg, err := config.Load(resolvedConfigPath)
 		if err != nil {
 			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{

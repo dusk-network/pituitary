@@ -41,7 +41,7 @@ func runMigrateConfigContext(_ context.Context, args []string, stdout, stderr io
 	)
 	fs.StringVar(&path, "path", defaultConfigName, "path to the config file to migrate")
 	fs.BoolVar(&write, "write", false, "rewrite the config in place")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "migrate-config", nil, cliIssue{

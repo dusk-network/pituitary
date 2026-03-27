@@ -12,6 +12,7 @@ For quick command lookup, start with the [cheatsheet](cheatsheet.md).
 | Spec format, workspace config, sources, selectors, artifacts | [docs/configuration.md](configuration.md) |
 | Runtime setup, indexing, output formats, MCP server | [docs/runtime.md](runtime.md) |
 | Compliance, reports, CI, command reference | [docs/workflows.md](workflows.md) |
+| Agent usage guidance and reusable skill package | [skills/pituitary-cli/SKILL.md](../skills/pituitary-cli/SKILL.md), [repo-context.md](../skills/pituitary-cli/references/repo-context.md), [AGENTS.md](../AGENTS.md) |
 
 ## Fastest Routes
 

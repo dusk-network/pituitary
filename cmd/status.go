@@ -58,7 +58,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		configPath   string
 		checkRuntime string
 	)
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&checkRuntime, "check-runtime", string(runtimeprobe.ScopeNone), "runtime probe scope: none, embedder, analysis, or all")
 

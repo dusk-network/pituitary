@@ -319,6 +319,90 @@ This draft updates public API rate limiting.
 	}
 }
 
+func TestRunCheckOverlapWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "overlap-request.json"), map[string]any{
+		"spec_ref": "SPEC-042",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--request-file", "overlap-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef string `json:"spec_ref"`
+		} `json:"request"`
+		Result struct {
+			Candidate struct {
+				Ref string `json:"ref"`
+			} `json:"candidate"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap request-file payload: %v", err)
+	}
+	if payload.Request.SpecRef != "SPEC-042" || payload.Result.Candidate.Ref != "SPEC-042" {
+		t.Fatalf("payload = %+v, want SPEC-042 request/candidate", payload)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunCheckOverlapRejectsSpecRecordOutsideWorkspace(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	outside := filepath.Join(t.TempDir(), "draft-spec.json")
+	mustWriteJSONFileCmd(t, outside, map[string]any{
+		"ref":    "SPEC-900",
+		"title":  "Draft Spec",
+		"status": "draft",
+		"kind":   "spec",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckOverlap([]string{"--spec-record-file", outside, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckOverlap() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal overlap outside-workspace payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "outside workspace root") {
+		t.Fatalf("error message = %q, want workspace-root validation", got)
+	}
+}
+
 func TestRunCheckOverlapReportsUnknownSpecRefActionably(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

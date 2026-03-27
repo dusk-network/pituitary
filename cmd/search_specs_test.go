@@ -106,6 +106,98 @@ func TestRunSearchSpecsTable(t *testing.T) {
 	}
 }
 
+func TestRunSearchSpecsWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "search-request.json"), map[string]any{
+		"query": "rate limiting",
+		"filters": map[string]any{
+			"domain":   "api",
+			"statuses": []string{"accepted"},
+		},
+		"limit": 5,
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runSearchSpecs([]string{"--request-file", "search-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Query   string `json:"query"`
+			Filters struct {
+				Domain   string   `json:"domain"`
+				Statuses []string `json:"statuses"`
+			} `json:"filters"`
+			Limit int `json:"limit"`
+		} `json:"request"`
+		Result struct {
+			Matches []struct {
+				Ref string `json:"ref"`
+			} `json:"matches"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal search request-file payload: %v", err)
+	}
+	if payload.Request.Query != "rate limiting" || payload.Request.Filters.Domain != "api" || payload.Request.Limit != 5 {
+		t.Fatalf("request = %+v, want normalized request-file values", payload.Request)
+	}
+	if len(payload.Request.Filters.Statuses) != 1 || payload.Request.Filters.Statuses[0] != "accepted" {
+		t.Fatalf("request filters = %+v, want accepted status", payload.Request.Filters)
+	}
+	if len(payload.Result.Matches) == 0 {
+		t.Fatal("result.matches is empty, want indexed matches")
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunSearchSpecsRejectsRequestFileOutsideWorkspace(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	outside := filepath.Join(t.TempDir(), "search-request.json")
+	mustWriteJSONFileCmd(t, outside, map[string]any{"query": "rate limiting"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runSearchSpecs([]string{"--request-file", outside, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal search outside-workspace payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "outside workspace root") {
+		t.Fatalf("error message = %q, want workspace-root validation", got)
+	}
+}
+
 func TestRunSearchSpecsRejectsMissingQuery(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

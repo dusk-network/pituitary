@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,6 +67,61 @@ func TestRunCheckTerminologyRequiresTerms(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "at least one term is required") {
 		t.Fatalf("runCheckTerminology() stderr = %q, want term validation", stderr.String())
+	}
+}
+
+func TestRunCheckTerminologyWithRequestFileJSON(t *testing.T) {
+	repo := writeTerminologyWorkspaceCmd(t)
+	indexStdout := bytes.Buffer{}
+	indexStderr := bytes.Buffer{}
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &indexStdout, &indexStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, indexStderr.String())
+	}
+
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "terminology-request.json"), map[string]any{
+		"terms":           []string{"repo", "workflow"},
+		"canonical_terms": []string{"locality", "continuity"},
+		"spec_ref":        "SPEC-LOCALITY",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runCheckTerminology([]string{"--request-file", "terminology-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckTerminology() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckTerminology() stderr = %q, want empty", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Terms   []string `json:"terms"`
+			SpecRef string   `json:"spec_ref"`
+		} `json:"request"`
+		Result struct {
+			Findings []struct {
+				Ref string `json:"ref"`
+			} `json:"findings"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal terminology request-file payload: %v", err)
+	}
+	if len(payload.Request.Terms) != 2 || payload.Request.SpecRef != "SPEC-LOCALITY" {
+		t.Fatalf("request = %+v, want request-file values", payload.Request)
+	}
+	if len(payload.Result.Findings) == 0 {
+		t.Fatal("result.findings is empty, want terminology findings")
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
 

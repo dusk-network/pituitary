@@ -13,6 +13,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 var requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
@@ -129,12 +130,13 @@ type DocRemediationResult struct {
 
 // DocDriftResult is the structured doc-drift response.
 type DocDriftResult struct {
-	Scope          DocDriftScope         `json:"scope"`
-	DriftItems     []DriftItem           `json:"drift_items"`
-	Assessments    []DocDriftAssessment  `json:"assessments,omitempty"`
-	SpecInferences []SpecInference       `json:"spec_inferences,omitempty"`
-	Remediation    *DocRemediationResult `json:"remediation"`
-	Warnings       []Warning             `json:"warnings,omitempty"`
+	Scope          DocDriftScope            `json:"scope"`
+	DriftItems     []DriftItem              `json:"drift_items"`
+	Assessments    []DocDriftAssessment     `json:"assessments,omitempty"`
+	SpecInferences []SpecInference          `json:"spec_inferences,omitempty"`
+	Remediation    *DocRemediationResult    `json:"remediation"`
+	Warnings       []Warning                `json:"warnings,omitempty"`
+	ContentTrust   *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type normalizedClaims struct {
@@ -303,7 +305,8 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		Remediation: &DocRemediationResult{
 			Items: remediationItems,
 		},
-		Warnings: buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
+		Warnings:     buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
+		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}, nil
 }
 

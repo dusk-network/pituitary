@@ -30,17 +30,19 @@ func runCompareSpecs(args []string, stdout, stderr io.Writer) int {
 func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("compare-specs", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("compare-specs", "pituitary [--config PATH] compare-specs (--spec-ref REF --spec-ref REF | --path PATH --path PATH) [--format FORMAT]")
+	help := newCommandHelp("compare-specs", "pituitary [--config PATH] compare-specs (--spec-ref REF --spec-ref REF | --path PATH --path PATH | --request-file PATH|-) [--format FORMAT]")
 
 	var (
-		specRefs   compareSpecRefs
-		specPaths  compareSpecRefs
-		format     string
-		configPath string
+		specRefs    compareSpecRefs
+		specPaths   compareSpecRefs
+		requestFile string
+		format      string
+		configPath  string
 	)
 	fs.Var(&specRefs, "spec-ref", "indexed spec ref; pass exactly two to compare")
 	fs.Var(&specPaths, "path", "workspace-relative or absolute path to an indexed spec; pass exactly two to compare")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&requestFile, "request-file", "", "path to compare request JSON, or - for stdin")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -72,7 +74,28 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 			Message: err.Error(),
 		}, 2)
 	}
+	trimmedRequestFile := strings.TrimSpace(requestFile)
 	switch {
+	case trimmedRequestFile != "" && (len(specRefs) > 0 || len(specPaths) > 0):
+		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+			Code:    "validation_error",
+			Message: "use either --request-file or the path/spec-ref flags",
+		}, 2)
+	case trimmedRequestFile != "":
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = loadWorkspaceScopedJSONFile[analysis.CompareRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
 	case len(specRefs) > 0 && len(specPaths) > 0:
 		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
 			Code:    "validation_error",
@@ -95,10 +118,16 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 	default:
 		request.SpecRefs = []string(specRefs)
 	}
-	if len(request.SpecRefs) != 2 {
+	switch {
+	case request.SpecRecord == nil && len(request.SpecRefs) != 2:
 		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
 			Code:    "validation_error",
 			Message: "exactly two --spec-ref flags or two --path flags are required",
+		}, 2)
+	case request.SpecRecord != nil && len(request.SpecRefs) != 1:
+		return writeCLIError(stdout, stderr, format, "compare-specs", request, cliIssue{
+			Code:    "validation_error",
+			Message: "request files with spec_record require exactly one indexed spec_ref",
 		}, 2)
 	}
 

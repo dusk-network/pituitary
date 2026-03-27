@@ -19,19 +19,21 @@ func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
 func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("analyze-impact", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF) [--change-type TYPE] [--format FORMAT]")
+	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF | --request-file PATH|-) [--change-type TYPE] [--format FORMAT]")
 
 	var (
-		specRef    string
-		specPath   string
-		changeType string
-		format     string
-		configPath string
+		specRef     string
+		specPath    string
+		requestFile string
+		changeType  string
+		format      string
+		configPath  string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
+	fs.StringVar(&requestFile, "request-file", "", "path to impact request JSON, or - for stdin")
 	fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
-	fs.StringVar(&format, "format", "text", "output format")
+	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
@@ -60,10 +62,11 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 	}
 	trimmedSpecRef := strings.TrimSpace(specRef)
 	trimmedSpecPath := strings.TrimSpace(specPath)
-	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath) > 1 {
+	trimmedRequestFile := strings.TrimSpace(requestFile)
+	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedRequestFile) > 1 {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
 			Code:    "validation_error",
-			Message: "exactly one of --path or --spec-ref is allowed",
+			Message: "exactly one of --path, --spec-ref, or --request-file is allowed",
 		}, 2)
 	}
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
@@ -86,12 +89,30 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 			return writeSpecPathResolutionError(stdout, stderr, format, "analyze-impact", request, err)
 		}
 	}
-	request.SpecRef = trimmedSpecRef
-	if request.SpecRef == "" {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-			Code:    "validation_error",
-			Message: "one of --path or --spec-ref is required",
-		}, 2)
+	switch {
+	case trimmedRequestFile != "":
+		cfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		request, err = loadWorkspaceScopedJSONFile[analysis.AnalyzeImpactRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
+		if err != nil {
+			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+				Code:    "validation_error",
+				Message: err.Error(),
+			}, 2)
+		}
+	default:
+		request.SpecRef = trimmedSpecRef
+		if request.SpecRef == "" {
+			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
+				Code:    "validation_error",
+				Message: "one of --path, --spec-ref, or --request-file is required",
+			}, 2)
+		}
 	}
 
 	operation := app.AnalyzeImpact(ctx, resolvedConfigPath, request)

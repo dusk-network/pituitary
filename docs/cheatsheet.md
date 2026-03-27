@@ -21,6 +21,7 @@ pituitary index --dry-run                       # validate without writing
 pituitary status                                # index health, config, freshness
 pituitary status --check-runtime embedder       # probe embedder readiness
 pituitary status --check-runtime all            # probe embedder + analysis readiness
+pituitary schema review-spec --format json      # machine-readable command contract
 ```
 
 ## Analysis
@@ -53,6 +54,7 @@ pituitary review-spec --path specs/X            # full composite review
 pituitary review-spec --path specs/X --format markdown  # shareable report
 pituitary review-spec --path specs/X --format html      # rich HTML report
 pituitary review-spec --path specs/X --format json      # machine-readable
+pituitary compare-specs --request-file request.json --format json  # structured request input
 ```
 
 ## Runtime Setup
@@ -83,6 +85,7 @@ Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact
 - All commands: `--format json`
 - `search-specs`: `--format table`
 - `review-spec`: `--format markdown`, `--format html`
+- `PITUITARY_FORMAT=json`: default JSON for shell/agent workflows
 
 ## Useful Flags
 

@@ -174,3 +174,47 @@ func TestRunAnalyzeImpactWarnsOnWeakInferredMetadata(t *testing.T) {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
+
+func TestRunAnalyzeImpactWithRequestFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "impact-request.json"), map[string]any{
+		"spec_ref":    "SPEC-042",
+		"change_type": "deprecated",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runAnalyzeImpact([]string{"--request-file", "impact-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef    string `json:"spec_ref"`
+			ChangeType string `json:"change_type"`
+		} `json:"request"`
+		Result struct {
+			ChangeType string `json:"change_type"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal impact request-file payload: %v", err)
+	}
+	if payload.Request.SpecRef != "SPEC-042" || payload.Request.ChangeType != "deprecated" || payload.Result.ChangeType != "deprecated" {
+		t.Fatalf("payload = %+v, want request-file change type propagated", payload)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}

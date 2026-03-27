@@ -6,6 +6,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 // ReviewRequest is the normalized review-spec input.
@@ -24,6 +25,7 @@ type ReviewResult struct {
 	DocDrift       *DocDriftResult            `json:"doc_drift"`
 	DocRemediation *DocRemediationResult      `json:"doc_remediation"`
 	Warnings       []Warning                  `json:"warnings,omitempty"`
+	ContentTrust   *resultmeta.ContentTrust   `json:"content_trust,omitempty"`
 }
 
 // ReviewSpec composes overlap, comparison, impact, and targeted doc-drift.
@@ -130,6 +132,7 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 		DocDrift:       docDrift,
 		DocRemediation: docRemediation,
 		Warnings:       reviewWarnings(*candidate, impact, docDrift),
+		ContentTrust:   resultmeta.UntrustedWorkspaceText(),
 	}, nil
 }
 
