@@ -5,7 +5,7 @@ CACHE_DIR ?= $(CURDIR)/.cache
 UNAME_S := $(shell uname -s)
 export GOCACHE := $(CACHE_DIR)/go-build
 
-.PHONY: fmt fmt-check docs-check smoke-sqlite-vec test vet bench ci clean
+.PHONY: fmt fmt-check docs-check smoke-sqlite-vec test test-race vet analyze bench ci clean
 
 CGO_ENABLED ?= 1
 export CGO_ENABLED
@@ -34,8 +34,15 @@ smoke-sqlite-vec:
 test:
 	$(GO) test ./...
 
+test-race:
+	$(GO) test -race ./...
+
 vet:
 	$(GO) vet ./...
+
+analyze:
+	staticcheck ./...
+	govulncheck ./...
 
 bench:
 	$(GO) test ./internal/index ./internal/analysis -run '^$$' -bench . -benchmem

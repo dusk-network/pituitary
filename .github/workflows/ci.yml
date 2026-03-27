@@ -45,6 +45,33 @@ jobs:
       - name: Run static analysis
         run: make vet
 
+  analyzers:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Add Go bin directory to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install static analyzers
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run analyzer suite
+        run: make analyze
+
+      - name: Run race tests
+        run: make test-race
+
   macos:
     runs-on: macos-latest
     env:

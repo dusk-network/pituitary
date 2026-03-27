@@ -98,14 +98,22 @@ These invariants deserve blocking coverage in `go test ./...`:
    - the internal dogfood workspace must preview, load, and dry-run successfully against the curated doc set
    - coverage: [dogfood_test.go](../../dogfood_test.go)
 
-The current `make ci` path is sufficient for blocking enforcement because it already runs:
+The current blocking baseline is split between the checked-in `make ci` path and one Linux-only analyzer lane in GitHub Actions.
+
+`make ci` covers:
 
 - format check
 - SQLite readiness smoke test
 - full Go test suite
 - `go vet`
 
-This repo does not currently need a second special governance workflow on top of `make ci`.
+The separate `analyzers` CI job covers:
+
+- `staticcheck`
+- `govulncheck`
+- `go test -race ./...`
+
+This repo does not currently need heavier governance than those checked-in validation lanes.
 
 ## GitHub-Side Protection Recommendation
 
@@ -113,6 +121,7 @@ After merge, the recommended GitHub settings for `main` are:
 
 - require a pull request before merging
 - require the `go` CI check from `.github/workflows/ci.yml`
+- require the `analyzers` CI check from `.github/workflows/ci.yml`
 - block force pushes
 - block branch deletion
 
