@@ -103,6 +103,7 @@ The current blocking baseline is split between the checked-in `make ci` path and
 `make ci` covers:
 
 - format check
+- docs link check
 - SQLite readiness smoke test
 - full Go test suite
 - `go vet`

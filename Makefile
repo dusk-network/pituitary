@@ -49,8 +49,14 @@ analyze:
 		echo 'govulncheck not found; install with: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4'; \
 		exit 1; \
 	}
-	staticcheck ./...
-	govulncheck ./...
+	@go_bin="$$(command -v $(GO) 2>/dev/null || printf '%s\n' '$(GO)')"; \
+		[ -x "$$go_bin" ] || { \
+			echo "Go toolchain not found via GO=$(GO)"; \
+			exit 1; \
+		}; \
+		go_dir="$$(dirname "$$go_bin")"; \
+		PATH="$$go_dir:$$PATH" staticcheck ./...; \
+		PATH="$$go_dir:$$PATH" govulncheck ./...
 
 bench:
 	$(GO) test ./internal/index ./internal/analysis -run '^$$' -bench . -benchmem

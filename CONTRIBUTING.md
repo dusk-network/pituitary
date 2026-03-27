@@ -53,6 +53,7 @@ If you want to mirror the Linux-only analyzer lane from CI locally, install the 
 ```sh
 go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
 go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+export PATH="$(go env GOPATH)/bin:$PATH"
 make analyze
 make test-race
 ```
