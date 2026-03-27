@@ -67,6 +67,65 @@ func TestRunDiscoverJSON(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverJSONWarnsAndSkipsConflictingMarkdownRefs(t *testing.T) {
+	repo := writeDiscoveryWorkspace(t)
+	mustWriteFileCmd(t, filepath.Join(repo, "rfcs", "primary.md"), `
+# Primary Contract
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "notes.md"), `
+# Root Proposal
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runDiscover([]string{"--path", ".", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runDiscover() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runDiscover() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Config string `json:"config"`
+		} `json:"result"`
+		Warnings []cliIssue `json:"warnings"`
+		Errors   []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal discover payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if got, want := len(payload.Warnings), 1; got != want {
+		t.Fatalf("warning count = %d, want %d", got, want)
+	}
+	if got, want := payload.Warnings[0].Code, "duplicate_spec_ref_skipped"; got != want {
+		t.Fatalf("warning code = %q, want %q", got, want)
+	}
+	if got, want := payload.Warnings[0].Path, "notes.md"; got != want {
+		t.Fatalf("warning path = %q, want %q", got, want)
+	}
+	if !strings.Contains(payload.Result.Config, "primary.md") {
+		t.Fatalf("generated config %q does not include kept contract path", payload.Result.Config)
+	}
+	if strings.Contains(payload.Result.Config, "notes.md") {
+		t.Fatalf("generated config %q unexpectedly includes skipped contract path", payload.Result.Config)
+	}
+}
+
 func TestRunDiscoverWriteProducesUsableLocalConfig(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 

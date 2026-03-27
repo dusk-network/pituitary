@@ -9,3 +9,4 @@ IMPLEMENTATION_BACKLOG.md
 docs/superpowers/
 .mcpregistry_*
 .smithery/
+.ccd.toml
