@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -24,6 +25,8 @@ type indexedSpecPathResolver struct {
 	workspaceRoot string
 	refsByPath    map[string][]string
 }
+
+var indexedSpecPathCaseInsensitive = runtime.GOOS == "windows"
 
 type specPathNotFoundError struct {
 	Input      string
@@ -158,8 +161,8 @@ ORDER BY ref ASC`, model.ArtifactKindSpec)
 
 func indexedSpecCandidatePaths(row indexedSpecPathRow) ([]string, error) {
 	candidates := []string{
-		normalizeIndexedSpecPath(row.SourceRef),
-		normalizeIndexedSpecPath(strings.TrimPrefix(strings.TrimSpace(row.SourceRef), "file://")),
+		normalizeIndexedSpecLookupPath(row.SourceRef),
+		normalizeIndexedSpecLookupPath(strings.TrimPrefix(strings.TrimSpace(row.SourceRef), "file://")),
 	}
 
 	var metadata map[string]string
@@ -169,7 +172,7 @@ func indexedSpecCandidatePaths(row indexedSpecPathRow) ([]string, error) {
 		}
 	}
 	for _, key := range []string{"path", "body_path", "bundle_path"} {
-		if value := normalizeIndexedSpecPath(metadata[key]); value != "" {
+		if value := normalizeIndexedSpecLookupPath(metadata[key]); value != "" {
 			candidates = append(candidates, value)
 		}
 	}
@@ -224,7 +227,7 @@ func normalizeSpecSelectorPath(workspaceRoot, rawPath string) (string, error) {
 			WorkspaceRoot: workspaceRoot,
 		}
 	}
-	return normalizeIndexedSpecPath(relPath), nil
+	return normalizeIndexedSpecLookupPath(relPath), nil
 }
 
 func normalizeIndexedSpecPath(path string) string {
@@ -233,6 +236,17 @@ func normalizeIndexedSpecPath(path string) string {
 		return ""
 	}
 	return filepath.ToSlash(filepath.Clean(path))
+}
+
+func normalizeIndexedSpecLookupPath(path string) string {
+	path = normalizeIndexedSpecPath(path)
+	if path == "" {
+		return ""
+	}
+	if indexedSpecPathCaseInsensitive {
+		return strings.ToLower(path)
+	}
+	return path
 }
 
 func pathEscapesRoot(relPath string) bool {

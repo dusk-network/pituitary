@@ -58,3 +58,30 @@ func TestResolveIndexedSpecRefWithConfigContextClassifiesMissingPath(t *testing.
 		t.Fatalf("ResolveIndexedSpecRefWithConfigContext() error = %v, want classified not-found error", err)
 	}
 }
+
+func TestResolveIndexedSpecRefsWithConfigContextMatchesCaseInsensitivelyOnWindows(t *testing.T) {
+	t.Parallel()
+
+	previous := indexedSpecPathCaseInsensitive
+	indexedSpecPathCaseInsensitive = true
+	t.Cleanup(func() {
+		indexedSpecPathCaseInsensitive = previous
+	})
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	ref, err := ResolveIndexedSpecRefWithConfigContext(context.Background(), cfg, "SPECS/RATE-LIMIT-V2/BODY.MD")
+	if err != nil {
+		t.Fatalf("ResolveIndexedSpecRefWithConfigContext() error = %v", err)
+	}
+	if got, want := ref, "SPEC-042"; got != want {
+		t.Fatalf("resolved ref = %q, want %q", got, want)
+	}
+}
