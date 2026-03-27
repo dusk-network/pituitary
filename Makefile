@@ -41,6 +41,14 @@ vet:
 	$(GO) vet ./...
 
 analyze:
+	@command -v staticcheck >/dev/null 2>&1 || { \
+		echo 'staticcheck not found; install with: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0'; \
+		exit 1; \
+	}
+	@command -v govulncheck >/dev/null 2>&1 || { \
+		echo 'govulncheck not found; install with: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4'; \
+		exit 1; \
+	}
 	staticcheck ./...
 	govulncheck ./...
 
