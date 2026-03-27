@@ -5,7 +5,7 @@ CACHE_DIR ?= $(CURDIR)/.cache
 UNAME_S := $(shell uname -s)
 export GOCACHE := $(CACHE_DIR)/go-build
 
-.PHONY: fmt fmt-check docs-check smoke-sqlite-vec test vet bench ci clean
+.PHONY: fmt fmt-check docs-check smoke-sqlite-vec test test-race vet analyze bench ci clean
 
 CGO_ENABLED ?= 1
 export CGO_ENABLED
@@ -34,8 +34,29 @@ smoke-sqlite-vec:
 test:
 	$(GO) test ./...
 
+test-race:
+	$(GO) test -race ./...
+
 vet:
 	$(GO) vet ./...
+
+analyze:
+	@command -v staticcheck >/dev/null 2>&1 || { \
+		echo 'staticcheck not found; install with: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0'; \
+		exit 1; \
+	}
+	@command -v govulncheck >/dev/null 2>&1 || { \
+		echo 'govulncheck not found; install with: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4'; \
+		exit 1; \
+	}
+	@go_bin="$$(command -v $(GO) 2>/dev/null || printf '%s\n' '$(GO)')"; \
+		[ -x "$$go_bin" ] || { \
+			echo "Go toolchain not found via GO=$(GO)"; \
+			exit 1; \
+		}; \
+		go_dir="$$(dirname "$$go_bin")"; \
+		PATH="$$go_dir:$$PATH" staticcheck ./...; \
+		PATH="$$go_dir:$$PATH" govulncheck ./...
 
 bench:
 	$(GO) test ./internal/index ./internal/analysis -run '^$$' -bench . -benchmem

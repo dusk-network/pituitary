@@ -68,7 +68,7 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 ### Also shipped in this repo during v1
 
 - An optional MCP server transport that wraps the same analysis packages as the CLI
-- A repository CI workflow that runs fmt, readiness, test, and vet validation
+- A repository CI workflow that runs fmt, readiness, test, race, vet, and lightweight analyzer validation
 
 These are shipped alongside the first slice, but only the CLI is required for first-ship completeness. The CI job is delivery plumbing, not a GitHub-specific product integration surface.
 

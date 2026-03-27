@@ -23,7 +23,9 @@ Use the checked-in `Makefile` targets:
 make fmt
 make smoke-sqlite-vec
 make test
+make test-race
 make vet
+make analyze
 make bench
 make ci
 ```
@@ -32,7 +34,9 @@ What they do:
 
 - `make smoke-sqlite-vec`: verifies the SQLite and `sqlite-vec` runtime path
 - `make test`: runs the full Go test suite
+- `make test-race`: runs the Go test suite under the race detector
 - `make vet`: runs static analysis
+- `make analyze`: runs the `staticcheck` and `govulncheck` analyzer suite when those tools are installed
 - `make bench`: runs index and analysis benchmarks
 - `make ci`: runs the checked-in validation pipeline
 

@@ -48,6 +48,16 @@ make ci                 # Full check: fmt + smoke + test + vet
 
 If `make smoke-sqlite-vec` passes, your C toolchain is working and you're ready to develop.
 
+If you want to mirror the Linux-only analyzer lane from CI locally, install the pinned tools and run:
+
+```sh
+go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+export PATH="$(go env GOPATH)/bin:$PATH"
+make analyze
+make test-race
+```
+
 If you do not want to install the local toolchain, the repo also ships a contributor `Dockerfile`:
 
 ```sh
@@ -103,6 +113,12 @@ make test
 
 # Run static analysis
 make vet
+
+# Run the Linux analyzer lane (requires staticcheck and govulncheck on PATH)
+make analyze
+
+# Run the full race-detector suite
+make test-race
 
 # Run the full CI pipeline
 make ci
