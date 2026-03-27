@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
 )
@@ -31,6 +32,18 @@ type DiscoverResult struct {
 	Config        string             `json:"config"`
 	Sources       []DiscoveredSource `json:"sources"`
 	Preview       *PreviewResult     `json:"preview,omitempty"`
+	Warnings      []DiscoverWarning  `json:"warnings,omitempty"`
+}
+
+// DiscoverWarning reports non-fatal discovery decisions that changed the
+// generated source selection.
+type DiscoverWarning struct {
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Ref         string `json:"ref,omitempty"`
+	KeptPath    string `json:"kept_path,omitempty"`
+	SkippedPath string `json:"skipped_path,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 // DiscoveredSource describes one proposed source block and the items behind it.
@@ -54,10 +67,14 @@ type DiscoveredItem struct {
 }
 
 type discoveredCandidate struct {
-	path       string
-	confidence string
-	score      int
-	rationale  []string
+	path        string
+	kind        string
+	ref         string
+	contentHash string
+	confidence  string
+	score       int
+	modifiedAt  time.Time
+	rationale   []string
 }
 
 // DiscoverWorkspace scans one repo-like directory and proposes a starting
@@ -88,6 +105,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	specCandidates, contractCandidates, warnings := dedupeDiscoveredSpecCandidates(specCandidates, contractCandidates)
 
 	sources := buildDiscoveredSources(workspaceRoot, specCandidates, contractCandidates, docCandidates)
 	if len(sources) == 0 {
@@ -113,6 +131,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 		Config:        configText,
 		Sources:       sources,
 		Preview:       preview,
+		Warnings:      warnings,
 	}
 
 	if options.Write {
@@ -163,11 +182,23 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 			return nil
 		}
 		bundleDirs[bundleDir] = struct{}{}
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("inspect discovered spec bundle %q: %w", workspaceRelative(workspaceRoot, bundleDir), err)
+		}
+		ref, contentHash, err := discoverSpecBundleIdentity(bundleDir)
+		if err != nil {
+			return err
+		}
 		candidates = append(candidates, discoveredCandidate{
-			path:       workspaceRelative(workspaceRoot, path),
-			confidence: "high",
-			score:      100,
-			rationale:  rationale,
+			path:        workspaceRelative(workspaceRoot, path),
+			kind:        config.SourceKindSpecBundle,
+			ref:         ref,
+			contentHash: contentHash,
+			confidence:  "high",
+			score:       100,
+			modifiedAt:  info.ModTime(),
+			rationale:   rationale,
 		})
 		return nil
 	})
@@ -177,6 +208,24 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 
 	sortDiscoveredCandidates(candidates)
 	return candidates, bundleDirs, nil
+}
+
+func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
+	specPath := filepath.Join(bundleDir, "spec.toml")
+	specBytes, err := os.ReadFile(specPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read discovered spec bundle %q: %w", filepath.ToSlash(bundleDir), err)
+	}
+	raw, err := parseSpecBundle(specBytes)
+	if err != nil {
+		return "", "", fmt.Errorf("parse discovered spec bundle %q: %w", filepath.ToSlash(specPath), err)
+	}
+	bodyPath := filepath.Clean(filepath.Join(bundleDir, raw.Body))
+	bodyBytes, err := os.ReadFile(bodyPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read discovered spec body %q: %w", filepath.ToSlash(bodyPath), err)
+	}
+	return raw.ID, joinedContentHash(specBytes, bodyBytes), nil
 }
 
 func isValidDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string) {
@@ -229,7 +278,10 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 			return nil
 		}
 
-		kind, candidate, ok := classifyMarkdownCandidate(workspaceRoot, path)
+		kind, candidate, ok, err := classifyMarkdownCandidate(workspaceRoot, path)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
@@ -249,10 +301,14 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 	return contractCandidates, docCandidates, nil
 }
 
-func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCandidate, bool) {
+func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCandidate, bool, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return "", discoveredCandidate{}, false
+		return "", discoveredCandidate{}, false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", discoveredCandidate{}, false, nil
 	}
 
 	relPath := workspaceRelative(workspaceRoot, path)
@@ -274,21 +330,132 @@ func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCa
 
 	switch {
 	case contractScore >= 3 && contractScore >= docScore+1:
+		ref, contentHash, err := discoverMarkdownContractIdentity(workspaceRoot, path, body)
+		if err != nil {
+			return "", discoveredCandidate{}, false, err
+		}
 		return config.SourceKindMarkdownContract, discoveredCandidate{
-			path:       relPath,
-			confidence: discoveryConfidence(contractScore),
-			score:      contractScore,
-			rationale:  contractReasons,
-		}, true
+			path:        relPath,
+			kind:        config.SourceKindMarkdownContract,
+			ref:         ref,
+			contentHash: contentHash,
+			confidence:  discoveryConfidence(contractScore),
+			score:       contractScore,
+			modifiedAt:  info.ModTime(),
+			rationale:   contractReasons,
+		}, true, nil
 	case docScore >= 2:
 		return config.SourceKindMarkdownDocs, discoveredCandidate{
 			path:       relPath,
+			kind:       config.SourceKindMarkdownDocs,
 			confidence: discoveryConfidence(docScore),
 			score:      docScore,
+			modifiedAt: info.ModTime(),
 			rationale:  docReasons,
-		}, true
+		}, true, nil
 	default:
-		return "", discoveredCandidate{}, false
+		return "", discoveredCandidate{}, false, nil
+	}
+}
+
+func discoverMarkdownContractIdentity(workspaceRoot, path string, body []byte) (string, string, error) {
+	fields := inferMarkdownContractFields(body)
+	ref := strings.TrimSpace(fields.Ref)
+	if ref == "" {
+		var err error
+		ref, err = markdownContractRefForPath(workspaceRoot, path)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return ref, contentHash(body), nil
+}
+
+func dedupeDiscoveredSpecCandidates(specs, contracts []discoveredCandidate) ([]discoveredCandidate, []discoveredCandidate, []DiscoverWarning) {
+	all := append(append([]discoveredCandidate(nil), specs...), contracts...)
+	if len(all) == 0 {
+		return nil, nil, nil
+	}
+
+	groups := make(map[string][]discoveredCandidate)
+	var passthrough []discoveredCandidate
+	for _, candidate := range all {
+		ref := strings.TrimSpace(candidate.ref)
+		if ref == "" {
+			passthrough = append(passthrough, candidate)
+			continue
+		}
+		groups[ref] = append(groups[ref], candidate)
+	}
+
+	refs := make([]string, 0, len(groups))
+	for ref := range groups {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+
+	deduped := append([]discoveredCandidate(nil), passthrough...)
+	var warnings []DiscoverWarning
+	for _, ref := range refs {
+		group := groups[ref]
+		preferred := group[0]
+		for _, candidate := range group[1:] {
+			if prefersDiscoveredCandidate(candidate, preferred) {
+				preferred = candidate
+			}
+		}
+		deduped = append(deduped, preferred)
+		for _, candidate := range group {
+			if candidate.path == preferred.path {
+				continue
+			}
+			if candidate.contentHash != "" && preferred.contentHash != "" && candidate.contentHash == preferred.contentHash {
+				continue
+			}
+			reason := discoverConflictPreferenceReason(preferred, candidate)
+			warnings = append(warnings, DiscoverWarning{
+				Code:        "duplicate_spec_ref_skipped",
+				Message:     fmt.Sprintf("skipped %s during discovery: ref %q conflicts with %s; kept %s (%s)", candidate.path, ref, preferred.path, preferred.path, reason),
+				Ref:         ref,
+				KeptPath:    preferred.path,
+				SkippedPath: candidate.path,
+				Reason:      reason,
+			})
+		}
+	}
+
+	sortDiscoveredCandidates(deduped)
+	var dedupedSpecs []discoveredCandidate
+	var dedupedContracts []discoveredCandidate
+	for _, candidate := range deduped {
+		switch candidate.kind {
+		case config.SourceKindSpecBundle:
+			dedupedSpecs = append(dedupedSpecs, candidate)
+		case config.SourceKindMarkdownContract:
+			dedupedContracts = append(dedupedContracts, candidate)
+		}
+	}
+	return dedupedSpecs, dedupedContracts, warnings
+}
+
+func prefersDiscoveredCandidate(left, right discoveredCandidate) bool {
+	if left.score != right.score {
+		return left.score > right.score
+	}
+	if !left.modifiedAt.Equal(right.modifiedAt) {
+		return left.modifiedAt.After(right.modifiedAt)
+	}
+	return left.path < right.path
+}
+
+func discoverConflictPreferenceReason(preferred, skipped discoveredCandidate) string {
+	switch {
+	case preferred.score != skipped.score:
+		return "higher discovery score"
+	case !preferred.modifiedAt.Equal(skipped.modifiedAt):
+		return "newer file"
+	default:
+		return "stable path tie-breaker"
 	}
 }
 

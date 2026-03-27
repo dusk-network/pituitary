@@ -129,39 +129,61 @@ func TestRunInitReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 }
 
-func TestRunInitDoesNotWriteConfigOnSourceLoadFailure(t *testing.T) {
+func TestRunInitSkipsConflictingDiscoveredRefs(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 
-	// Create two markdown contracts with the same Ref: line to trigger
-	// a duplicate spec ref error during source loading.
-	conflictDir := filepath.Join(repo, "rfcs")
-	mustMkdirAllCmd(t, conflictDir)
-	mustWriteFileCmd(t, filepath.Join(conflictDir, "a.md"), "# Proposal A\n\nRef: DUPE-001\nStatus: draft\n\nFirst proposal.\n")
-	mustWriteFileCmd(t, filepath.Join(conflictDir, "b.md"), "# Proposal B\n\nRef: DUPE-001\nStatus: draft\n\nSecond proposal with same ref.\n")
+	mustWriteFileCmd(t, filepath.Join(repo, "rfcs", "primary.md"), `
+# Primary Contract
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "notes.md"), `
+# Root Proposal
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := withWorkingDir(t, repo, func() int {
 		return runInit([]string{"--path", "."}, &stdout, &stderr)
 	})
-	if exitCode != 2 {
-		t.Fatalf("runInit() exit code = %d, want 2", exitCode)
+	if exitCode != 0 {
+		t.Fatalf("runInit() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
 	}
 
-	// The config file must NOT have been written.
 	configPath := filepath.Join(repo, ".pituitary", "pituitary.toml")
-	if _, err := os.Stat(configPath); err == nil {
-		t.Fatalf("config was written at %s despite source load failure; user would be trapped", configPath)
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("unexpected error checking config path: %v", err)
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("config missing after init: %v", err)
+	}
+
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	configText := string(configBytes)
+	if !strings.Contains(configText, "primary.md") {
+		t.Fatalf("generated config %q does not include kept contract path", configText)
+	}
+	if strings.Contains(configText, "notes.md") {
+		t.Fatalf("generated config %q unexpectedly includes skipped contract path", configText)
 	}
 
 	errOutput := stderr.String()
-	if !strings.Contains(errOutput, "duplicate spec ref") {
-		t.Fatalf("runInit() stderr %q does not mention duplicate spec ref", errOutput)
+	if !strings.Contains(errOutput, "warning: skipped notes.md during discovery") {
+		t.Fatalf("runInit() stderr %q does not contain duplicate-ref warning", errOutput)
 	}
-	if !strings.Contains(errOutput, "config was not written") {
-		t.Fatalf("runInit() stderr %q does not mention config was not written", errOutput)
+	if strings.Contains(errOutput, "source load failed") {
+		t.Fatalf("runInit() stderr %q unexpectedly reports source load failure", errOutput)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "index: 3 specs · 3 docs") {
+		t.Fatalf("runInit() output %q does not report the deduplicated index counts", output)
 	}
 }
 

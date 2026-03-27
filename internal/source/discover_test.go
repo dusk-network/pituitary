@@ -2,6 +2,7 @@ package source
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -185,5 +186,94 @@ func TestDiscoverDetectsIntentArtifacts(t *testing.T) {
 		if !projectItems[name] {
 			t.Errorf("expected %s to be in project-docs source, got items: %v", name, projectItems)
 		}
+	}
+}
+
+func TestDiscoverWorkspaceSkipsConflictingMarkdownContractRefs(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "rfcs", "primary.md"), `
+# Primary Contract
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
+	mustWriteFile(t, filepath.Join(repo, "notes.md"), `
+# Root Proposal
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`)
+
+	result, err := DiscoverWorkspace(DiscoverOptions{RootPath: repo})
+	if err != nil {
+		t.Fatalf("DiscoverWorkspace() error = %v", err)
+	}
+
+	if got, want := len(result.Warnings), 1; got != want {
+		t.Fatalf("warning count = %d, want %d", got, want)
+	}
+	warning := result.Warnings[0]
+	if got, want := warning.Code, "duplicate_spec_ref_skipped"; got != want {
+		t.Fatalf("warning code = %q, want %q", got, want)
+	}
+	if got, want := warning.Ref, "DUPE-001"; got != want {
+		t.Fatalf("warning ref = %q, want %q", got, want)
+	}
+	if got, want := warning.KeptPath, "rfcs/primary.md"; got != want {
+		t.Fatalf("warning kept_path = %q, want %q", got, want)
+	}
+	if got, want := warning.SkippedPath, "notes.md"; got != want {
+		t.Fatalf("warning skipped_path = %q, want %q", got, want)
+	}
+	if got, want := warning.Reason, "higher discovery score"; got != want {
+		t.Fatalf("warning reason = %q, want %q", got, want)
+	}
+	if got, want := len(result.Sources), 1; got != want {
+		t.Fatalf("source count = %d, want %d", got, want)
+	}
+	if got, want := result.Sources[0].ItemCount, 1; got != want {
+		t.Fatalf("contracts item count = %d, want %d", got, want)
+	}
+	if !strings.Contains(result.Config, "primary.md") {
+		t.Fatalf("generated config %q does not include kept contract path", result.Config)
+	}
+	if strings.Contains(result.Config, "notes.md") {
+		t.Fatalf("generated config %q unexpectedly includes skipped contract path", result.Config)
+	}
+}
+
+func TestDiscoverWorkspaceSilentlySkipsTrueDuplicateMarkdownContractRefs(t *testing.T) {
+	repo := t.TempDir()
+	body := `
+# Shared Contract
+
+Ref: DUPE-001
+Status: draft
+Domain: api
+`
+	mustWriteFile(t, filepath.Join(repo, "rfcs", "primary.md"), body)
+	mustWriteFile(t, filepath.Join(repo, "notes.md"), body)
+
+	result, err := DiscoverWorkspace(DiscoverOptions{RootPath: repo})
+	if err != nil {
+		t.Fatalf("DiscoverWorkspace() error = %v", err)
+	}
+
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none for same-content duplicates", result.Warnings)
+	}
+	if got, want := len(result.Sources), 1; got != want {
+		t.Fatalf("source count = %d, want %d", got, want)
+	}
+	if got, want := result.Sources[0].ItemCount, 1; got != want {
+		t.Fatalf("contracts item count = %d, want %d", got, want)
+	}
+	if !strings.Contains(result.Config, "primary.md") {
+		t.Fatalf("generated config %q does not include kept contract path", result.Config)
+	}
+	if strings.Contains(result.Config, "notes.md") {
+		t.Fatalf("generated config %q unexpectedly includes skipped duplicate path", result.Config)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 type cliIssue struct {
@@ -116,6 +117,13 @@ func writeCLIJSON(w io.Writer, payload cliEnvelope) int {
 
 func cliWarningsForResult(result any) []cliIssue {
 	switch typed := result.(type) {
+	case *source.DiscoverResult:
+		return discoverWarningsToCLIIssues(typed.Warnings)
+	case *initResult:
+		if typed.Discover == nil {
+			return nil
+		}
+		return discoverWarningsToCLIIssues(typed.Discover.Warnings)
 	case *analysis.AnalyzeImpactResult:
 		return warningsToCLIIssues(typed.Warnings)
 	case *analysis.TerminologyAuditResult:
@@ -127,6 +135,21 @@ func cliWarningsForResult(result any) []cliIssue {
 	default:
 		return nil
 	}
+}
+
+func discoverWarningsToCLIIssues(warnings []source.DiscoverWarning) []cliIssue {
+	if len(warnings) == 0 {
+		return nil
+	}
+	issues := make([]cliIssue, 0, len(warnings))
+	for _, warning := range warnings {
+		issues = append(issues, cliIssue{
+			Code:    warning.Code,
+			Message: warning.Message,
+			Path:    warning.SkippedPath,
+		})
+	}
+	return issues
 }
 
 func warningsToCLIIssues(warnings []analysis.Warning) []cliIssue {
