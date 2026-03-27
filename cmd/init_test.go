@@ -129,6 +129,40 @@ func TestRunInitReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 }
 
+func TestRunInitDoesNotWriteConfigOnSourceLoadFailure(t *testing.T) {
+	repo := writeDiscoveryWorkspace(t)
+
+	// Create two markdown contracts with the same Ref: line to trigger
+	// a duplicate spec ref error during source loading.
+	conflictDir := filepath.Join(repo, "rfcs")
+	mustMkdirAllCmd(t, conflictDir)
+	mustWriteFileCmd(t, filepath.Join(conflictDir, "a.md"), "# Proposal A\n\nRef: DUPE-001\nStatus: draft\n\nFirst proposal.\n")
+	mustWriteFileCmd(t, filepath.Join(conflictDir, "b.md"), "# Proposal B\n\nRef: DUPE-001\nStatus: draft\n\nSecond proposal with same ref.\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runInit([]string{"--path", "."}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runInit() exit code = %d, want 2", exitCode)
+	}
+
+	// The config file must NOT have been written.
+	configPath := filepath.Join(repo, ".pituitary", "pituitary.toml")
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatalf("config was written at %s despite source load failure; user would be trapped", configPath)
+	}
+
+	errOutput := stderr.String()
+	if !strings.Contains(errOutput, "duplicate spec ref") {
+		t.Fatalf("runInit() stderr %q does not mention duplicate spec ref", errOutput)
+	}
+	if !strings.Contains(errOutput, "config was not written") {
+		t.Fatalf("runInit() stderr %q does not mention config was not written", errOutput)
+	}
+}
+
 func TestRunInitRejectsExistingConfig(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 	mustMkdirAllCmd(t, filepath.Join(repo, ".pituitary"))

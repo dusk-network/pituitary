@@ -148,6 +148,34 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// LoadFromText parses config from text content as if it were read from the
+// given path. This allows validating a generated config before writing it
+// to disk.
+func LoadFromText(content string, path string) (*Config, error) {
+	configPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+
+	data := []byte(content)
+	if legacy, ok, err := detectLegacyProjectConfig(bytes.NewReader(data)); err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	} else if ok {
+		return nil, fmt.Errorf("%s: %s", configPath, legacyConfigLoadMessage(configPath, legacy))
+	}
+
+	raw, err := parse(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	}
+
+	cfg, err := buildFromRaw(configPath, raw, true)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	}
+	return cfg, nil
+}
+
 func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (*Config, error) {
 	cfg := &Config{
 		SchemaVersion: raw.schemaVersion,
