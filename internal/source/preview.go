@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/diag"
 )
 
 // PreviewResult describes which items each configured source will contribute.
@@ -31,8 +32,19 @@ type PreviewItem struct {
 	Path         string `json:"path"`
 }
 
+// PreviewOptions controls diagnostic behavior during source previews.
+type PreviewOptions struct {
+	Logger *diag.Logger
+}
+
 // PreviewFromConfig enumerates source items without rebuilding the index.
 func PreviewFromConfig(cfg *config.Config) (*PreviewResult, error) {
+	return PreviewFromConfigWithOptions(cfg, PreviewOptions{})
+}
+
+// PreviewFromConfigWithOptions enumerates source items without rebuilding the index.
+func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*PreviewResult, error) {
+	logger := options.Logger
 	result := &PreviewResult{
 		Sources: make([]SourcePreview, 0, len(cfg.Sources)),
 	}
@@ -41,6 +53,11 @@ func PreviewFromConfig(cfg *config.Config) (*PreviewResult, error) {
 		preview, err := previewSource(cfg.Workspace.RootPath, source)
 		if err != nil {
 			return nil, err
+		}
+		if preview.ItemCount == 0 {
+			logger.Warnf("preview", "source %q (%s %s) would index 0 item(s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
+		} else {
+			logger.Infof("preview", "source %q (%s %s) would index %d item(s)", source.Name, source.Kind, filepath.ToSlash(source.Path), preview.ItemCount)
 		}
 		result.Sources = append(result.Sources, preview)
 	}

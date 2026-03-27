@@ -173,12 +173,51 @@ func TestParseGlobalCLIOptionsSupportsColorMode(t *testing.T) {
 	}
 }
 
+func TestParseGlobalCLIOptionsSupportsLogLevel(t *testing.T) {
+	t.Parallel()
+
+	options, remaining, err := parseGlobalCLIOptions([]string{"--log-level", "debug", "status"})
+	if err != nil {
+		t.Fatalf("parseGlobalCLIOptions() error = %v, want nil", err)
+	}
+	if got, want := options.LogLevel, "debug"; got != want {
+		t.Fatalf("log level = %q, want %q", got, want)
+	}
+	if len(remaining) != 1 || remaining[0] != "status" {
+		t.Fatalf("remaining args = %#v, want [status]", remaining)
+	}
+}
+
+func TestParseGlobalCLIOptionsUsesLogLevelEnv(t *testing.T) {
+	t.Setenv(logLevelEnvVar, "info")
+
+	options, remaining, err := parseGlobalCLIOptions([]string{"status"})
+	if err != nil {
+		t.Fatalf("parseGlobalCLIOptions() error = %v, want nil", err)
+	}
+	if got, want := options.LogLevel, "info"; got != want {
+		t.Fatalf("log level = %q, want %q", got, want)
+	}
+	if len(remaining) != 1 || remaining[0] != "status" {
+		t.Fatalf("remaining args = %#v, want [status]", remaining)
+	}
+}
+
 func TestParseGlobalCLIOptionsRejectsInvalidColorMode(t *testing.T) {
 	t.Parallel()
 
 	_, _, err := parseGlobalCLIOptions([]string{"--color", "violet", "status"})
 	if err == nil || !strings.Contains(err.Error(), "invalid --color value") {
 		t.Fatalf("parseGlobalCLIOptions() error = %v, want invalid --color value", err)
+	}
+}
+
+func TestParseGlobalCLIOptionsRejectsInvalidLogLevel(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := parseGlobalCLIOptions([]string{"--log-level", "trace", "status"})
+	if err == nil || !strings.Contains(err.Error(), "invalid --log-level value") {
+		t.Fatalf("parseGlobalCLIOptions() error = %v, want invalid --log-level value", err)
 	}
 }
 

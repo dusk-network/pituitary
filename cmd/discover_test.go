@@ -167,6 +167,36 @@ func TestRunDiscoverWriteProducesUsableLocalConfig(t *testing.T) {
 	}
 }
 
+func TestRunDiscoverDebugLogsRejectedSpecBundle(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "broken", "spec.toml"), `
+id = "SPEC-001"
+title = "Broken Spec"
+status = "accepted"
+domain = "api"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "docs", "guides", "guide.md"), `
+# Guide
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return Run([]string{"--log-level", "debug", "discover", "--path", "."}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("Run(discover --log-level debug) exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+
+	logOutput := stderr.String()
+	if !strings.Contains(logOutput, "pituitary debug: discover: rejected spec bundle specs/broken/spec.toml") {
+		t.Fatalf("stderr %q does not contain rejected bundle log", logOutput)
+	}
+	if !strings.Contains(logOutput, "missing required field(s): body") {
+		t.Fatalf("stderr %q does not contain the bundle rejection reason", logOutput)
+	}
+}
+
 func TestRunDiscoverWriteSupportsCustomConfigPath(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 	configPath := filepath.Join(repo, "tools", "pituitary.local.toml")

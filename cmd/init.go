@@ -75,10 +75,12 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 		ConfigPath: strings.TrimSpace(configPath),
 		DryRun:     dryRun,
 	}
+	logger := cliLoggerFromContext(ctx)
 	discovered, err := source.DiscoverWorkspace(source.DiscoverOptions{
 		RootPath:   path,
 		ConfigPath: request.ConfigPath,
 		Write:      false,
+		Logger:     logger,
 	})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
@@ -113,7 +115,7 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 			Message: "generated config is invalid:\n" + err.Error(),
 		}, 2)
 	}
-	records, err := source.LoadFromConfig(cfg)
+	records, err := source.LoadFromConfigWithOptions(cfg, source.LoadOptions{Logger: logger})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
 			Code:    "source_error",
@@ -127,6 +129,7 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 			Message: err.Error(),
 		}, 2)
 	}
+	logger.Infof("init", "wrote generated config to %s", discovered.ConfigPath)
 
 	var rebuild *index.RebuildResult
 	if format == commandFormatText {
