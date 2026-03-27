@@ -152,6 +152,8 @@ func TestRunInitDoesNotWriteConfigOnSourceLoadFailure(t *testing.T) {
 	configPath := filepath.Join(repo, ".pituitary", "pituitary.toml")
 	if _, err := os.Stat(configPath); err == nil {
 		t.Fatalf("config was written at %s despite source load failure; user would be trapped", configPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected error checking config path: %v", err)
 	}
 
 	errOutput := stderr.String()

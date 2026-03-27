@@ -130,22 +130,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("open %s: %w", configPath, err)
 	}
 
-	if legacy, ok, err := detectLegacyProjectConfig(bytes.NewReader(data)); err != nil {
-		return nil, fmt.Errorf("%s: %w", configPath, err)
-	} else if ok {
-		return nil, fmt.Errorf("%s: %s", configPath, legacyConfigLoadMessage(configPath, legacy))
-	}
-
-	raw, err := parse(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", configPath, err)
-	}
-
-	cfg, err := buildFromRaw(configPath, raw, true)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", configPath, err)
-	}
-	return cfg, nil
+	return loadFromData(data, configPath)
 }
 
 // LoadFromText parses config from text content as if it were read from the
@@ -157,7 +142,10 @@ func LoadFromText(content string, path string) (*Config, error) {
 		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 
-	data := []byte(content)
+	return loadFromData([]byte(content), configPath)
+}
+
+func loadFromData(data []byte, configPath string) (*Config, error) {
 	if legacy, ok, err := detectLegacyProjectConfig(bytes.NewReader(data)); err != nil {
 		return nil, fmt.Errorf("%s: %w", configPath, err)
 	} else if ok {

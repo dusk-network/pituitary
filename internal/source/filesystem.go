@@ -114,7 +114,7 @@ func appendUniqueSpecRecords(result *LoadResult, seen map[string]artifactOrigin,
 				"duplicate spec ref %q: %s conflicts with %s\n"+
 					"  to fix: edit the Ref: line in one of the files to make it unique,\n"+
 					"  or add an exclude pattern to your config to skip one of them",
-				record.Ref, describeOrigin("bundle", origin), describeOrigin("bundle", prior),
+				record.Ref, describeOrigin("file", origin), describeOrigin("file", prior),
 			)
 		}
 		seen[record.Ref] = origin
