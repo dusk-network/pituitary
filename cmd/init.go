@@ -102,25 +102,29 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 			Message: err.Error(),
 		}, 2)
 	}
-	if err := source.WriteDiscoveredConfig(discovered.ConfigPath, discovered.Config); err != nil {
-		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
-	}
 
-	cfg, err := config.Load(discovered.ConfigPath)
+	// Validate sources before writing config. This prevents the user from
+	// getting trapped: config written but sources fail to load, and re-running
+	// init refuses because the config already exists.
+	cfg, err := config.LoadFromText(discovered.Config, discovered.ConfigPath)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
 			Code:    "config_error",
-			Message: "invalid config:\n" + err.Error(),
+			Message: "generated config is invalid:\n" + err.Error(),
 		}, 2)
 	}
 	records, err := source.LoadFromConfig(cfg)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
 			Code:    "source_error",
-			Message: "source load failed:\n" + err.Error(),
+			Message: "source load failed (config was not written):\n" + err.Error(),
+		}, 2)
+	}
+
+	if err := source.WriteDiscoveredConfig(discovered.ConfigPath, discovered.Config); err != nil {
+		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
+			Code:    "config_error",
+			Message: err.Error(),
 		}, 2)
 	}
 

@@ -130,6 +130,22 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("open %s: %w", configPath, err)
 	}
 
+	return loadFromData(data, configPath)
+}
+
+// LoadFromText parses config from text content as if it were read from the
+// given path. This allows validating a generated config before writing it
+// to disk.
+func LoadFromText(content string, path string) (*Config, error) {
+	configPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+
+	return loadFromData([]byte(content), configPath)
+}
+
+func loadFromData(data []byte, configPath string) (*Config, error) {
 	if legacy, ok, err := detectLegacyProjectConfig(bytes.NewReader(data)); err != nil {
 		return nil, fmt.Errorf("%s: %w", configPath, err)
 	} else if ok {

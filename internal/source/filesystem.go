@@ -110,7 +110,12 @@ func appendUniqueSpecRecords(result *LoadResult, seen map[string]artifactOrigin,
 	for _, record := range records {
 		origin := specOrigin(source, record)
 		if prior, exists := seen[record.Ref]; exists {
-			return fmt.Errorf("duplicate spec ref %q: %s conflicts with %s", record.Ref, describeOrigin("bundle", origin), describeOrigin("bundle", prior))
+			return fmt.Errorf(
+				"duplicate spec ref %q: %s conflicts with %s\n"+
+					"  to fix: edit the Ref: line in one of the files to make it unique,\n"+
+					"  or add an exclude pattern to your config to skip one of them",
+				record.Ref, describeOrigin("file", origin), describeOrigin("file", prior),
+			)
 		}
 		seen[record.Ref] = origin
 		result.Specs = append(result.Specs, record)
