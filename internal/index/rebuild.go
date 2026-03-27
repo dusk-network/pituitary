@@ -255,6 +255,7 @@ func ensureDirectoryPath(dirPath string) ([]string, error) {
 			}
 			created := make([]string, 0, len(missing))
 			for i := len(missing) - 1; i >= 0; i-- {
+				// #nosec G301 -- staging directories are local workspace state, not secret material.
 				if err := os.Mkdir(missing[i], 0o755); err != nil {
 					cleanupCreatedDirectories(created)
 					if os.IsExist(err) {
@@ -361,10 +362,6 @@ func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimensio
 		return fmt.Errorf("remove staging database probe: %w", err)
 	}
 	return nil
-}
-
-func buildStaging(db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult) (*RebuildResult, error) {
-	return buildStagingContext(context.Background(), db, cfg, dimension, embedder, records, &reuseState{artifacts: map[string]storedArtifact{}}, RebuildOptions{}, nil)
 }
 
 func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, state *reuseState, options RebuildOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
@@ -508,10 +505,6 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	return result, nil
 }
 
-func createSchema(db *sql.DB, dimension int) error {
-	return createSchemaContext(context.Background(), db, dimension)
-}
-
 func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 	statements := []string{
 		`CREATE TABLE artifacts (
@@ -565,10 +558,6 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 	return nil
 }
 
-func insertSpecArtifact(tx *sql.Tx, spec model.SpecRecord) error {
-	return insertSpecArtifactContext(context.Background(), tx, spec)
-}
-
 func insertSpecArtifactContext(ctx context.Context, tx *sql.Tx, spec model.SpecRecord) error {
 	metadataJSON, err := json.Marshal(spec.Metadata)
 	if err != nil {
@@ -595,10 +584,6 @@ func insertSpecArtifactContext(ctx context.Context, tx *sql.Tx, spec model.SpecR
 	return nil
 }
 
-func insertDocArtifact(tx *sql.Tx, doc model.DocRecord) error {
-	return insertDocArtifactContext(context.Background(), tx, doc)
-}
-
 func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocRecord) error {
 	metadataJSON, err := json.Marshal(doc.Metadata)
 	if err != nil {
@@ -623,12 +608,6 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 		return fmt.Errorf("insert doc artifact %s: %w", doc.Ref, err)
 	}
 	return nil
-}
-
-func insertArtifactChunks(chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title, body string) error {
-	plan := planArtifactReuse(title, "", body, storedArtifact{})
-	_, _, _, err := insertArtifactChunksContext(context.Background(), chunkStmt, vectorStmt, embedder, artifactRef, title, plan, RebuildProgressEvent{}, nil)
-	return err
 }
 
 func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title string, plan artifactChunkPlan, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, int, int, error) {
@@ -706,10 +685,6 @@ func reportRebuildProgress(reporter RebuildProgressReporter, event RebuildProgre
 	reporter(event)
 }
 
-func insertChunk(stmt *sql.Stmt, artifactRef, section, content string) (int64, error) {
-	return insertChunkContext(context.Background(), stmt, artifactRef, section, content)
-}
-
 func insertChunkContext(ctx context.Context, stmt *sql.Stmt, artifactRef, section, content string) (int64, error) {
 	result, err := stmt.ExecContext(ctx, artifactRef, section, content)
 	if err != nil {
@@ -720,10 +695,6 @@ func insertChunkContext(ctx context.Context, stmt *sql.Stmt, artifactRef, sectio
 		return 0, fmt.Errorf("read chunk id for %s: %w", artifactRef, err)
 	}
 	return chunkID, nil
-}
-
-func insertChunkVector(stmt *sql.Stmt, chunkID int64, _ int, vector []float64) error {
-	return insertChunkVectorContext(context.Background(), stmt, chunkID, 0, vector)
 }
 
 func insertChunkVectorContext(ctx context.Context, stmt *sql.Stmt, chunkID int64, _ int, vector []float64) error {
@@ -755,19 +726,11 @@ func textForEmbedding(title string, section chunk.Section) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func insertEdge(stmt *sql.Stmt, fromRef, toRef, edgeType string) error {
-	return insertEdgeContext(context.Background(), stmt, fromRef, toRef, edgeType)
-}
-
 func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType string) error {
 	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType); err != nil {
 		return fmt.Errorf("insert edge %s -> %s (%s): %w", fromRef, toRef, edgeType, err)
 	}
 	return nil
-}
-
-func insertMetadata(tx *sql.Tx, key, value string) error {
-	return insertMetadataContext(context.Background(), tx, key, value)
 }
 
 func insertMetadataContext(ctx context.Context, tx *sql.Tx, key, value string) error {
@@ -777,19 +740,11 @@ func insertMetadataContext(ctx context.Context, tx *sql.Tx, key, value string) e
 	return nil
 }
 
-func insertContentFingerprint(db *sql.DB, value string) error {
-	return insertContentFingerprintContext(context.Background(), db, value)
-}
-
 func insertContentFingerprintContext(ctx context.Context, db *sql.DB, value string) error {
 	if _, err := db.ExecContext(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, "content_fingerprint", value); err != nil {
 		return fmt.Errorf("insert content fingerprint: %w", err)
 	}
 	return nil
-}
-
-func runIntegrityChecks(db *sql.DB) error {
-	return runIntegrityChecksContext(context.Background(), db)
 }
 
 func runIntegrityChecksContext(ctx context.Context, db *sql.DB) error {

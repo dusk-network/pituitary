@@ -130,6 +130,7 @@ func loadComplianceDiffFile(path string) (string, error) {
 			return "", fmt.Errorf("read diff from stdin: %w", err)
 		}
 	} else {
+		// #nosec G304 -- path is an explicit CLI diff file supplied by the operator.
 		data, err = os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("read diff file %q: %w", path, err)

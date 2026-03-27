@@ -48,7 +48,7 @@ If your repo already has a config, skip `init` and go straight to `status`, `ind
 
 ## Build from Source
 
-**Prerequisites:** Go 1.25+, a C toolchain (required for the sqlite-vec extension). For platform-specific setup, see [prerequisites.md](development/prerequisites.md).
+**Prerequisites:** Go 1.25.8+, a C toolchain (required for the sqlite-vec extension). For platform-specific setup, see [prerequisites.md](development/prerequisites.md).
 
 ```sh
 git clone https://github.com/dusk-network/pituitary.git

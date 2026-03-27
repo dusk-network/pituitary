@@ -1,6 +1,6 @@
 module github.com/dusk-network/pituitary
 
-go 1.25.0
+go 1.25.8
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6

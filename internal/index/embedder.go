@@ -159,7 +159,7 @@ func tokenize(text string) []string {
 func tokenBucket(token string, dimension int) int {
 	hasher := fnv.New32a()
 	_, _ = hasher.Write([]byte(token))
-	return int(hasher.Sum32() % uint32(dimension))
+	return int(int64(hasher.Sum32()) % int64(dimension))
 }
 
 func normalize(vector []float64) []float64 {

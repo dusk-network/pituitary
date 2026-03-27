@@ -298,7 +298,8 @@ func readMetadataContext(ctx context.Context, db *sql.DB, keys ...string) (map[s
 		return result, nil
 	}
 
-	query := fmt.Sprintf(`SELECT key, value FROM metadata WHERE key IN (%s)`, placeholders(len(keys)))
+	// #nosec G202 -- placeholders() only emits '?' markers; key values are still passed as bound parameters.
+	query := `SELECT key, value FROM metadata WHERE key IN (` + placeholders(len(keys)) + `)`
 	args := make([]any, 0, len(keys))
 	for _, key := range keys {
 		args = append(args, key)

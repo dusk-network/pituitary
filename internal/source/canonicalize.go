@@ -62,6 +62,7 @@ func CanonicalizeMarkdownContract(options CanonicalizeOptions) (*CanonicalizeRes
 		return nil, fmt.Errorf("canonicalize source %q is not markdown", workspaceRelative(workspaceRoot, sourcePath))
 	}
 
+	// #nosec G304 -- sourcePath is resolved from the workspace and validated before reading.
 	body, err := os.ReadFile(sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("read markdown contract %q: %w", workspaceRelative(workspaceRoot, sourcePath), err)
@@ -264,12 +265,15 @@ func writeCanonicalizedBundle(bundleDir, specToml, bodyMarkdown string) error {
 			return fmt.Errorf("stat output path %s: %w", filepath.ToSlash(path), err)
 		}
 	}
+	// #nosec G301 -- generated bundle directories use normal checkout permissions for repo files.
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		return fmt.Errorf("create bundle directory: %w", err)
 	}
+	// #nosec G306 -- generated spec bundles are non-secret repo files intended to be readable by standard tooling.
 	if err := os.WriteFile(filepath.Join(bundleDir, "spec.toml"), []byte(specToml), 0o644); err != nil {
 		return fmt.Errorf("write generated spec.toml: %w", err)
 	}
+	// #nosec G306 -- generated spec bundles are non-secret repo files intended to be readable by standard tooling.
 	if err := os.WriteFile(filepath.Join(bundleDir, "body.md"), []byte(bodyMarkdown), 0o644); err != nil {
 		return fmt.Errorf("write generated body.md: %w", err)
 	}

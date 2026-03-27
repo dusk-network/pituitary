@@ -340,10 +340,6 @@ func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
 	}
 }
 
-func loadIndexedDocs(db *sql.DB, refs []string) (map[string]docDocument, error) {
-	return loadIndexedDocsContext(context.Background(), db, refs)
-}
-
 func loadIndexedDocsContext(ctx context.Context, db *sql.DB, refs []string) (map[string]docDocument, error) {
 	rows, err := loadIndexedDocRowsContext(ctx, db, refs)
 	if err != nil {
@@ -366,10 +362,6 @@ func loadIndexedDocsContext(ctx context.Context, db *sql.DB, refs []string) (map
 		return nil, err
 	}
 	return docs, nil
-}
-
-func loadIndexedDocRows(db *sql.DB, refs []string) ([]indexedArtifactRow, error) {
-	return loadIndexedDocRowsContext(context.Background(), db, refs)
 }
 
 func loadIndexedDocRowsContext(ctx context.Context, db *sql.DB, refs []string) ([]indexedArtifactRow, error) {
@@ -410,10 +402,6 @@ WHERE kind = ?`)
 		return nil, fmt.Errorf("iterate indexed docs: %w", err)
 	}
 	return result, nil
-}
-
-func loadDocSections(db *sql.DB, docs map[string]docDocument) error {
-	return loadDocSectionsContext(context.Background(), db, docs)
 }
 
 func loadDocSectionsContext(ctx context.Context, db *sql.DB, docs map[string]docDocument) error {
@@ -1134,26 +1122,6 @@ func humanizedDriftValue(code, value string) string {
 	return value
 }
 
-func docEvidenceForFinding(doc docDocument, finding DriftFinding) (string, string) {
-	keywords := evidenceKeywordsForFinding(finding)
-	for _, section := range doc.Sections {
-		if excerpt, ok := sectionExcerptForKeywords(section, keywords); ok {
-			return section.Heading, excerpt
-		}
-	}
-	return "", ""
-}
-
-func specEvidenceForFinding(spec specDocument, finding DriftFinding) (string, string) {
-	keywords := evidenceKeywordsForFinding(finding)
-	for _, section := range spec.Sections {
-		if excerpt, ok := sectionExcerptForKeywords(section, keywords); ok {
-			return section.Heading, excerpt
-		}
-	}
-	return "", ""
-}
-
 func evidenceKeywordsForFinding(finding DriftFinding) []string {
 	switch finding.Code {
 	case "window_mismatch":
@@ -1407,37 +1375,6 @@ func bestAlignedAssessmentCandidateForDocs(doc docDocument, relevant []specDocum
 		}
 	}
 	return best
-}
-
-func bestAlignedEvidence(doc docDocument, spec specDocument) (*DriftEvidence, float64) {
-	var (
-		bestDoc   *embeddedSection
-		bestSpec  *embeddedSection
-		bestScore float64
-	)
-	for i := range doc.Sections {
-		docSection := &doc.Sections[i]
-		for j := range spec.Sections {
-			specSection := &spec.Sections[j]
-			score := sectionAssessmentScore(*docSection, *specSection)
-			if bestDoc == nil || score > bestScore {
-				bestScore = score
-				bestDoc = docSection
-				bestSpec = specSection
-			}
-		}
-	}
-	if bestDoc == nil || bestSpec == nil {
-		return nil, 0
-	}
-	return &DriftEvidence{
-		SpecRef:     spec.Record.Ref,
-		SpecTitle:   spec.Record.Title,
-		SpecSection: defaultString(stringsTrimSpace(bestSpec.Heading), "(body)"),
-		SpecExcerpt: defaultString(sectionExcerpt(*bestSpec), stringsTrimSpace(spec.Record.Title)),
-		DocSection:  defaultString(stringsTrimSpace(bestDoc.Heading), "(body)"),
-		DocExcerpt:  sectionExcerpt(*bestDoc),
-	}, bestScore
 }
 
 func shouldEmitAlignedAssessment(candidate *alignedAssessmentCandidate) bool {

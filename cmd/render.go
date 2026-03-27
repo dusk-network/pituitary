@@ -726,28 +726,6 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 	}
 }
 
-func renderDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence, prefix string) {
-	if evidence == nil {
-		return
-	}
-	if evidence.SpecRef != "" || evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
-		fmt.Fprintf(w, "%sspec evidence: %s", prefix, evidence.SpecRef)
-		if evidence.SpecSection != "" {
-			fmt.Fprintf(w, " | %s", evidence.SpecSection)
-		}
-		fmt.Fprintln(w)
-		if evidence.SpecExcerpt != "" {
-			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.SpecExcerpt)
-		}
-	}
-	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
-		fmt.Fprintf(w, "%sdoc evidence: %s\n", prefix, evidence.DocSection)
-		if evidence.DocExcerpt != "" {
-			fmt.Fprintf(w, "%s  excerpt: %s\n", prefix, evidence.DocExcerpt)
-		}
-	}
-}
-
 func renderFixResult(w io.Writer, result *app.FixResult) {
 	p := presentationForWriter(w)
 	suffix := ""
@@ -1796,45 +1774,6 @@ func driftAssessmentsFromItems(items []analysis.DriftItem) []analysis.DocDriftAs
 		})
 	}
 	return result
-}
-
-func renderReviewImpactSummary(w io.Writer, impact *analysis.AnalyzeImpactResult) {
-	if impact == nil {
-		return
-	}
-	specs := topImpactedSpecs(impact.AffectedSpecs, 3)
-	if len(specs) == 0 {
-		fmt.Fprintln(w, "top impacted specs: none")
-	} else {
-		fmt.Fprintln(w, "top impacted specs:")
-		for _, item := range specs {
-			fmt.Fprintf(w, "- %s | %s | %s", item.Ref, item.Title, item.Relationship)
-			if item.Historical {
-				fmt.Fprint(w, " | historical")
-			}
-			fmt.Fprintln(w)
-		}
-		if extra := len(impact.AffectedSpecs) - len(specs); extra > 0 {
-			fmt.Fprintf(w, "- %d more impacted spec(s)\n", extra)
-		}
-	}
-
-	docs := topImpactedDocs(impact.AffectedDocs, 3)
-	if len(docs) == 0 {
-		fmt.Fprintln(w, "top impacted docs: none")
-		return
-	}
-	fmt.Fprintln(w, "top impacted docs:")
-	for _, item := range docs {
-		fmt.Fprintf(w, "- %s | %s | %.3f", item.Ref, item.Title, item.Score)
-		if item.SourceRef != "" {
-			fmt.Fprintf(w, " | %s", item.SourceRef)
-		}
-		fmt.Fprintln(w)
-	}
-	if extra := len(impact.AffectedDocs) - len(docs); extra > 0 {
-		fmt.Fprintf(w, "- %d more impacted doc(s)\n", extra)
-	}
 }
 
 func topImpactedSpecs(items []analysis.ImpactedSpec, limit int) []analysis.ImpactedSpec {

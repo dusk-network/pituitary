@@ -138,6 +138,7 @@ func loadSpecRecordFile(path string) (model.SpecRecord, error) {
 			return model.SpecRecord{}, fmt.Errorf("read spec record from stdin: %w", err)
 		}
 	} else {
+		// #nosec G304 -- path is an explicit CLI spec-record file supplied by the operator.
 		data, err = os.ReadFile(path)
 		if err != nil {
 			return model.SpecRecord{}, fmt.Errorf("read spec record file %q: %w", path, err)

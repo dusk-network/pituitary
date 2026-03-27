@@ -88,6 +88,7 @@ func runMigrateConfigContext(_ context.Context, args []string, stdout, stderr io
 	}
 
 	if write {
+		// #nosec G306 -- migrated config files are normal repo files intended to remain readable by standard tooling.
 		if err := os.WriteFile(migration.Config.ConfigPath, []byte(rendered), 0o644); err != nil {
 			return writeCLIError(stdout, stderr, format, "migrate-config", request, cliIssue{
 				Code:    "config_error",

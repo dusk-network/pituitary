@@ -253,6 +253,7 @@ type rawSpecBundle struct {
 
 func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string) (model.SpecRecord, error) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
+	// #nosec G304 -- specPath is the fixed spec.toml file within a discovered bundle directory under the workspace.
 	specBytes, err := os.ReadFile(specPath)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read spec.toml: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), err)
@@ -278,6 +279,7 @@ func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q body %q does not exist", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath))
 	}
 
+	// #nosec G304 -- bodyPath is validated to remain within the selected bundle directory.
 	bodyBytes, err := os.ReadFile(bodyPath)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read body %q: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath), err)
@@ -357,6 +359,7 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		return nil, err
 	}
 	for _, match := range matches {
+		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
 		bodyBytes, err := os.ReadFile(match.AbsolutePath)
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
@@ -389,6 +392,7 @@ func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.
 		return nil, err
 	}
 	for _, match := range matches {
+		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
 		bodyBytes, err := os.ReadFile(match.AbsolutePath)
 		if err != nil {
 			return nil, fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)

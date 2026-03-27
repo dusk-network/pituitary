@@ -232,10 +232,6 @@ func isSupportedSearchStatus(status string) bool {
 	}
 }
 
-func validateStoredDimension(db *sql.DB, configured int) error {
-	return validateStoredEmbedderContext(context.Background(), db, "", configured)
-}
-
 func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint string, configured int) error {
 	var raw string
 	err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
@@ -270,10 +266,6 @@ func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint 
 		return fmt.Errorf("index embedder fingerprint %q does not match configured embedder fingerprint %q; run `pituitary index --rebuild`", storedFingerprint, fingerprint)
 	}
 	return nil
-}
-
-func loadRankedCandidates(db *sql.DB, query SearchSpecQuery, queryEmbedding []float64) ([]chunkCandidate, error) {
-	return loadRankedCandidatesContext(context.Background(), db, query, queryEmbedding)
 }
 
 func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSpecQuery, queryEmbedding []float64) ([]chunkCandidate, error) {

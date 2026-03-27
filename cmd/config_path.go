@@ -105,18 +105,6 @@ func resolveCommandConfigPathWithResolution(ctx context.Context, localConfigPath
 	)
 }
 
-func resolveCLIConfigPath(explicitPaths ...string) (string, error) {
-	options := make([]configPathOption, 0, len(explicitPaths))
-	for i, explicitPath := range explicitPaths {
-		options = append(options, configPathOption{
-			Source: fmt.Sprintf("explicit_%d", i+1),
-			Path:   explicitPath,
-		})
-	}
-	resolvedPath, _, err := resolveCLIConfigPathWithResolution(options...)
-	return resolvedPath, err
-}
-
 func resolveCLIConfigPathWithResolution(explicitOptions ...configPathOption) (string, *configResolution, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -179,27 +167,6 @@ func resolveCLIConfigPathFromWorkingDir(cwd string, explicitOptions ...configPat
 	}
 
 	return selected.Path, resolution, nil
-}
-
-func discoverCLIConfigPath(startDir string) (string, bool) {
-	dir := filepath.Clean(startDir)
-	for {
-		for _, candidate := range []string{
-			filepath.Join(dir, localConfigDirName, defaultConfigName),
-			filepath.Join(dir, defaultConfigName),
-		} {
-			info, err := os.Stat(candidate)
-			if err == nil && !info.IsDir() {
-				return candidate, true
-			}
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
 }
 
 func buildConfigResolutionCandidate(precedence int, source, rawPath string) configResolutionCandidate {

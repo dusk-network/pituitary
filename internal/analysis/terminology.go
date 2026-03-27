@@ -151,9 +151,7 @@ func CheckTerminologyContext(ctx context.Context, cfg *config.Config, request Te
 	findings := auditTerminologyArtifacts(artifacts, matchers, evidenceSections)
 
 	warningSpecs := make([]specDocument, 0, len(anchors))
-	for _, spec := range anchors {
-		warningSpecs = append(warningSpecs, spec)
-	}
+	warningSpecs = append(warningSpecs, anchors...)
 	warnings = append(warnings, buildSpecInferenceWarnings("terminology audit", warningSpecs...)...)
 
 	return &TerminologyAuditResult{

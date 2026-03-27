@@ -272,6 +272,7 @@ func buildFixFileResult(cfg *config.Config, record model.DocRecord, remediation 
 	if err != nil {
 		return FixFileResult{}, err
 	}
+	// #nosec G304 -- path is resolved from a workspace source reference before reading.
 	bodyBytes, err := os.ReadFile(path)
 	if err != nil {
 		return FixFileResult{}, fmt.Errorf("read %s: %w", path, err)
@@ -508,6 +509,7 @@ func allMatchIndicesFold(text, needle string) []int {
 }
 
 func applyFixEdits(path, expectedContent, expectedChecksum string, edits []plannedFixEdit) error {
+	// #nosec G304 -- path is the previously planned workspace file being updated in place.
 	currentBytes, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s before apply: %w", path, err)

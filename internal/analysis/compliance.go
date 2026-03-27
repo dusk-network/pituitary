@@ -286,6 +286,7 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			return nil, fmt.Errorf("path %q is a directory; --path expects a file", rawPath)
 		}
 
+		// #nosec G304 -- absPath is resolved under the workspace root by resolveWorkspaceFilePath.
 		data, err := os.ReadFile(absPath)
 		if err != nil {
 			return nil, fmt.Errorf("read path %q: %w", rawPath, err)
@@ -495,7 +496,7 @@ func parseDiffPathToken(token string) string {
 	token = stringsTrimSpace(token)
 	token = strings.TrimPrefix(token, "a/")
 	token = strings.TrimPrefix(token, "b/")
-	if token == "" || token == "/dev/null" {
+	if token == "" || token == os.DevNull {
 		return ""
 	}
 	return normalizeCompliancePath(token)

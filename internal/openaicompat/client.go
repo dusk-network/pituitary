@@ -200,7 +200,7 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 
 		retryAfter := retryAfterDuration(resp.Header.Get("Retry-After"))
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, responseSizeLimit))
-		resp.Body.Close()
+		closeErr := resp.Body.Close()
 		if readErr != nil {
 			err = NewDependencyUnavailable(client.Runtime, "read %s response: %v", client.Runtime, readErr)
 		} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -215,9 +215,15 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 		} else {
 			value, decodeErr := decode(resp, responseBody)
 			if decodeErr == nil {
+				if closeErr != nil {
+					return zero, NewDependencyUnavailable(client.Runtime, "close %s response: %v", client.Runtime, closeErr)
+				}
 				return value, nil
 			}
 			err = decodeErr
+		}
+		if closeErr != nil && err == nil {
+			err = NewDependencyUnavailable(client.Runtime, "close %s response: %v", client.Runtime, closeErr)
 		}
 
 		lastErr = err
@@ -243,7 +249,7 @@ func shouldRetry(err error, statusCode int) bool {
 
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return netErr.Timeout() || netErr.Temporary()
+		return netErr.Timeout()
 	}
 	if err == nil {
 		return false
