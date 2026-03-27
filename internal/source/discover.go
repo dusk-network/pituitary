@@ -3,7 +3,6 @@ package source
 import (
 	"fmt"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -212,6 +211,7 @@ func discoverSpecBundleCandidates(workspaceRoot string) ([]discoveredCandidate, 
 
 func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
+	// #nosec G304 -- specPath is the fixed bundle manifest inside a discovered workspace directory.
 	specBytes, err := os.ReadFile(specPath)
 	if err != nil {
 		return "", "", fmt.Errorf("read discovered spec bundle %q: %w", filepath.ToSlash(bundleDir), err)
@@ -221,6 +221,10 @@ func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 		return "", "", fmt.Errorf("parse discovered spec bundle %q: %w", filepath.ToSlash(specPath), err)
 	}
 	bodyPath := filepath.Clean(filepath.Join(bundleDir, raw.Body))
+	if !pathWithinRoot(bundleDir, bodyPath) {
+		return "", "", fmt.Errorf("read discovered spec body %q: path escapes bundle", filepath.ToSlash(bodyPath))
+	}
+	// #nosec G304 -- bodyPath is validated to remain inside the discovered bundle directory.
 	bodyBytes, err := os.ReadFile(bodyPath)
 	if err != nil {
 		return "", "", fmt.Errorf("read discovered spec body %q: %w", filepath.ToSlash(bodyPath), err)
@@ -230,6 +234,7 @@ func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 
 func isValidDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
+	// #nosec G304 -- specPath is the fixed bundle manifest inside a discovered workspace directory.
 	specBytes, err := os.ReadFile(specPath)
 	if err != nil {
 		return false, nil
@@ -302,6 +307,7 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 }
 
 func classifyMarkdownCandidate(workspaceRoot, path string) (string, discoveredCandidate, bool, error) {
+	// #nosec G304 -- path comes from filepath.WalkDir rooted at the workspace.
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", discoveredCandidate{}, false, nil
@@ -728,9 +734,11 @@ func writeDiscoveredConfig(path, content string) error {
 		return fmt.Errorf("stat config path: %w", err)
 	}
 
+	// #nosec G301 -- generated config directories use normal checkout permissions for repo files.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
+	// #nosec G306 -- discovered config files are non-secret repo files intended to be readable by standard tooling.
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write discovered config: %w", err)
 	}
@@ -881,8 +889,4 @@ func minInt(left, right int) int {
 		return left
 	}
 	return right
-}
-
-func discoveryPathJoin(parts ...string) string {
-	return pathpkg.Join(parts...)
 }

@@ -288,10 +288,6 @@ func validateDraftSpec(record model.SpecRecord) error {
 	return nil
 }
 
-func loadIndexedSpecs(db *sql.DB, refs []string) (map[string]specDocument, error) {
-	return loadIndexedSpecsContext(context.Background(), db, refs)
-}
-
 func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, refs []string) (map[string]specDocument, error) {
 	artifacts, err := loadIndexedArtifactRowsContext(ctx, db, refs)
 	if err != nil {
@@ -328,10 +324,6 @@ func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, refs []string) (ma
 	}
 
 	return specs, nil
-}
-
-func loadIndexedArtifactRows(db *sql.DB, refs []string) ([]indexedArtifactRow, error) {
-	return loadIndexedArtifactRowsContext(context.Background(), db, refs)
 }
 
 func loadIndexedArtifactRowsContext(ctx context.Context, db *sql.DB, refs []string) ([]indexedArtifactRow, error) {
@@ -379,10 +371,6 @@ WHERE kind = ?`)
 		return nil, fmt.Errorf("iterate indexed specs: %w", err)
 	}
 	return result, nil
-}
-
-func loadSpecEdges(db *sql.DB, specs map[string]specDocument) error {
-	return loadSpecEdgesContext(context.Background(), db, specs)
 }
 
 func loadSpecEdgesContext(ctx context.Context, db *sql.DB, specs map[string]specDocument) error {
@@ -437,10 +425,6 @@ ORDER BY from_ref ASC, edge_type ASC, to_ref ASC`)
 		return fmt.Errorf("iterate spec edges: %w", err)
 	}
 	return nil
-}
-
-func loadSpecSections(db *sql.DB, specs map[string]specDocument) error {
-	return loadSpecSectionsContext(context.Background(), db, specs)
 }
 
 func loadSpecSectionsContext(ctx context.Context, db *sql.DB, specs map[string]specDocument) error {

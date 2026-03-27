@@ -36,10 +36,8 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if err := validateOverlapRequest(OverlapRequest{
-		SpecRef:    request.SpecRef,
-		SpecRecord: request.SpecRecord,
-	}); err != nil {
+	overlapRequest := OverlapRequest(request)
+	if err := validateOverlapRequest(overlapRequest); err != nil {
 		return nil, err
 	}
 
@@ -54,10 +52,7 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 		return nil, err
 	}
 
-	candidate, err := loadCandidate(repo, OverlapRequest{
-		SpecRef:    request.SpecRef,
-		SpecRecord: request.SpecRecord,
-	}, nil)
+	candidate, err := loadCandidate(repo, overlapRequest, nil)
 	if err != nil {
 		return nil, err
 	}

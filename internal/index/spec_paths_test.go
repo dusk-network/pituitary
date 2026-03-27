@@ -60,8 +60,6 @@ func TestResolveIndexedSpecRefWithConfigContextClassifiesMissingPath(t *testing.
 }
 
 func TestResolveIndexedSpecRefsWithConfigContextMatchesCaseInsensitivelyOnWindows(t *testing.T) {
-	t.Parallel()
-
 	previous := indexedSpecPathCaseInsensitive
 	indexedSpecPathCaseInsensitive = true
 	t.Cleanup(func() {

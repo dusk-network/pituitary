@@ -93,8 +93,6 @@ func TestFixDocDriftAppliesEditsAndMarksIndexStale(t *testing.T) {
 }
 
 func TestFixDocDriftMatchesPathCaseInsensitivelyOnWindows(t *testing.T) {
-	t.Parallel()
-
 	previous := fixPathCaseInsensitive
 	fixPathCaseInsensitive = true
 	t.Cleanup(func() {

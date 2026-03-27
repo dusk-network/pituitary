@@ -154,12 +154,6 @@ func (p renderPresentation) blockMedium() string {
 	}
 	return p.yellow("[~]")
 }
-func (p renderPresentation) blockOK() string {
-	if p.utf8 {
-		return p.green("██")
-	}
-	return p.green("[+]")
-}
 func (p renderPresentation) okBadge() string {
 	if p.utf8 {
 		return p.green("██ OK")

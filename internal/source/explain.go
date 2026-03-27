@@ -214,6 +214,7 @@ func explainMarkdownContractSource(workspaceRoot string, explanation SourceFileE
 		return explanation, nil
 	}
 
+	// #nosec G304 -- absolutePath is derived from the selected workspace source and explanation target.
 	body, err := os.ReadFile(absolutePath)
 	if err != nil {
 		return SourceFileExplanation{}, fmt.Errorf(

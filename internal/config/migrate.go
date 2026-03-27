@@ -31,6 +31,7 @@ func MigrateFile(path string) (*MigrationResult, error) {
 		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 
+	// #nosec G304 -- configPath is the explicit config file selected for migration.
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", configPath, err)

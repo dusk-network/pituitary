@@ -21,10 +21,6 @@ var sqliteReadinessProbe = probeSQLiteReadyContext
 
 const sqliteReadinessDSN = "file:pituitary-sqlite-ready?mode=memory&cache=shared"
 
-func openReadWrite(path string) (*sql.DB, error) {
-	return openReadWriteContext(context.Background(), path)
-}
-
 func openReadWriteContext(ctx context.Context, path string) (*sql.DB, error) {
 	if err := CheckSQLiteReadyContext(ctx); err != nil {
 		return nil, err

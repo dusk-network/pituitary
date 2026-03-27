@@ -2,7 +2,7 @@
 
 Pituitary currently requires:
 
-- Go 1.25+
+- Go 1.25.8+
 - `make`
 - a CGO-capable C toolchain for the `sqlite-vec` path
 

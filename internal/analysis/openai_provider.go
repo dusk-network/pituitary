@@ -22,7 +22,6 @@ type openAICompatibleAnalysisProvider struct {
 }
 
 type openAICompatibleChatRequest = openaicompat.ChatRequest
-type openAICompatibleChatMessage = openaicompat.ChatMessage
 
 type compareAnalysisPrompt struct {
 	Command     string               `json:"command"`
