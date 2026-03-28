@@ -3,6 +3,7 @@ package source
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -13,119 +14,69 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/diag"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/sdk"
 )
 
-// LoadResult contains canonical records emitted by configured source adapters.
-type LoadResult struct {
-	Specs   []model.SpecRecord
-	Docs    []model.DocRecord
-	Sources []LoadSourceSummary
+func init() {
+	sdk.Register(config.AdapterFilesystem, func() sdk.Adapter {
+		return &filesystemAdapter{}
+	})
 }
 
-// LoadSourceSummary describes the records contributed by one configured source.
-type LoadSourceSummary struct {
-	Name      string `json:"name"`
-	Adapter   string `json:"adapter"`
-	Kind      string `json:"kind"`
-	Path      string `json:"path"`
-	ItemCount int    `json:"item_count"`
-	SpecCount int    `json:"spec_count,omitempty"`
-	DocCount  int    `json:"doc_count,omitempty"`
-}
+type filesystemAdapter struct{}
 
-// LoadOptions controls diagnostic behavior while loading configured sources.
-type LoadOptions struct {
-	Logger *diag.Logger
-}
+func (a *filesystemAdapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterResult, error) {
+	_ = ctx
 
-// LoadFromConfig loads and normalizes all configured filesystem sources.
-func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
-	return LoadFromConfigWithOptions(cfg, LoadOptions{})
-}
-
-// LoadFromConfigWithOptions loads and normalizes all configured filesystem sources.
-func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadResult, error) {
-	logger := options.Logger
-	result := &LoadResult{
-		Sources: make([]LoadSourceSummary, 0, len(cfg.Sources)),
-	}
-	seenSpecs := make(map[string]artifactOrigin)
-	seenDocs := make(map[string]artifactOrigin)
-	logger.Infof("source", "loading %d configured source(s)", len(cfg.Sources))
-
-	for _, source := range cfg.Sources {
-		logger.Debugf("source", "loading source %q (%s %s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
-		summary := LoadSourceSummary{
-			Name:    source.Name,
-			Adapter: source.Adapter,
-			Kind:    source.Kind,
-			Path:    source.Path,
-		}
-
-		switch {
-		case source.Adapter != config.AdapterFilesystem:
-			return nil, fmt.Errorf("source %q: unsupported adapter %q", source.Name, source.Adapter)
-		case source.Kind == config.SourceKindSpecBundle:
-			specs, err := loadSpecBundles(cfg.Workspace.RootPath, source)
-			if err != nil {
-				return nil, err
-			}
-			if err := appendUniqueSpecRecords(result, seenSpecs, source, specs); err != nil {
-				return nil, err
-			}
-			summary.SpecCount = len(specs)
-			summary.ItemCount = len(specs)
-		case source.Kind == config.SourceKindMarkdownDocs:
-			docs, err := loadMarkdownDocs(cfg.Workspace.RootPath, source)
-			if err != nil {
-				return nil, err
-			}
-			if err := appendUniqueDocRecords(result, seenDocs, source, docs); err != nil {
-				return nil, err
-			}
-			summary.DocCount = len(docs)
-			summary.ItemCount = len(docs)
-		case source.Kind == config.SourceKindMarkdownContract:
-			specs, err := loadMarkdownContracts(cfg.Workspace.RootPath, source)
-			if err != nil {
-				return nil, err
-			}
-			if err := appendUniqueSpecRecords(result, seenSpecs, source, specs); err != nil {
-				return nil, err
-			}
-			summary.SpecCount = len(specs)
-			summary.ItemCount = len(specs)
-		default:
-			return nil, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
-		}
-
-		result.Sources = append(result.Sources, summary)
-		if summary.ItemCount == 0 {
-			logger.Warnf("source", "source %q (%s %s) matched 0 item(s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
-			continue
-		}
-		logger.Infof(
-			"source",
-			"source %q (%s %s) loaded %d item(s) (%d spec(s), %d doc(s))",
-			source.Name,
-			source.Kind,
-			filepath.ToSlash(source.Path),
-			summary.ItemCount,
-			summary.SpecCount,
-			summary.DocCount,
-		)
+	source := config.Source{
+		Name:         cfg.Name,
+		Adapter:      cfg.Adapter,
+		Kind:         cfg.Kind,
+		Path:         cfg.Path,
+		Files:        append([]string(nil), cfg.Files...),
+		Include:      append([]string(nil), cfg.Include...),
+		Exclude:      append([]string(nil), cfg.Exclude...),
+		Options:      config.CloneSourceOptions(cfg.Options),
+		ResolvedPath: resolveFilesystemSourcePath(cfg.WorkspaceRoot, cfg.Path),
 	}
 
-	sort.Slice(result.Specs, func(i, j int) bool {
-		return result.Specs[i].Ref < result.Specs[j].Ref
-	})
-	sort.Slice(result.Docs, func(i, j int) bool {
-		return result.Docs[i].Ref < result.Docs[j].Ref
-	})
+	if strings.TrimSpace(source.Path) == "" {
+		return nil, fmt.Errorf("path is required for adapter %q", config.AdapterFilesystem)
+	}
 
-	return result, nil
+	switch source.Kind {
+	case config.SourceKindSpecBundle:
+		specs, err := loadSpecBundles(cfg.WorkspaceRoot, source)
+		if err != nil {
+			return nil, err
+		}
+		return &sdk.AdapterResult{Specs: specs}, nil
+	case config.SourceKindMarkdownDocs:
+		docs, err := loadMarkdownDocs(cfg.WorkspaceRoot, source)
+		if err != nil {
+			return nil, err
+		}
+		return &sdk.AdapterResult{Docs: docs}, nil
+	case config.SourceKindMarkdownContract:
+		specs, err := loadMarkdownContracts(cfg.WorkspaceRoot, source)
+		if err != nil {
+			return nil, err
+		}
+		return &sdk.AdapterResult{Specs: specs}, nil
+	default:
+		return nil, fmt.Errorf("unsupported kind %q", source.Kind)
+	}
+}
+
+func resolveFilesystemSourcePath(workspaceRoot, sourcePath string) string {
+	if strings.TrimSpace(sourcePath) == "" {
+		return ""
+	}
+	if filepath.IsAbs(sourcePath) {
+		return filepath.Clean(sourcePath)
+	}
+	return filepath.Clean(filepath.Join(workspaceRoot, sourcePath))
 }
 
 type artifactOrigin struct {

@@ -19,7 +19,9 @@ func parse(file io.Reader) (rawConfig, error) {
 	}
 
 	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
-		return rawConfig{}, formatUndecodedKeys(undecoded)
+		if err := formatUndecodedKeys(undecoded); err != nil {
+			return rawConfig{}, err
+		}
 	}
 
 	return cfg, nil
@@ -29,6 +31,9 @@ func formatUndecodedKeys(keys []toml.Key) error {
 	messages := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
+		if isOpaqueSourceOptionKey(key) {
+			continue
+		}
 		message := undecodedKeyMessage(key)
 		if _, exists := seen[message]; exists {
 			continue
@@ -37,7 +42,14 @@ func formatUndecodedKeys(keys []toml.Key) error {
 		messages = append(messages, message)
 	}
 	sort.Strings(messages)
+	if len(messages) == 0 {
+		return nil
+	}
 	return errors.New(strings.Join(messages, "\n"))
+}
+
+func isOpaqueSourceOptionKey(key toml.Key) bool {
+	return len(key) >= 3 && key[0] == "sources" && key[1] == "options"
 }
 
 func undecodedKeyMessage(key toml.Key) string {

@@ -43,7 +43,7 @@ applies_to = [                    # optional: governed code/config paths
 `pituitary init` generates `.pituitary/pituitary.toml` inside your project. You can also hand-write one:
 
 ```toml
-schema_version = 2
+schema_version = 3
 
 [workspace]
 root = "."
@@ -70,6 +70,26 @@ path = "rfcs"
 include = ["**/*.md"]
 ```
 
+### Example: Optional GitHub issues source
+
+Schema `3` also supports adapter-specific typed options under `[sources.options]`:
+
+```toml
+[[sources]]
+name = "github-issues"
+adapter = "github"
+kind = "issue"
+
+[sources.options]
+repo = "dusk-network/pituitary"
+labels = ["spec", "rfc"]
+state = "open"
+api_key_env = "GITHUB_TOKEN"  # optional for private repos or higher rate limits
+per_page = 100
+```
+
+The built-in GitHub adapter indexes RFC/spec-style issues as `SpecRecord`s and other issues as `DocRecord`s. Keep GitHub-specific settings inside `sources.options`; the kernel still treats `name`, `adapter`, `kind`, `path`, `files`, `include`, and `exclude` as the explicit shared config surface.
+
 ### Example: Indexing AI agent instructions
 
 If your repo uses CLAUDE.md, AGENTS.md, or similar AI-policy files, add them as a `markdown_docs` or `markdown_contract` source:
@@ -92,6 +112,8 @@ This indexes them alongside your specs so drift detection and search cover them.
 **`markdown_docs`**: Free-form Markdown files such as guides and runbooks. Indexed for drift detection and search.
 
 **`markdown_contract`**: Markdown files treated as inferred specs. Pituitary extracts metadata from `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` lines when present, or falls back to stable workspace-derived refs like `contract://rfcs/auth/session-policy` with status `draft`.
+
+**`issue`**: Optional adapter-defined kind used by the built-in GitHub source adapter. GitHub issues labeled like specs/RFCs are normalized as specs; other issues are normalized as docs.
 
 ## Selectors
 

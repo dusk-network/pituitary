@@ -59,10 +59,10 @@ specs_dir = "specs"
 	if got, want := payload.Result.DetectedSchema, "project.v1"; got != want {
 		t.Fatalf("detected schema = %q, want %q", got, want)
 	}
-	if got, want := payload.Result.TargetSchemaVersion, 2; got != want {
+	if got, want := payload.Result.TargetSchemaVersion, 3; got != want {
 		t.Fatalf("target schema version = %d, want %d", got, want)
 	}
-	if !strings.Contains(payload.Result.Config, "schema_version = 2") {
+	if !strings.Contains(payload.Result.Config, "schema_version = 3") {
 		t.Fatalf("migrated config %q does not contain schema_version", payload.Result.Config)
 	}
 }
@@ -93,7 +93,7 @@ specs_dir = "specs"
 	if err != nil {
 		t.Fatalf("read migrated config: %v", err)
 	}
-	if !strings.Contains(string(content), "schema_version = 2") {
+	if !strings.Contains(string(content), "schema_version = 3") {
 		t.Fatalf("written config %q does not contain schema_version", string(content))
 	}
 	if strings.Contains(string(content), "[project]") {

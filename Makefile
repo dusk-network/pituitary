@@ -38,6 +38,10 @@ test-race:
 	$(GO) test -race ./...
 
 vet:
+	@! grep -R --include='*.go' -n '"github.com/dusk-network/pituitary/extensions' internal/ >/dev/null || { \
+		echo 'internal/ must not import extensions/'; \
+		exit 1; \
+	}
 	$(GO) vet ./...
 
 analyze:

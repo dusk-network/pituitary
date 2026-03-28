@@ -6,7 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/sdk"
 )
+
+func init() {
+	sdk.Register("github", func() sdk.Adapter {
+		return nil
+	})
+}
 
 func TestLoadResolvesWorkspaceAndSourcePaths(t *testing.T) {
 	t.Parallel()
@@ -680,11 +688,82 @@ path = "specs"
 	}
 }
 
+func TestLoadAcceptsNonFilesystemAdapterOptions(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	content := `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "github-issues"
+adapter = "github"
+kind = "issue"
+
+[sources.options]
+repo = "dusk-network/pituitary"
+labels = ["spec", "rfc"]
+state = "open"
+per_page = 50
+include_closed = false
+
+[sources.options.headers]
+accept = "application/vnd.github+json"
+`
+
+	raw, err := parse(strings.NewReader(strings.TrimSpace(content)))
+	if err != nil {
+		t.Fatalf("parse() error = %v", err)
+	}
+	if got, want := raw.Workspace.Root, "."; got != want {
+		t.Fatalf("raw workspace root = %q, want %q (raw = %#v)", got, want, raw)
+	}
+	if got, want := len(raw.Sources), 1; got != want {
+		t.Fatalf("raw source count = %d, want %d (raw = %#v)", got, want, raw)
+	}
+	cfg, err := buildFromRaw(configPath, raw, true)
+	if err != nil {
+		t.Fatalf("buildFromRaw() error = %v", err)
+	}
+	source := cfg.Sources[0]
+	if got, want := source.Path, ""; got != want {
+		t.Fatalf("source path = %q, want %q", got, want)
+	}
+	if source.ResolvedPath != "" {
+		t.Fatalf("resolved path = %q, want empty", source.ResolvedPath)
+	}
+	if got, want := source.Options["repo"], "dusk-network/pituitary"; got != want {
+		t.Fatalf("repo option = %#v, want %#v", got, want)
+	}
+	labels, ok := source.Options["labels"].([]any)
+	if !ok {
+		t.Fatalf("labels option type = %T, want []any", source.Options["labels"])
+	}
+	if got, want := optionStrings(labels), []string{"spec", "rfc"}; !equalStringSlices(got, want) {
+		t.Fatalf("labels option = %#v, want %#v", got, want)
+	}
+	if got, want := source.Options["per_page"], int64(50); got != want {
+		t.Fatalf("per_page option = %#v, want %#v", got, want)
+	}
+	if got, want := source.Options["include_closed"], false; got != want {
+		t.Fatalf("include_closed option = %#v, want %#v", got, want)
+	}
+	headers, ok := source.Options["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers option type = %T, want map[string]any", source.Options["headers"])
+	}
+	if got, want := headers["accept"], "application/vnd.github+json"; got != want {
+		t.Fatalf("headers.accept = %#v, want %#v", got, want)
+	}
+}
+
 func TestLoadRejectsUnknownAdapter(t *testing.T) {
 	t.Parallel()
 
 	repo := t.TempDir()
-	mustMkdirAll(t, filepath.Join(repo, "specs"))
 	configPath := filepath.Join(repo, "pituitary.toml")
 	writeFile(t, configPath, `
 [workspace]
@@ -693,7 +772,7 @@ index_path = ".pituitary/pituitary.db"
 
 [[sources]]
 name = "specs"
-adapter = "github"
+adapter = "missing"
 kind = "spec_bundle"
 path = "specs"
 `)
@@ -702,8 +781,75 @@ path = "specs"
 	if err == nil {
 		t.Fatal("Load() error = nil, want validation error")
 	}
-	if !strings.Contains(err.Error(), `source "specs".adapter: unsupported adapter "github"`) {
+	if !strings.Contains(err.Error(), `source "specs".adapter: unknown adapter "missing"`) {
 		t.Fatalf("Load() error = %q, want unknown adapter details", err)
+	}
+	if !strings.Contains(err.Error(), `registered adapters: filesystem, github`) {
+		t.Fatalf("Load() error = %q, want registered adapter details", err)
+	}
+}
+
+func TestRenderRoundTripsSourceOptions(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:      ".",
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Sources: []Source{
+			{
+				Name:    "docs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindMarkdownDocs,
+				Path:    "docs",
+				Options: map[string]any{
+					"labels":         []string{"spec", "rfc"},
+					"include_closed": false,
+					"per_page":       50,
+					"headers": map[string]any{
+						"accept": "application/json",
+					},
+				},
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	options := loaded.Sources[0].Options
+	labels, ok := options["labels"].([]any)
+	if !ok {
+		t.Fatalf("labels option type = %T, want []any", options["labels"])
+	}
+	if got, want := optionStrings(labels), []string{"spec", "rfc"}; !equalStringSlices(got, want) {
+		t.Fatalf("labels option = %#v, want %#v", got, want)
+	}
+	if got, want := options["include_closed"], false; got != want {
+		t.Fatalf("include_closed option = %#v, want %#v", got, want)
+	}
+	if got, want := options["per_page"], int64(50); got != want {
+		t.Fatalf("per_page option = %#v, want %#v", got, want)
+	}
+	headers, ok := options["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers option type = %T, want map[string]any", options["headers"])
+	}
+	if got, want := headers["accept"], "application/json"; got != want {
+		t.Fatalf("headers.accept = %#v, want %#v", got, want)
 	}
 }
 
@@ -808,4 +954,16 @@ func equalStringSlices(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func optionStrings(values []any) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return nil
+		}
+		result = append(result, text)
+	}
+	return result
 }

@@ -113,7 +113,7 @@ path = "specs"
 	}
 }
 
-func TestRunIndexReportsInvalidConfig(t *testing.T) {
+func TestRunIndexRejectsUnknownAdapterInConfig(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `
 [workspace]
@@ -122,7 +122,7 @@ index_path = ".pituitary/pituitary.db"
 
 [[sources]]
 name = "specs"
-adapter = "github"
+adapter = "missing"
 kind = "spec_bundle"
 path = "specs"
 `)
@@ -142,7 +142,7 @@ path = "specs"
 	if !strings.Contains(stderr.String(), `pituitary index: invalid config:`) {
 		t.Fatalf("runIndex() stderr %q does not contain invalid-config prefix", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), `unsupported adapter "github"`) {
+	if !strings.Contains(stderr.String(), `unknown adapter "missing"`) {
 		t.Fatalf("runIndex() stderr %q does not contain adapter detail", stderr.String())
 	}
 }

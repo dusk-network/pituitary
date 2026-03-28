@@ -8,12 +8,15 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/dusk-network/pituitary/sdk"
 )
 
 const (
-	CurrentSchemaVersion       = 2
+	CurrentSchemaVersion       = 3
 	AdapterFilesystem          = "filesystem"
 	SourceKindSpecBundle       = "spec_bundle"
 	SourceKindMarkdownDocs     = "markdown_docs"
@@ -50,6 +53,7 @@ type Source struct {
 	Files        []string
 	Include      []string
 	Exclude      []string
+	Options      map[string]any
 	ResolvedPath string
 }
 
@@ -87,13 +91,14 @@ type rawRuntime struct {
 }
 
 type rawSource struct {
-	Name    string   `toml:"name"`
-	Adapter string   `toml:"adapter"`
-	Kind    string   `toml:"kind"`
-	Path    string   `toml:"path"`
-	Files   []string `toml:"files"`
-	Include []string `toml:"include"`
-	Exclude []string `toml:"exclude"`
+	Name    string         `toml:"name"`
+	Adapter string         `toml:"adapter"`
+	Kind    string         `toml:"kind"`
+	Path    string         `toml:"path"`
+	Files   []string       `toml:"files"`
+	Include []string       `toml:"include"`
+	Exclude []string       `toml:"exclude"`
+	Options map[string]any `toml:"options"`
 }
 
 type rawRuntimeProvider struct {
@@ -205,6 +210,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Files:   append([]string(nil), source.Files...),
 			Include: append([]string(nil), source.Include...),
 			Exclude: append([]string(nil), source.Exclude...),
+			Options: CloneSourceOptions(source.Options),
 		})
 	}
 	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
@@ -247,6 +253,54 @@ func parseQuotedString(value string) (string, error) {
 	return parsed, nil
 }
 
+func CloneSourceOptions(options map[string]any) map[string]any {
+	if len(options) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(options))
+	for key, value := range options {
+		cloned[key] = CloneOptionValue(value)
+	}
+	return cloned
+}
+
+func CloneOptionValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return CloneSourceOptions(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for i := range typed {
+			cloned[i] = CloneOptionValue(typed[i])
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return typed
+	}
+}
+
+func RegisteredAdapterNames() []string {
+	names := map[string]struct{}{
+		AdapterFilesystem: {},
+	}
+	for _, name := range sdk.RegisteredAdapterNames() {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		names[name] = struct{}{}
+	}
+
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
 // Validate resolves derived paths and verifies that a config can be used by the
 // current bootstrap runtime.
 func Validate(cfg *Config) error {
@@ -255,6 +309,11 @@ func Validate(cfg *Config) error {
 
 func validate(cfg *Config) error {
 	var errs validationErrors
+	registeredAdapters := RegisteredAdapterNames()
+	registeredAdapterSet := make(map[string]struct{}, len(registeredAdapters))
+	for _, name := range registeredAdapters {
+		registeredAdapterSet[name] = struct{}{}
+	}
 
 	if cfg.Workspace.Root == "" {
 		errs.add("workspace.root: value is required")
@@ -298,19 +357,22 @@ func validate(cfg *Config) error {
 
 		if source.Adapter == "" {
 			errs.add("%s.adapter: value is required", label)
-		} else if source.Adapter != AdapterFilesystem {
-			errs.add("%s.adapter: unsupported adapter %q (v1 supports only %q)", label, source.Adapter, AdapterFilesystem)
+		} else if _, exists := registeredAdapterSet[source.Adapter]; !exists {
+			errs.add(
+				"%s.adapter: unknown adapter %q (registered adapters: %s)",
+				label,
+				source.Adapter,
+				strings.Join(registeredAdapters, ", "),
+			)
 		}
 
 		if source.Kind == "" {
 			errs.add("%s.kind: value is required", label)
-		} else if source.Kind != SourceKindSpecBundle && source.Kind != SourceKindMarkdownDocs && source.Kind != SourceKindMarkdownContract {
-			errs.add("%s.kind: unsupported kind %q", label, source.Kind)
 		}
 
-		if source.Path == "" {
+		filesystemSource := source.Adapter == AdapterFilesystem
+		if strings.TrimSpace(source.Path) == "" && filesystemSource {
 			errs.add("%s.path: value is required", label)
-			continue
 		}
 		files := make([]string, 0, len(source.Files))
 		seenFiles := make(map[string]struct{}, len(source.Files))
@@ -320,11 +382,11 @@ func validate(cfg *Config) error {
 				errs.add("%s.files[%d]: %v", label, i, err)
 				continue
 			}
-			if source.Kind == SourceKindSpecBundle && pathpkg.Base(normalized) != "spec.toml" {
+			if filesystemSource && source.Kind == SourceKindSpecBundle && pathpkg.Base(normalized) != "spec.toml" {
 				errs.add("%s.files[%d]: %q must point to a spec.toml file for kind %q", label, i, value, source.Kind)
 				continue
 			}
-			if (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
+			if filesystemSource && (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
 				errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
 				continue
 			}
@@ -335,6 +397,9 @@ func validate(cfg *Config) error {
 			files = append(files, normalized)
 		}
 		source.Files = files
+		if filesystemSource && len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
+			errs.add("%s.files: path is required when files are set", label)
+		}
 		for _, pattern := range source.Include {
 			if strings.TrimSpace(pattern) == "" {
 				errs.add("%s.include: patterns must not be empty", label)
@@ -356,22 +421,26 @@ func validate(cfg *Config) error {
 		if cfg.Workspace.RootPath == "" {
 			continue
 		}
-		source.ResolvedPath = resolvePath(cfg.Workspace.RootPath, source.Path)
-		info, err := os.Stat(source.ResolvedPath)
-		switch {
-		case err == nil && !info.IsDir():
-			errs.add("%s.path: %q is not a directory", label, source.Path)
-		case err != nil:
-			errs.add("%s.path: %q does not exist", label, source.Path)
+		if strings.TrimSpace(source.Path) != "" {
+			source.ResolvedPath = resolvePath(cfg.Workspace.RootPath, source.Path)
 		}
-		for i, relFile := range source.Files {
-			resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
-			info, err := os.Stat(resolvedFile)
+		if filesystemSource && source.ResolvedPath != "" {
+			info, err := os.Stat(source.ResolvedPath)
 			switch {
-			case err == nil && info.IsDir():
-				errs.add("%s.files[%d]: %q is a directory", label, i, relFile)
+			case err == nil && !info.IsDir():
+				errs.add("%s.path: %q is not a directory", label, source.Path)
 			case err != nil:
-				errs.add("%s.files[%d]: %q does not exist", label, i, relFile)
+				errs.add("%s.path: %q does not exist", label, source.Path)
+			}
+			for i, relFile := range source.Files {
+				resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
+				info, err := os.Stat(resolvedFile)
+				switch {
+				case err == nil && info.IsDir():
+					errs.add("%s.files[%d]: %q is a directory", label, i, relFile)
+				case err != nil:
+					errs.add("%s.files[%d]: %q does not exist", label, i, relFile)
+				}
 			}
 		}
 	}
