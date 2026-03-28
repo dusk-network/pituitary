@@ -54,7 +54,7 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return fmt.Sprintf("unsupported runtime section %q", key[1])
+			return fmt.Sprintf("unsupported runtime field %q", key[1])
 		default:
 			return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
 		}
