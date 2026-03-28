@@ -225,7 +225,7 @@ provider = "fixture"
 	if !strings.Contains(stderr.String(), "line ") {
 		t.Fatalf("runIndex() stderr %q does not contain line information", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "unterminated array") {
+	if !strings.Contains(stderr.String(), "array terminator") {
 		t.Fatalf("runIndex() stderr %q does not contain parse detail", stderr.String())
 	}
 }

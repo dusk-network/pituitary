@@ -151,8 +151,8 @@ root = "other"
 		if err == nil {
 			t.Fatal("parse() error = nil, want duplicate workspace field error")
 		}
-		if !strings.Contains(err.Error(), "duplicate workspace.root; first defined at line 3") {
-			t.Fatalf("parse() error = %q, want duplicate workspace.root details", err)
+		if !strings.Contains(err.Error(), `workspace.root`) || !strings.Contains(err.Error(), "already been defined") {
+			t.Fatalf("parse() error = %q, want duplicate workspace.root details from TOML parser", err)
 		}
 	})
 
@@ -175,8 +175,8 @@ include = ["runbooks/*.md"]
 		if err == nil {
 			t.Fatal("parse() error = nil, want duplicate sources array field error")
 		}
-		if !strings.Contains(err.Error(), "duplicate sources.include; first defined at line 11") {
-			t.Fatalf("parse() error = %q, want duplicate sources.include details", err)
+		if !strings.Contains(err.Error(), `sources.include`) || !strings.Contains(err.Error(), "already been defined") {
+			t.Fatalf("parse() error = %q, want duplicate sources.include details from TOML parser", err)
 		}
 	})
 }
@@ -391,8 +391,8 @@ include = [
 	if err == nil {
 		t.Fatal("Load() error = nil, want unterminated array error")
 	}
-	if !strings.Contains(err.Error(), `sources.include: unterminated array`) {
-		t.Fatalf("Load() error = %q, want unterminated selector-array detail", err)
+	if !strings.Contains(err.Error(), `sources.include`) || !strings.Contains(err.Error(), "array terminator") {
+		t.Fatalf("Load() error = %q, want unterminated selector-array detail from TOML parser", err)
 	}
 }
 
@@ -428,8 +428,8 @@ provider = "fixture"
 	if !strings.Contains(err.Error(), "line ") {
 		t.Fatalf("Load() error = %q, want line detail", err)
 	}
-	if !strings.Contains(err.Error(), `sources.include: unterminated array`) {
-		t.Fatalf("Load() error = %q, want unterminated selector-array detail", err)
+	if !strings.Contains(err.Error(), `sources.include`) || !strings.Contains(err.Error(), "array terminator") {
+		t.Fatalf("Load() error = %q, want unterminated selector-array detail from TOML parser", err)
 	}
 }
 

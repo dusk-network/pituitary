@@ -1,11 +1,9 @@
 package config
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -72,35 +70,39 @@ type RuntimeProvider struct {
 }
 
 type rawConfig struct {
-	schemaVersion   int
-	workspace       rawWorkspace
-	runtimeEmbedder rawRuntimeProvider
-	runtimeAnalysis rawRuntimeProvider
-	sources         []rawSource
+	SchemaVersion int          `toml:"schema_version"`
+	Workspace     rawWorkspace `toml:"workspace"`
+	Runtime       rawRuntime   `toml:"runtime"`
+	Sources       []rawSource  `toml:"sources"`
 }
 
 type rawWorkspace struct {
-	root      string
-	indexPath string
+	Root      string `toml:"root"`
+	IndexPath string `toml:"index_path"`
+}
+
+type rawRuntime struct {
+	Embedder rawRuntimeProvider `toml:"embedder"`
+	Analysis rawRuntimeProvider `toml:"analysis"`
 }
 
 type rawSource struct {
-	name    string
-	adapter string
-	kind    string
-	paths   string
-	files   []string
-	include []string
-	exclude []string
+	Name    string   `toml:"name"`
+	Adapter string   `toml:"adapter"`
+	Kind    string   `toml:"kind"`
+	Path    string   `toml:"path"`
+	Files   []string `toml:"files"`
+	Include []string `toml:"include"`
+	Exclude []string `toml:"exclude"`
 }
 
 type rawRuntimeProvider struct {
-	provider   string
-	model      string
-	endpoint   string
-	apiKeyEnv  string
-	timeoutMS  *int
-	maxRetries *int
+	Provider   string `toml:"provider"`
+	Model      string `toml:"model"`
+	Endpoint   string `toml:"endpoint"`
+	APIKeyEnv  string `toml:"api_key_env"`
+	TimeoutMS  *int   `toml:"timeout_ms"`
+	MaxRetries *int   `toml:"max_retries"`
 }
 
 type validationErrors struct {
@@ -167,42 +169,42 @@ func loadFromData(data []byte, configPath string) (*Config, error) {
 
 func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (*Config, error) {
 	cfg := &Config{
-		SchemaVersion: raw.schemaVersion,
+		SchemaVersion: raw.SchemaVersion,
 		ConfigPath:    configPath,
 		ConfigDir:     configBaseDir(configPath),
 		Workspace: Workspace{
-			Root:      raw.workspace.root,
-			IndexPath: raw.workspace.indexPath,
+			Root:      raw.Workspace.Root,
+			IndexPath: raw.Workspace.IndexPath,
 		},
 		Runtime: Runtime{
 			Embedder: RuntimeProvider{
-				Provider:   defaultString(raw.runtimeEmbedder.provider, RuntimeProviderFixture),
-				Model:      raw.runtimeEmbedder.model,
-				Endpoint:   raw.runtimeEmbedder.endpoint,
-				APIKeyEnv:  raw.runtimeEmbedder.apiKeyEnv,
-				TimeoutMS:  defaultOptionalInt(raw.runtimeEmbedder.timeoutMS, 1000),
-				MaxRetries: defaultOptionalInt(raw.runtimeEmbedder.maxRetries, 0),
+				Provider:   defaultString(raw.Runtime.Embedder.Provider, RuntimeProviderFixture),
+				Model:      raw.Runtime.Embedder.Model,
+				Endpoint:   raw.Runtime.Embedder.Endpoint,
+				APIKeyEnv:  raw.Runtime.Embedder.APIKeyEnv,
+				TimeoutMS:  defaultOptionalInt(raw.Runtime.Embedder.TimeoutMS, 1000),
+				MaxRetries: defaultOptionalInt(raw.Runtime.Embedder.MaxRetries, 0),
 			},
 			Analysis: RuntimeProvider{
-				Provider:   defaultString(raw.runtimeAnalysis.provider, RuntimeProviderDisabled),
-				Model:      raw.runtimeAnalysis.model,
-				Endpoint:   raw.runtimeAnalysis.endpoint,
-				APIKeyEnv:  raw.runtimeAnalysis.apiKeyEnv,
-				TimeoutMS:  defaultOptionalInt(raw.runtimeAnalysis.timeoutMS, 1000),
-				MaxRetries: defaultOptionalInt(raw.runtimeAnalysis.maxRetries, 0),
+				Provider:   defaultString(raw.Runtime.Analysis.Provider, RuntimeProviderDisabled),
+				Model:      raw.Runtime.Analysis.Model,
+				Endpoint:   raw.Runtime.Analysis.Endpoint,
+				APIKeyEnv:  raw.Runtime.Analysis.APIKeyEnv,
+				TimeoutMS:  defaultOptionalInt(raw.Runtime.Analysis.TimeoutMS, 1000),
+				MaxRetries: defaultOptionalInt(raw.Runtime.Analysis.MaxRetries, 0),
 			},
 		},
-		Sources: make([]Source, 0, len(raw.sources)),
+		Sources: make([]Source, 0, len(raw.Sources)),
 	}
-	for _, source := range raw.sources {
+	for _, source := range raw.Sources {
 		cfg.Sources = append(cfg.Sources, Source{
-			Name:    source.name,
-			Adapter: source.adapter,
-			Kind:    source.kind,
-			Path:    source.paths,
-			Files:   append([]string(nil), source.files...),
-			Include: append([]string(nil), source.include...),
-			Exclude: append([]string(nil), source.exclude...),
+			Name:    source.Name,
+			Adapter: source.Adapter,
+			Kind:    source.Kind,
+			Path:    source.Path,
+			Files:   append([]string(nil), source.Files...),
+			Include: append([]string(nil), source.Include...),
+			Exclude: append([]string(nil), source.Exclude...),
 		})
 	}
 	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
@@ -234,278 +236,6 @@ func configBaseDir(configPath string) string {
 	return configDir
 }
 
-func parse(file io.Reader) (rawConfig, error) {
-	var cfg rawConfig
-	var section string
-	var currentSource *rawSource
-	var activeSourceArrayKey string
-	var activeSourceArrayLine int
-	seenRoot := map[string]int{}
-	seenWorkspace := map[string]int{}
-	seenRuntimeEmbedder := map[string]int{}
-	seenRuntimeAnalysis := map[string]int{}
-	var seenCurrentSource map[string]int
-
-	scanner := bufio.NewScanner(file)
-	for lineNo := 1; scanner.Scan(); lineNo++ {
-		line := strings.TrimSpace(stripComment(scanner.Text()))
-		if line == "" {
-			continue
-		}
-
-		if activeSourceArrayKey != "" {
-			if line == "]" {
-				activeSourceArrayKey = ""
-				activeSourceArrayLine = 0
-				continue
-			}
-			if !strings.HasPrefix(line, "\"") && !strings.HasPrefix(line, ",") {
-				return rawConfig{}, fmt.Errorf(
-					"line %d: sources.%s: unterminated array; expected ] to close the array opened on line %d",
-					lineNo,
-					activeSourceArrayKey,
-					activeSourceArrayLine,
-				)
-			}
-			if currentSource == nil {
-				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
-			}
-			values, err := parseQuotedValues(line)
-			if err != nil {
-				return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, activeSourceArrayKey, err)
-			}
-			if err := assignSourceArrayField(currentSource, activeSourceArrayKey, values); err != nil {
-				return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]"):
-			name := strings.TrimSpace(line[2 : len(line)-2])
-			if name != "sources" {
-				return rawConfig{}, fmt.Errorf("line %d: unsupported array section %q", lineNo, name)
-			}
-			cfg.sources = append(cfg.sources, rawSource{})
-			currentSource = &cfg.sources[len(cfg.sources)-1]
-			seenCurrentSource = map[string]int{}
-			section = name
-			continue
-		case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
-			name := strings.TrimSpace(line[1 : len(line)-1])
-			switch name {
-			case "workspace", "runtime.embedder", "runtime.analysis":
-				section = name
-				currentSource = nil
-			default:
-				return rawConfig{}, fmt.Errorf("line %d: unsupported section %q", lineNo, name)
-			}
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return rawConfig{}, fmt.Errorf("line %d: expected key = value", lineNo)
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		switch section {
-		case "":
-			if key != "schema_version" {
-				return rawConfig{}, fmt.Errorf("line %d: key %q is outside a supported section", lineNo, key)
-			}
-			if err := markDuplicateKey(seenRoot, "schema_version", lineNo); err != nil {
-				return rawConfig{}, err
-			}
-			parsed, err := strconv.Atoi(value)
-			if err != nil {
-				return rawConfig{}, fmt.Errorf("line %d: schema_version: expected integer", lineNo)
-			}
-			cfg.schemaVersion = parsed
-		case "workspace":
-			if err := markDuplicateKey(seenWorkspace, "workspace."+key, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-			if err := parseWorkspaceField(&cfg.workspace, key, value, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-		case "runtime.embedder":
-			if err := markDuplicateKey(seenRuntimeEmbedder, "runtime.embedder."+key, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-			if err := parseRuntimeField(&cfg.runtimeEmbedder, key, value, lineNo, section); err != nil {
-				return rawConfig{}, err
-			}
-		case "runtime.analysis":
-			if err := markDuplicateKey(seenRuntimeAnalysis, "runtime.analysis."+key, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-			if err := parseRuntimeField(&cfg.runtimeAnalysis, key, value, lineNo, section); err != nil {
-				return rawConfig{}, err
-			}
-		case "sources":
-			if currentSource == nil {
-				return rawConfig{}, fmt.Errorf("line %d: source entry missing array header", lineNo)
-			}
-			if seenCurrentSource == nil {
-				seenCurrentSource = map[string]int{}
-			}
-			if value == "[" {
-				if !isSourceArrayField(key) {
-					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
-				}
-				if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
-					return rawConfig{}, err
-				}
-				activeSourceArrayKey = key
-				activeSourceArrayLine = lineNo
-				if err := assignSourceArrayField(currentSource, key, nil); err != nil {
-					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
-				}
-				continue
-			}
-			if strings.HasPrefix(value, "[") {
-				if !isSourceArrayField(key) {
-					return rawConfig{}, fmt.Errorf("line %d: unsupported sources array field %q", lineNo, key)
-				}
-				if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
-					return rawConfig{}, err
-				}
-				values, err := parseQuotedValues(value)
-				if err != nil {
-					return rawConfig{}, fmt.Errorf("line %d: sources.%s: %w", lineNo, key, err)
-				}
-				if err := assignSourceArrayField(currentSource, key, values); err != nil {
-					return rawConfig{}, fmt.Errorf("line %d: %w", lineNo, err)
-				}
-				continue
-			}
-			if err := markDuplicateKey(seenCurrentSource, "sources."+key, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-			if err := parseSourceField(currentSource, key, value, lineNo); err != nil {
-				return rawConfig{}, err
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return rawConfig{}, fmt.Errorf("read config: %w", err)
-	}
-	if activeSourceArrayKey != "" {
-		return rawConfig{}, fmt.Errorf(
-			"line %d: sources.%s: unterminated array; expected ] before end of file",
-			activeSourceArrayLine,
-			activeSourceArrayKey,
-		)
-	}
-	return cfg, nil
-}
-
-func markDuplicateKey(seen map[string]int, key string, lineNo int) error {
-	if firstLine, ok := seen[key]; ok {
-		return fmt.Errorf("line %d: duplicate %s; first defined at line %d", lineNo, key, firstLine)
-	}
-	seen[key] = lineNo
-	return nil
-}
-
-func parseWorkspaceField(workspace *rawWorkspace, key, value string, lineNo int) error {
-	parsed, err := parseQuotedString(value)
-	if err != nil {
-		return fmt.Errorf("line %d: workspace.%s: %w", lineNo, key, err)
-	}
-
-	switch key {
-	case "root":
-		workspace.root = parsed
-	case "index_path":
-		workspace.indexPath = parsed
-	default:
-		return fmt.Errorf("line %d: unsupported workspace field %q", lineNo, key)
-	}
-	return nil
-}
-
-func parseSourceField(source *rawSource, key, value string, lineNo int) error {
-	parsed, err := parseQuotedString(value)
-	if err != nil {
-		return fmt.Errorf("line %d: sources.%s: %w", lineNo, key, err)
-	}
-
-	switch key {
-	case "name":
-		source.name = parsed
-	case "adapter":
-		source.adapter = parsed
-	case "kind":
-		source.kind = parsed
-	case "path":
-		source.paths = parsed
-	default:
-		return fmt.Errorf("line %d: unsupported sources field %q", lineNo, key)
-	}
-	return nil
-}
-
-func isSourceArrayField(key string) bool {
-	switch key {
-	case "files", "include", "exclude":
-		return true
-	default:
-		return false
-	}
-}
-
-func assignSourceArrayField(source *rawSource, key string, values []string) error {
-	switch key {
-	case "files":
-		source.files = append(source.files, values...)
-	case "include":
-		source.include = append(source.include, values...)
-	case "exclude":
-		source.exclude = append(source.exclude, values...)
-	default:
-		return fmt.Errorf("unsupported sources array field %q", key)
-	}
-	return nil
-}
-
-func parseRuntimeField(runtime *rawRuntimeProvider, key, value string, lineNo int, section string) error {
-	switch key {
-	case "provider", "model", "endpoint", "api_key_env":
-		parsed, err := parseQuotedString(value)
-		if err != nil {
-			return fmt.Errorf("line %d: %s.%s: %w", lineNo, section, key, err)
-		}
-		switch key {
-		case "provider":
-			runtime.provider = parsed
-		case "model":
-			runtime.model = parsed
-		case "endpoint":
-			runtime.endpoint = parsed
-		case "api_key_env":
-			runtime.apiKeyEnv = parsed
-		}
-		return nil
-	case "timeout_ms", "max_retries":
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("line %d: %s.%s: expected integer", lineNo, section, key)
-		}
-		if key == "timeout_ms" {
-			runtime.timeoutMS = intPtr(parsed)
-		} else {
-			runtime.maxRetries = intPtr(parsed)
-		}
-		return nil
-	default:
-		return fmt.Errorf("line %d: unsupported %s field %q", lineNo, section, key)
-	}
-}
-
 func parseQuotedString(value string) (string, error) {
 	if !strings.HasPrefix(value, "\"") {
 		return "", fmt.Errorf("expected quoted string")
@@ -515,62 +245,6 @@ func parseQuotedString(value string) (string, error) {
 		return "", fmt.Errorf("parse quoted string: %w", err)
 	}
 	return parsed, nil
-}
-
-func parseQuotedValues(value string) ([]string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, fmt.Errorf("expected quoted string")
-	}
-	if strings.HasPrefix(value, "[") {
-		if !strings.HasSuffix(value, "]") {
-			return nil, fmt.Errorf("unterminated array")
-		}
-		value = strings.TrimSpace(value[1 : len(value)-1])
-	}
-
-	var values []string
-	for {
-		value = strings.TrimSpace(value)
-		switch {
-		case value == "":
-			return values, nil
-		case strings.HasPrefix(value, ","):
-			value = value[1:]
-			continue
-		case strings.HasPrefix(value, "]"):
-			value = strings.TrimSpace(value[1:])
-			if value != "" {
-				return nil, fmt.Errorf("unexpected trailing content %q", value)
-			}
-			return values, nil
-		case !strings.HasPrefix(value, "\""):
-			return nil, fmt.Errorf("expected quoted string")
-		}
-
-		quoted := nextQuotedString(value)
-		parsed, err := strconv.Unquote(quoted)
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, parsed)
-		value = value[len(quoted):]
-	}
-}
-
-func nextQuotedString(value string) string {
-	escaped := false
-	for i := 1; i < len(value); i++ {
-		switch {
-		case escaped:
-			escaped = false
-		case value[i] == '\\':
-			escaped = true
-		case value[i] == '"':
-			return value[:i+1]
-		}
-	}
-	return value
 }
 
 // Validate resolves derived paths and verifies that a config can be used by the
