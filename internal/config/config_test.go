@@ -6,7 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/sdk"
 )
+
+func init() {
+	sdk.Register("github", func() sdk.Adapter {
+		return nil
+	})
+}
 
 func TestLoadResolvesWorkspaceAndSourcePaths(t *testing.T) {
 	t.Parallel()
@@ -748,6 +756,99 @@ accept = "application/vnd.github+json"
 		t.Fatalf("headers option type = %T, want map[string]any", source.Options["headers"])
 	}
 	if got, want := headers["accept"], "application/vnd.github+json"; got != want {
+		t.Fatalf("headers.accept = %#v, want %#v", got, want)
+	}
+}
+
+func TestLoadRejectsUnknownAdapter(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "missing"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), `source "specs".adapter: unknown adapter "missing"`) {
+		t.Fatalf("Load() error = %q, want unknown adapter details", err)
+	}
+	if !strings.Contains(err.Error(), `registered adapters: filesystem, github`) {
+		t.Fatalf("Load() error = %q, want registered adapter details", err)
+	}
+}
+
+func TestRenderRoundTripsSourceOptions(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:      ".",
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Sources: []Source{
+			{
+				Name:    "docs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindMarkdownDocs,
+				Path:    "docs",
+				Options: map[string]any{
+					"labels":         []string{"spec", "rfc"},
+					"include_closed": false,
+					"per_page":       50,
+					"headers": map[string]any{
+						"accept": "application/json",
+					},
+				},
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	options := loaded.Sources[0].Options
+	labels, ok := options["labels"].([]any)
+	if !ok {
+		t.Fatalf("labels option type = %T, want []any", options["labels"])
+	}
+	if got, want := optionStrings(labels), []string{"spec", "rfc"}; !equalStringSlices(got, want) {
+		t.Fatalf("labels option = %#v, want %#v", got, want)
+	}
+	if got, want := options["include_closed"], false; got != want {
+		t.Fatalf("include_closed option = %#v, want %#v", got, want)
+	}
+	if got, want := options["per_page"], int64(50); got != want {
+		t.Fatalf("per_page option = %#v, want %#v", got, want)
+	}
+	headers, ok := options["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers option type = %T, want map[string]any", options["headers"])
+	}
+	if got, want := headers["accept"], "application/json"; got != want {
 		t.Fatalf("headers.accept = %#v, want %#v", got, want)
 	}
 }

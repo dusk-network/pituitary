@@ -37,7 +37,7 @@ func (a *filesystemAdapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sd
 		Files:        append([]string(nil), cfg.Files...),
 		Include:      append([]string(nil), cfg.Include...),
 		Exclude:      append([]string(nil), cfg.Exclude...),
-		Options:      cloneSourceOptions(cfg.Options),
+		Options:      config.CloneSourceOptions(cfg.Options),
 		ResolvedPath: resolveFilesystemSourcePath(cfg.WorkspaceRoot, cfg.Path),
 	}
 

@@ -72,7 +72,7 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 			Files:         append([]string(nil), source.Files...),
 			Include:       append([]string(nil), source.Include...),
 			Exclude:       append([]string(nil), source.Exclude...),
-			Options:       cloneSourceOptions(source.Options),
+			Options:       config.CloneSourceOptions(source.Options),
 			WorkspaceRoot: cfg.Workspace.RootPath,
 		})
 		if err != nil {
@@ -127,32 +127,4 @@ func unknownAdapterError(sourceName, adapter string) error {
 		adapter,
 		strings.Join(registered, ", "),
 	)
-}
-
-func cloneSourceOptions(options map[string]any) map[string]any {
-	if len(options) == 0 {
-		return nil
-	}
-	cloned := make(map[string]any, len(options))
-	for key, value := range options {
-		cloned[key] = cloneOptionValue(value)
-	}
-	return cloned
-}
-
-func cloneOptionValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneSourceOptions(typed)
-	case []any:
-		cloned := make([]any, len(typed))
-		for i := range typed {
-			cloned[i] = cloneOptionValue(typed[i])
-		}
-		return cloned
-	case []string:
-		return append([]string(nil), typed...)
-	default:
-		return typed
-	}
 }

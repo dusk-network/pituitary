@@ -113,7 +113,7 @@ path = "specs"
 	}
 }
 
-func TestRunIndexReportsUnknownAdapterAtSourceLoad(t *testing.T) {
+func TestRunIndexRejectsUnknownAdapterInConfig(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `
 [workspace]
@@ -139,8 +139,8 @@ path = "specs"
 	if stdout.Len() != 0 {
 		t.Fatalf("runIndex() wrote unexpected stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), `pituitary index: source load failed:`) {
-		t.Fatalf("runIndex() stderr %q does not contain source-load prefix", stderr.String())
+	if !strings.Contains(stderr.String(), `pituitary index: invalid config:`) {
+		t.Fatalf("runIndex() stderr %q does not contain invalid-config prefix", stderr.String())
 	}
 	if !strings.Contains(stderr.String(), `unknown adapter "missing"`) {
 		t.Fatalf("runIndex() stderr %q does not contain adapter detail", stderr.String())

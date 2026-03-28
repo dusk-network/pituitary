@@ -8,8 +8,11 @@ import (
 	"os"
 	pathpkg "path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/dusk-network/pituitary/sdk"
 )
 
 const (
@@ -207,7 +210,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Files:   append([]string(nil), source.Files...),
 			Include: append([]string(nil), source.Include...),
 			Exclude: append([]string(nil), source.Exclude...),
-			Options: cloneSourceOptions(source.Options),
+			Options: CloneSourceOptions(source.Options),
 		})
 	}
 	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
@@ -250,25 +253,25 @@ func parseQuotedString(value string) (string, error) {
 	return parsed, nil
 }
 
-func cloneSourceOptions(options map[string]any) map[string]any {
+func CloneSourceOptions(options map[string]any) map[string]any {
 	if len(options) == 0 {
 		return nil
 	}
 	cloned := make(map[string]any, len(options))
 	for key, value := range options {
-		cloned[key] = cloneOptionValue(value)
+		cloned[key] = CloneOptionValue(value)
 	}
 	return cloned
 }
 
-func cloneOptionValue(value any) any {
+func CloneOptionValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
-		return cloneSourceOptions(typed)
+		return CloneSourceOptions(typed)
 	case []any:
 		cloned := make([]any, len(typed))
 		for i := range typed {
-			cloned[i] = cloneOptionValue(typed[i])
+			cloned[i] = CloneOptionValue(typed[i])
 		}
 		return cloned
 	case []string:
@@ -276,6 +279,26 @@ func cloneOptionValue(value any) any {
 	default:
 		return typed
 	}
+}
+
+func RegisteredAdapterNames() []string {
+	names := map[string]struct{}{
+		AdapterFilesystem: {},
+	}
+	for _, name := range sdk.RegisteredAdapterNames() {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		names[name] = struct{}{}
+	}
+
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // Validate resolves derived paths and verifies that a config can be used by the
@@ -286,6 +309,11 @@ func Validate(cfg *Config) error {
 
 func validate(cfg *Config) error {
 	var errs validationErrors
+	registeredAdapters := RegisteredAdapterNames()
+	registeredAdapterSet := make(map[string]struct{}, len(registeredAdapters))
+	for _, name := range registeredAdapters {
+		registeredAdapterSet[name] = struct{}{}
+	}
 
 	if cfg.Workspace.Root == "" {
 		errs.add("workspace.root: value is required")
@@ -329,6 +357,13 @@ func validate(cfg *Config) error {
 
 		if source.Adapter == "" {
 			errs.add("%s.adapter: value is required", label)
+		} else if _, exists := registeredAdapterSet[source.Adapter]; !exists {
+			errs.add(
+				"%s.adapter: unknown adapter %q (registered adapters: %s)",
+				label,
+				source.Adapter,
+				strings.Join(registeredAdapters, ", "),
+			)
 		}
 
 		if source.Kind == "" {
@@ -362,7 +397,7 @@ func validate(cfg *Config) error {
 			files = append(files, normalized)
 		}
 		source.Files = files
-		if len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
+		if filesystemSource && len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
 			errs.add("%s.files: path is required when files are set", label)
 		}
 		for _, pattern := range source.Include {
