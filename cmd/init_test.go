@@ -190,7 +190,7 @@ Domain: api
 func TestRunInitRejectsExistingConfig(t *testing.T) {
 	repo := writeDiscoveryWorkspace(t)
 	mustMkdirAllCmd(t, filepath.Join(repo, ".pituitary"))
-	mustWriteFileCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), "schema_version = 2\n")
+	mustWriteFileCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), "schema_version = 3\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

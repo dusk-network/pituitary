@@ -13,7 +13,7 @@ func TestLoadAcceptsExplicitSchemaVersion(t *testing.T) {
 	mustMkdirAll(t, filepath.Join(repo, "specs"))
 	configPath := filepath.Join(repo, "pituitary.toml")
 	writeFile(t, configPath, `
-schema_version = 2
+schema_version = 3
 
 [workspace]
 root = "."
@@ -125,7 +125,7 @@ specs_dir = "specs"
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
-	if !strings.Contains(rendered, "schema_version = 2") {
+	if !strings.Contains(rendered, "schema_version = 3") {
 		t.Fatalf("rendered config %q does not contain schema_version", rendered)
 	}
 	if !strings.Contains(rendered, "kind = \"spec_bundle\"") {

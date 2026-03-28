@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -275,6 +276,7 @@ func sourceFingerprint(cfg *config.Config) string {
 		sort.Strings(files)
 		sort.Strings(include)
 		sort.Strings(exclude)
+		optionsJSON, _ := json.Marshal(src.Options)
 
 		part := strings.Join([]string{
 			src.Name,
@@ -285,6 +287,7 @@ func sourceFingerprint(cfg *config.Config) string {
 			strings.Join(files, ","),
 			strings.Join(include, ","),
 			strings.Join(exclude, ","),
+			string(optionsJSON),
 		}, "|")
 		parts = append(parts, part)
 	}
