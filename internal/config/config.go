@@ -532,7 +532,3 @@ func defaultOptionalInt(value *int, fallback int) int {
 	}
 	return *value
 }
-
-func intPtr(value int) *int {
-	return &value
-}
