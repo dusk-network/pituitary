@@ -252,7 +252,7 @@ The `options` table is opaque to the kernel — each adapter parses its own opti
 - Keep the "reject unknown keys" behavior for top-level `[[sources]]` fields — only the `options` nested table is exempt from kernel validation
 - Bump `schema_version` to 3 to signal the extended config format
 
-**Parser strategy:** The hand-rolled parser requires non-trivial extension to support nested tables and typed values. Phase 1 should evaluate switching to `BurntSushi/toml` (or `pelletier/go-toml`) which handles this for free, versus extending the hand-rolled parser. The choice should be made at implementation time based on the blast radius of each approach.
+**Parser strategy:** The hand-rolled parser requires non-trivial extension to support nested tables and typed values. Issue `#153` selects `BurntSushi/toml` as the parser for `internal/config` because the blast radius stays local to the config package while preserving the existing validation layer. Phase 1 should build on that parser rather than extending the old line-by-line implementation.
 
 ### Custom builds for third-party adapters
 

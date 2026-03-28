@@ -62,14 +62,14 @@ func MigrateFile(path string) (*MigrationResult, error) {
 
 	detectedSchema := fmt.Sprintf("current.v%d", CurrentSchemaVersion)
 	var notes []string
-	switch raw.schemaVersion {
+	switch raw.SchemaVersion {
 	case 0:
 		detectedSchema = "current.unversioned"
 		notes = append(notes, fmt.Sprintf("added explicit schema_version = %d", CurrentSchemaVersion))
 	case CurrentSchemaVersion:
 		notes = append(notes, fmt.Sprintf("config already uses schema_version = %d; output is normalized", CurrentSchemaVersion))
 	default:
-		return nil, fmt.Errorf("cannot migrate unsupported schema_version %d automatically", raw.schemaVersion)
+		return nil, fmt.Errorf("cannot migrate unsupported schema_version %d automatically", raw.SchemaVersion)
 	}
 
 	return &MigrationResult{
