@@ -10,3 +10,8 @@ docs/superpowers/
 .mcpregistry_*
 .smithery/
 .ccd.toml
+README-draft.md
+README-old.md
+demo.cast
+docs/OSS_TRIAGE.md
+skills/pituitary-cli/anneal.log
