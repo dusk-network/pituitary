@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 export TERM=${TERM:-xterm-256color}
 
 B=$'\033[1m'
@@ -19,8 +19,8 @@ type_cmd() {
 }
 
 run_cmd() {
-    type_cmd "$1"
-    eval "$1"
+    type_cmd "$*"
+    "$@"
     sleep 2.5
 }
 
@@ -29,20 +29,24 @@ printf "\n  ${B}Pituitary${RST} ${D}— catch spec drift before it catches you${
 sleep 1.5
 
 # 1. check-doc-drift
-run_cmd "pituitary check-doc-drift --scope all"
+run_cmd pituitary check-doc-drift --scope all
 
 # 2. fix (dry-run so it doesn't modify files)
-run_cmd "pituitary fix --scope all --dry-run"
+run_cmd pituitary fix --scope all --dry-run
 
 # 3. check-overlap
-run_cmd "pituitary check-overlap --spec-ref SPEC-042"
+run_cmd pituitary check-overlap --spec-ref SPEC-042
 
 # 4. review-spec
-run_cmd "pituitary review-spec --spec-ref SPEC-042"
+run_cmd pituitary review-spec --spec-ref SPEC-042
 
 # 5. status (just the summary line, not the full config dump)
 type_cmd "pituitary status"
 pituitary status 2>&1 | head -3
+status_exit=${PIPESTATUS[0]}
+if [ "$status_exit" -ne 0 ]; then
+    exit "$status_exit"
+fi
 sleep 2
 
 printf "\n  ${D}github.com/dusk-network/pituitary${RST}\n\n"

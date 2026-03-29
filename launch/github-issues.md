@@ -12,7 +12,7 @@
 
 ### Problem
 
-All CLI output is currently plain text. On a dark terminal, findings, statuses, and evidence blend together — it's hard to scan and doesn't make a strong first impression.
+The CLI already has basic ANSI/UTF-8 styling support, but many commands still render largely as plain text and the coloring is not applied consistently or with a clear semantic palette. On a dark terminal, findings, statuses, and evidence still blend together — it's hard to scan and doesn't make a strong first impression.
 
 ### Proposal
 
@@ -157,83 +157,69 @@ Compact final summary with finding count.
 
 ### Runnable mockup
 
-Run `bash launch/preview-v2.sh` in a terminal to see the colored preview. The asciicast `demo.cast` shows the same output as a recording.
+Run `bash launch/preview-v2.sh` in a terminal to see the colored preview.
 
 ---
 
-## Issue 2: `pituitary fix` — apply drift remediations to source files
+## Issue 2: `pituitary fix` should support `--request-file` for structured workflows
 
-**Title:** `pituitary fix` — apply drift remediations to source files
+**Title:** `pituitary fix` should support `--request-file` for structured workflows
 
-**Labels:** `enhancement`, `feature`
+**Labels:** `enhancement`, `agent-dx`
 
 **Body:**
 
 ### Problem
 
-`check-doc-drift` detects drift and suggests edits ("replace X with Y"), but the user has to open each file and make the changes manually. This makes the remediation feel like a report rather than a tool. The gap between "I found the problem" and "the problem is fixed" is where adoption falls off.
+`pituitary fix` already supports `--path`, `--scope`, `--dry-run`, and `--yes`, but it is the odd command out in the CLI contract surface: other analysis commands accept `--request-file` for structured automation while `fix` still requires flags and an interactive TTY flow. That makes agent/editor integrations clumsier than they need to be.
 
 ### Proposal
 
-Add a `pituitary fix` command that reads drift findings and applies the suggested edits to source files, with confirmation.
+Add `--request-file PATH|-` support to `pituitary fix` so structured callers can plan or apply deterministic remediations without shell-escaping brittle flag combinations.
 
-#### Scoped modes
+#### Example request payloads
+
+```json
+{ "path": "docs/guides/api-rate-limits.md", "dry_run": true }
+```
+
+```json
+{ "scope": "all", "dry_run": true }
+```
+
+```json
+{ "doc_refs": ["doc://guides/api-rate-limits"], "apply": true }
+```
+
+#### Expected CLI forms
 
 ```sh
-# Fix one doc
-pituitary fix --path docs/guides/api-rate-limits.md
+# Dry-run plan via structured request
+pituitary fix --request-file request.json --format json
 
-# Fix all stale docs for one spec
-pituitary fix --scope SPEC-042
-
-# Fix everything
-pituitary fix --scope all
+# Apply a pre-selected set of doc refs non-interactively
+cat request.json | pituitary fix --request-file - --format json
 ```
 
-#### Exact output specification
+#### Request/response contract
 
-```
-━━◈ fix --path docs/guides/api-rate-limits.md                [bold white · dim]
-
-  docs/guides/api-rate-limits.md                              [dim path]
-
-    - The public API uses a fixed-window rate limiter.        [red]
-    + The public API uses a sliding-window rate limiter.      [green]
-
-    - The default limit is 100 requests per minute for each API key.  [red]
-    + The default limit is 200 requests per minute per tenant.        [green]
-
-    - tenant-specific overrides are not supported.            [red]
-    + tenant-specific overrides are supported through configuration.  [green]
-
-  apply these edits? [y/n/diff]                               [yellow prompt, bold choices]
-```
-
-- `y` — apply and write file
-- `n` — skip this file
-- `diff` — show full unified diff before deciding
-
-#### Non-interactive mode for CI
-
-```sh
-pituitary fix --scope all --dry-run    # show what would change, exit 0/1
-pituitary fix --scope all --yes        # apply all without confirmation
-```
+- Match the architecture contract for `fix`: selector plus apply/dry-run semantics.
+- Support the same structured workflow style as `review-spec`, `compare-specs`, `check-doc-drift`, and `check-compliance`.
+- Keep deterministic behavior exactly as-is; this is a transport and ergonomics improvement, not a semantic rewrite.
 
 ### Implementation notes
 
-- The edit evidence already exists in `check-doc-drift` results (suggested_edit field with old/new text)
-- Core work: locate exact text spans in source files, produce minimal edits, write with atomic backup
-- Edge cases: text that appears multiple times in a file, edits that overlap, files that changed since last index
-- Should require a fresh index — fail fast if index is stale
-- `--format json` should output the planned edits as structured data (for MCP consumers and scripting)
+- Extend the existing fix request parser rather than adding a second execution path.
+- Preserve the current TTY confirmation flow for plain text interactive use.
+- `--request-file` should work with both `--dry-run` planning and non-interactive apply modes.
+- Validate selector exclusivity the same way the flag-based path does now.
 
 ### Relationship to MCP
 
-The MCP server should expose `fix` as a tool so agents can apply remediations directly during code review workflows. The agent calls `check_doc_drift`, reviews the findings, and then calls `fix` to apply the edits — all within the editor session.
+This is the missing piece for exposing `fix` cleanly through agent workflows. Once `fix` accepts structured input, MCP wrappers and editor integrations can pass exact doc refs and apply intent without shell-specific quoting rules.
 
 ### Out of scope for first version
 
-- Fixing code compliance issues (only doc drift remediations)
-- AI-generated rewrites (only deterministic text replacement from existing suggested_edit fields)
-- Multi-file atomic transactions (each file is independent)
+- Changing the deterministic remediation model
+- Introducing AI-generated rewrites
+- Expanding `fix` beyond doc-drift remediations
