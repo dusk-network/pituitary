@@ -26,6 +26,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 	switch typed := result.(type) {
 	case *source.CanonicalizeResult:
 		renderCanonicalizeResult(w, typed)
+	case *source.NewSpecBundleResult:
+		renderNewSpecBundleResult(w, typed)
 	case *source.DiscoverResult:
 		renderDiscoverResult(w, typed)
 	case *initResult:
@@ -197,6 +199,25 @@ func renderCanonicalizeResult(w io.Writer, result *source.CanonicalizeResult) {
 		if !strings.HasSuffix(file.Content, "\n") {
 			fmt.Fprintln(w)
 		}
+	}
+}
+
+func renderNewSpecBundleResult(w io.Writer, result *source.NewSpecBundleResult) {
+	fmt.Fprintf(w, "workspace: %s\n", result.WorkspaceRoot)
+	if result.ConfigPath != "" {
+		fmt.Fprintf(w, "config path: %s\n", result.ConfigPath)
+	}
+	fmt.Fprintf(w, "spec root: %s\n", result.SpecRoot)
+	fmt.Fprintf(w, "bundle dir: %s\n", result.BundleDir)
+	if result.WroteBundle {
+		fmt.Fprintln(w, "bundle write: wrote draft bundle")
+	}
+	fmt.Fprintf(w, "spec ref: %s\n", result.Spec.Ref)
+	fmt.Fprintf(w, "title: %s\n", result.Spec.Title)
+	fmt.Fprintf(w, "status: %s\n", result.Spec.Status)
+	fmt.Fprintf(w, "domain: %s\n", result.Spec.Domain)
+	for _, file := range result.Files {
+		fmt.Fprintf(w, "generated file: %s\n", file.Path)
 	}
 }
 

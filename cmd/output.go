@@ -119,6 +119,8 @@ func cliWarningsForResult(result any) []cliIssue {
 	switch typed := result.(type) {
 	case *source.DiscoverResult:
 		return discoverWarningsToCLIIssues(typed.Warnings)
+	case *source.NewSpecBundleResult:
+		return newSpecWarningsToCLIIssues(typed.Warnings)
 	case *initResult:
 		if typed.Discover == nil {
 			return nil
@@ -135,6 +137,20 @@ func cliWarningsForResult(result any) []cliIssue {
 	default:
 		return nil
 	}
+}
+
+func newSpecWarningsToCLIIssues(warnings []source.NewSpecBundleWarning) []cliIssue {
+	if len(warnings) == 0 {
+		return nil
+	}
+	issues := make([]cliIssue, 0, len(warnings))
+	for _, warning := range warnings {
+		issues = append(issues, cliIssue{
+			Code:    warning.Code,
+			Message: warning.Message,
+		})
+	}
+	return issues
 }
 
 func discoverWarningsToCLIIssues(warnings []source.DiscoverWarning) []cliIssue {
