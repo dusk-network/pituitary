@@ -73,7 +73,7 @@ All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=
 
 For agent integrations, use `pituitary schema <command> --format json` to inspect request/response contracts, and prefer `--request-file PATH|-` on analysis commands when shell escaping would be brittle. Results that include raw repo excerpts or evidence now carry `result.content_trust` metadata so callers can treat returned workspace text as untrusted input instead of executable instructions.
 
-See the [cheatsheet](docs/cheatsheet.md) for every command, the [full reference](docs/reference.md) for configuration/runtime/spec details, the reusable skill package at [skills/pituitary-cli/SKILL.md](skills/pituitary-cli/SKILL.md), and [AGENTS.md](AGENTS.md) for repo-native agent instructions.
+See the [cheatsheet](docs/cheatsheet.md) for every command, the [full reference](docs/reference.md) for configuration/runtime/spec details, the reusable multi-editor package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md), and [AGENTS.md](AGENTS.md) for repo-native agent instructions.
 
 ## Install
 
@@ -110,6 +110,8 @@ Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add
 ```
 
 Your agent gets 6 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, or planning changes that touch governed code.
+
+If your editor prefers shared skills or repo policy files instead of MCP, use the package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md). The CCD-style install path is to copy `skills/pituitary-cli/` into a host skill directory such as `~/.claude/skills/pituitary-cli/`, `~/.codex/skills/pituitary-cli/`, or `~/.gemini/skills/pituitary-cli/`. For AGENTS-aware tools, use the repo's canonical [AGENTS.md](AGENTS.md); generated mirrors like [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility outputs, not separate policy sources.
 
 ## Use It in CI
 
