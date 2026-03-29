@@ -25,9 +25,10 @@ cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli
 ### Repo-local host install
 
 ```sh
-mkdir -p .agents/skills .claude/skills .gemini/skills
+mkdir -p .agents/skills .claude/skills .codex/skills .gemini/skills
 cp -R skills/pituitary-cli .agents/skills/pituitary-cli
 cp -R skills/pituitary-cli .claude/skills/pituitary-cli
+cp -R skills/pituitary-cli .codex/skills/pituitary-cli
 cp -R skills/pituitary-cli .gemini/skills/pituitary-cli
 ```
 

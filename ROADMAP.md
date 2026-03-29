@@ -153,7 +153,7 @@ A coverage score for your spec corpus is the most shareable concept in the issue
 ### JSON config file indexing (extension adapter)
 [#156](https://github.com/dusk-network/pituitary/issues/156) · `extension`
 
-Agents increasingly produce structured JSON (`openapi.yaml`, `schema.json`, config files) as de-facto intent artifacts. A JSON adapter expands Pituitary's audience from "teams with structured specs" to "any team with an API schema." RFC 0002 architecture is ready for it.
+Agents increasingly produce structured JSON (`openapi.yaml`, `schema.json`, config files) as de facto intent artifacts. A JSON adapter expands Pituitary's audience from "teams with structured specs" to "any team with an API schema." RFC 0002 architecture is ready for it.
 
 ### `--debug` flag for analysis trace
 [#168](https://github.com/dusk-network/pituitary/issues/168) · `area:ux`
