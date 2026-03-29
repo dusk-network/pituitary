@@ -67,10 +67,11 @@ runs:
         script: |
           const explicit = `${{ inputs.pituitary-version }}`.trim();
           const actionRef = `${{ github.action_ref || '' }}`.trim();
+          const semverTagPattern = /^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
           let version = explicit;
 
           if (!version) {
-            if (/^v\d/.test(actionRef)) {
+            if (semverTagPattern.test(actionRef)) {
               version = actionRef;
             } else {
               const release = await github.rest.repos.getLatestRelease({
@@ -87,17 +88,11 @@ runs:
       shell: bash
       env:
         PITUITARY_VERSION: ${{ steps.resolve-version.outputs.version }}
+        PITUITARY_INSTALL_DIR: $HOME/.local/bin
       run: |
         set -euo pipefail
 
-        version_no_v="${PITUITARY_VERSION#v}"
-        archive="pituitary_${version_no_v}_linux_amd64.tar.gz"
-
-        curl -fsSL -o "/tmp/${archive}" \
-          "https://github.com/dusk-network/pituitary/releases/download/${PITUITARY_VERSION}/${archive}"
-        tar -xzf "/tmp/${archive}" -C /tmp
-        mkdir -p "$HOME/.local/bin"
-        install -m 0755 /tmp/pituitary "$HOME/.local/bin/pituitary"
+        sh "${{ github.action_path }}/scripts/install.sh" "$PITUITARY_VERSION"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
         pituitary version

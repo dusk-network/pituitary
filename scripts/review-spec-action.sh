@@ -4,6 +4,7 @@ set -euo pipefail
 
 pituitary_bin="${PITUITARY_BIN:-pituitary}"
 pituitary_config="${PITUITARY_CONFIG:?PITUITARY_CONFIG is required}"
+github_output_path="${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 changed_files_json="${CHANGED_FILES_JSON:-[]}"
 fail_on="${FAIL_ON:-error}"
 
@@ -36,12 +37,27 @@ printf '[]\n' > "$reviewed_bundles_json_path"
 
 while IFS= read -r changed_file; do
   [ -n "$changed_file" ] || continue
-  if [ ! -e "$changed_file" ]; then
-    continue
+
+  path_to_explain="$changed_file"
+  if [ ! -e "$path_to_explain" ]; then
+    candidate="$path_to_explain"
+    while :; do
+      parent="$(dirname "$candidate")"
+      if [ "$parent" = "$candidate" ]; then
+        path_to_explain=""
+        break
+      fi
+      if [ -f "$parent/spec.toml" ]; then
+        path_to_explain="$parent/spec.toml"
+        break
+      fi
+      candidate="$parent"
+    done
+    [ -n "$path_to_explain" ] || continue
   fi
 
   explain_json="$workdir/explain.json"
-  if ! "$pituitary_bin" explain-file "$changed_file" --config "$pituitary_config" --format json > "$explain_json" 2>/dev/null; then
+  if ! "$pituitary_bin" explain-file "$path_to_explain" --config "$pituitary_config" --format json > "$explain_json" 2>/dev/null; then
     continue
   fi
 
@@ -156,6 +172,7 @@ if [ "$highest_rank" -ge "$(fail_rank)" ]; then
   exit_code=1
 fi
 
+comment_delimiter="COMMENT_EOF_${RANDOM}_${RANDOM}"
 {
   echo "reviewed-spec-count=$reviewed_spec_count"
   echo "error-count=$error_count"
@@ -164,7 +181,7 @@ fi
   echo "has-reviews=$has_reviews"
   echo "reviewed-bundles=$(cat "$reviewed_bundles_json_path")"
   echo "exit-code=$exit_code"
-  echo "comment-body<<COMMENT_EOF"
+  echo "comment-body<<$comment_delimiter"
   printf '%s\n' "$comment_body"
-  echo "COMMENT_EOF"
-} >> "$GITHUB_OUTPUT"
+  echo "$comment_delimiter"
+} >> "$github_output_path"
