@@ -92,6 +92,16 @@ runs:
       run: |
         set -euo pipefail
 
+        case "${RUNNER_OS:-unknown}/${RUNNER_ARCH:-unknown}" in
+          Linux/X64|macOS/ARM64) ;;
+          *)
+            echo "pituitary review-spec action: unsupported runner platform ${RUNNER_OS:-unknown}/${RUNNER_ARCH:-unknown}" >&2
+            echo "Supported runner combinations are Linux/X64 and macOS/ARM64." >&2
+            echo "For other platforms, install Pituitary manually from GitHub Releases before running the action." >&2
+            exit 1
+            ;;
+        esac
+
         sh "${{ github.action_path }}/scripts/install.sh" "$PITUITARY_VERSION"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
