@@ -4,6 +4,44 @@ Pituitary should run in CI as a consumer, not as a separate CI product. The CLI 
 
 These examples assume your repo already has a committed config (`.pituitary/pituitary.toml`). If it does not, run `pituitary init --path .` locally first and commit the generated config before you wire CI around it.
 
+## GitHub Action: comment `review-spec` output on spec pull requests
+
+This action comments on pull requests that touch configured spec bundles. It uses `pituitary explain-file` to map changed files back to indexed `spec_bundle` sources, runs `pituitary review-spec` for each affected bundle, and updates one sticky PR comment with the markdown report.
+
+```yaml
+name: Pituitary Review Spec
+
+on:
+  pull_request:
+    paths:
+      - "specs/**"
+      - ".pituitary/pituitary.toml"
+      - "pituitary.toml"
+
+jobs:
+  review-spec:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - uses: dusk-network/pituitary@v1.0.0-beta.3
+        with:
+          fail-on: error
+          # Set this when your repo keeps config at the root instead.
+          # config-path: pituitary.toml
+```
+
+`fail-on` is an action-level severity threshold:
+
+- `error`: fail only when a touched spec review finds deterministic doc-drift items
+- `warning`: fail on `error` plus `review-spec` warnings or `possible_drift` assessments
+- `none`: never fail; comment only
+
+The action updates one comment per PR by default and deletes the stale comment automatically if the PR no longer touches indexed spec bundles.
+By default it reads `.pituitary/pituitary.toml`; if your repo keeps `pituitary.toml` at the root, set `config-path: pituitary.toml`.
+
 ## GitHub Actions: diff compliance plus doc drift
 
 This recipe installs the released Linux binary, rebuilds the local index, checks the PR diff against accepted specs, and then runs a workspace-wide doc-drift pass.
@@ -18,7 +56,7 @@ jobs:
   pituitary:
     runs-on: ubuntu-latest
     env:
-      PITUITARY_VERSION: v1.0.0-alpha
+      PITUITARY_VERSION: v1.0.0-beta.3
     steps:
       - name: Check out repository
         uses: actions/checkout@v5

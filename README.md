@@ -113,6 +113,22 @@ Your agent gets 6 tools: `search_specs`, `check_overlap`, `compare_specs`, `anal
 
 ## Use It in CI
 
+For pull requests that change specs, use the shipped GitHub Action to run `review-spec` and post the report as a PR comment:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+steps:
+  - uses: dusk-network/pituitary@v1.0.0-beta.3
+    with:
+      fail-on: error
+      # Set this when your repo keeps config at the root instead.
+      # config-path: pituitary.toml
+```
+
 Add spec hygiene checks alongside your linter:
 
 ```yaml
