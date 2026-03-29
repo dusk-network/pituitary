@@ -48,6 +48,7 @@ git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 
 ```sh
 pituitary init --path .              # discover, index, report
+pituitary new --title "Rate limiting policy" --domain api  # scaffold a draft spec
 pituitary check-doc-drift --scope all  # find stale docs
 pituitary review-spec --path specs/X   # full review of one spec
 pituitary status                       # index health at a glance
@@ -58,6 +59,7 @@ pituitary status                       # index health at a glance
 | What you want to do | Command |
 |---|---|
 | First run on a repo | `pituitary init --path .` |
+| Scaffold a new draft spec | `pituitary new --title "Rate limiting policy" --domain api` |
 | Find stale docs | `pituitary check-doc-drift --scope all` |
 | Check a PR diff against specs | `git diff origin/main...HEAD \| pituitary check-compliance --diff-file -` |
 | Full spec review | `pituitary review-spec --path specs/X` |

@@ -257,6 +257,17 @@ func commandSchemaRegistry() map[string]schemaCommandSpec {
 			InputType:  discoverRequest{},
 			OutputType: source.DiscoverResult{},
 		},
+		"new": {
+			Summary: schemaCommandSummary{
+				Name:             "new",
+				Description:      commandDescription("new"),
+				MutatesState:     true,
+				ConfigScoped:     true,
+				SupportedFormats: sortedCommandFormats("new"),
+			},
+			InputType:  newRequest{},
+			OutputType: source.NewSpecBundleResult{},
+		},
 		"explain-file": {
 			Summary: schemaCommandSummary{
 				Name:             "explain-file",

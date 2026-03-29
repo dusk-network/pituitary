@@ -29,6 +29,7 @@ func commandRegistry() map[string]commandSpec {
 		"canonicalize":      {Description: "promote an inferred contract into a spec bundle", Formats: commandFormats(), Run: runCanonicalizeContext},
 		"discover":          {Description: "scan a repo and propose a local config", Formats: commandFormats(), Run: runDiscoverContext},
 		"init":              {Description: "discover, write, index, and summarize a workspace", Formats: commandFormats(), Run: runInitContext},
+		"new":               {Description: "scaffold a draft spec bundle from a template", Formats: commandFormats(), Run: runNewContext},
 		"migrate-config":    {Description: "rewrite a legacy config into the current schema", Formats: commandFormats(), Run: runMigrateConfigContext},
 		"index":             {Description: "rebuild or validate the local Pituitary index", Formats: commandFormats(), Run: runIndexContext},
 		"status":            {Description: "show current index status", Formats: commandFormats(), Run: runStatusContext},

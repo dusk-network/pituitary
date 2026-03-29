@@ -7,6 +7,7 @@ Quick command map for the common workflows. For the full install, config, runtim
 ```sh
 pituitary init --path .                         # discover + config + index + status
 pituitary init --path . --dry-run               # preview without writing
+pituitary new --title "Rate limiting policy" --domain api  # scaffold a draft spec
 pituitary discover --path .                     # propose sources (lower-level)
 pituitary preview-sources                       # show what will be indexed
 pituitary explain-file README.md                # why is this file in/out of scope?
