@@ -142,13 +142,13 @@ Add spec hygiene checks alongside your linter:
 See [docs/development/ci-recipes.md](docs/development/ci-recipes.md) for a complete GitHub Actions recipe.
 
 <details>
-<summary><strong>Semantic Retrieval</strong> (for professional accuracy beyond the deterministic default)</summary>
+<summary><strong>Semantic Runtime</strong> (optional retrieval + bounded analysis beyond the deterministic default)</summary>
 
 <br>
 
-Pituitary works out of the box with no API keys and no external dependencies. If you work in a professional context with higher standards for accuracy, you can enable deeper semantic support. This improves how precisely overlap detection, drift checks, and search match related content across your specs and docs.
+Pituitary works out of the box with no API keys and no external dependencies. For higher-quality semantic retrieval on a real corpus, configure an embedding runtime and rebuild the index. For bounded provider-backed adjudication in `compare-specs` and `check-doc-drift`, also configure a separate analysis runtime.
 
-**Cloud: OpenAI** (if you already have a key)
+**Cloud: OpenAI-compatible embeddings** (if you already have a key)
 
 ```toml
 [runtime.embedder]
@@ -165,11 +165,32 @@ api_key_env = "OPENAI_API_KEY"
 provider = "openai_compatible"
 model = "nomic-embed-text-v1.5"
 endpoint = "http://127.0.0.1:1234/v1"
+
+[runtime.analysis]
+provider = "openai_compatible"
+model = "your-analysis-model"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
 ```
 
-Then rebuild: `pituitary index --rebuild`
+For `runtime.analysis`, prefer a text model that is good at bounded adjudication rather than a generic embedding or agent stack:
 
-Any OpenAI-compatible embedding API works. See [runtime docs](docs/runtime.md) for full setup including analysis providers.
+- strong instruction following and schema adherence
+- concise answers without verbose reasoning text or intermediate chain-of-thought
+- enough context for Pituitary's shortlisted evidence bundle; typical general-purpose `8k`-`32k` context is sufficient, with larger windows optional
+- active-parameter cost that fits your latency and hardware budget
+
+Examples today include recent instruct models from the Qwen and Mistral families, but the important choice is the capability profile, not one fixed model name.
+
+Then validate and rebuild:
+
+```sh
+pituitary status --check-runtime all
+pituitary index --rebuild
+```
+
+Retrieval remains deterministic. The analysis model only sees narrowly shortlisted context for `compare-specs` and `check-doc-drift`. Any OpenAI-compatible embedding or analysis API works. See [runtime docs](docs/runtime.md) for full setup.
 
 </details>
 
