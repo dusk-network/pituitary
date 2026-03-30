@@ -41,8 +41,8 @@ When choosing `runtime.analysis`, optimize for bounded semantic adjudication rat
 
 - strong instruction following under tight evidence constraints
 - reliable structured-output hygiene
-- direct-answer or non-thinking mode when available
-- enough context for prompt plus shortlisted excerpts, usually `128k+`
+- concise answers without verbose reasoning text or intermediate chain-of-thought
+- enough context for the prompt plus Pituitary's small shortlisted evidence bundle; typical general-purpose `8k`-`32k` context is sufficient, with larger windows optional
 - a parameter and active-parameter footprint that fits your local hardware and latency budget
 
 Examples today include recent instruct-capable Qwen and Mistral models, but Pituitary does not require one specific analysis model.

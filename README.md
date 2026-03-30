@@ -170,13 +170,15 @@ endpoint = "http://127.0.0.1:1234/v1"
 provider = "openai_compatible"
 model = "your-analysis-model"
 endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
 ```
 
 For `runtime.analysis`, prefer a text model that is good at bounded adjudication rather than a generic embedding or agent stack:
 
 - strong instruction following and schema adherence
-- direct-answer or non-thinking mode for clean outputs
-- enough context for shortlisted evidence, typically `128k+`
+- concise answers without verbose reasoning text or intermediate chain-of-thought
+- enough context for Pituitary's shortlisted evidence bundle; typical general-purpose `8k`-`32k` context is sufficient, with larger windows optional
 - active-parameter cost that fits your latency and hardware budget
 
 Examples today include recent instruct models from the Qwen and Mistral families, but the important choice is the capability profile, not one fixed model name.
