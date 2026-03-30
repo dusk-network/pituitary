@@ -29,13 +29,23 @@ For provider-backed qualitative analysis used by `compare-specs` and `check-doc-
 ```toml
 [runtime.analysis]
 provider = "openai_compatible"
-model = "qwen3-coder-next"
+model = "your-analysis-model"
 endpoint = "http://127.0.0.1:1234/v1"
 timeout_ms = 30000
 max_retries = 1
 ```
 
 Retrieval stays deterministic. The analysis model only touches narrowly shortlisted context.
+
+When choosing `runtime.analysis`, optimize for bounded semantic adjudication rather than open-ended chat:
+
+- strong instruction following under tight evidence constraints
+- reliable structured-output hygiene
+- direct-answer or non-thinking mode when available
+- enough context for prompt plus shortlisted excerpts, usually `128k+`
+- a parameter and active-parameter footprint that fits your local hardware and latency budget
+
+Examples today include recent instruct-capable Qwen and Mistral models, but Pituitary does not require one specific analysis model.
 
 Validate both runtimes with:
 
