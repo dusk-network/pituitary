@@ -292,3 +292,42 @@ func TestOpenAICompatibleEmbedderFallsBackToSmallerBatchesOnDependencyFailure(t 
 		t.Fatalf("first call batch size = %d, want 3", calls[0])
 	}
 }
+
+func TestOpenAICompatibleEmbedderDoesNotSplitClientErrors(t *testing.T) {
+	t.Parallel()
+
+	var calls []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		calls = append(calls, len(request.Input))
+		http.Error(w, `{"error":"unknown model"}`, http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	embedder, err := NewEmbedder(config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "pituitary-embed",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder() error = %v", err)
+	}
+
+	_, err = embedder.EmbedDocuments(context.Background(), []string{"text-0", "text-1", "text-2"})
+	if err == nil {
+		t.Fatal("EmbedDocuments() error = nil, want dependency-unavailable failure")
+	}
+	if !IsDependencyUnavailable(err) {
+		t.Fatalf("EmbedDocuments() error = %v, want dependency-unavailable classification", err)
+	}
+	if len(calls) != 1 || calls[0] != 3 {
+		t.Fatalf("call sizes = %v, want one unsplit client-error request", calls)
+	}
+}

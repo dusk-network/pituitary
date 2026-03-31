@@ -2,7 +2,9 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 
@@ -99,7 +101,7 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 
 func (e *openAICompatibleEmbedder) embedBatchAdaptive(ctx context.Context, input []string) ([][]float64, error) {
 	vectors, err := e.embedBatch(ctx, input)
-	if err == nil || len(input) <= 1 || !IsDependencyUnavailable(err) {
+	if err == nil || !shouldSplitEmbeddingBatch(err, len(input)) {
 		return vectors, err
 	}
 
@@ -113,6 +115,22 @@ func (e *openAICompatibleEmbedder) embedBatchAdaptive(ctx context.Context, input
 		return nil, err
 	}
 	return append(left, right...), nil
+}
+
+func shouldSplitEmbeddingBatch(err error, batchSize int) bool {
+	if batchSize <= 1 || !IsDependencyUnavailable(err) {
+		return false
+	}
+
+	var target interface {
+		HTTPStatusCode() int
+	}
+	if !errors.As(err, &target) {
+		return false
+	}
+
+	status := target.HTTPStatusCode()
+	return status == http.StatusRequestEntityTooLarge || status >= http.StatusInternalServerError
 }
 
 func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []string) ([][]float64, error) {
