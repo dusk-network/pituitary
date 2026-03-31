@@ -16,6 +16,9 @@ const (
 	embeddingStrategyPlain             = "plain_v1"
 	embeddingStrategyNomicSearchPrefix = "nomic_search_prefix_v1"
 	openAICompatibleEmbedderRuntime    = "runtime.embedder"
+	// Use a conservative default because some local OpenAI-compatible providers,
+	// notably LM Studio serving nomic-embed-text, fail or destabilize on larger
+	// embedding batches even when single-item requests succeed.
 	openAICompatibleEmbeddingBatchSize = 8
 )
 
