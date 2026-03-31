@@ -211,7 +211,7 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 			if message == "" {
 				message = http.StatusText(resp.StatusCode)
 			}
-			err = NewDependencyUnavailable(client.Runtime, "%s endpoint %s returned %s: %s", client.Runtime, resp.Request.URL, resp.Status, message)
+			err = NewDependencyUnavailableStatus(client.Runtime, resp.StatusCode, "%s endpoint %s returned %s: %s", client.Runtime, resp.Request.URL, resp.Status, message)
 		} else {
 			value, decodeErr := decode(resp, responseBody)
 			if decodeErr == nil {

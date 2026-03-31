@@ -9,8 +9,9 @@ import (
 // DependencyUnavailableError indicates that an OpenAI-compatible runtime could
 // not satisfy the current request.
 type DependencyUnavailableError struct {
-	Runtime string
-	Message string
+	Runtime    string
+	Message    string
+	HTTPStatus int
 }
 
 func (e *DependencyUnavailableError) Error() string {
@@ -22,11 +23,27 @@ func (e *DependencyUnavailableError) RuntimeName() string {
 	return strings.TrimSpace(e.Runtime)
 }
 
+// HTTPStatusCode returns the associated HTTP status when the dependency
+// failure came from an HTTP response, or zero otherwise.
+func (e *DependencyUnavailableError) HTTPStatusCode() int {
+	return e.HTTPStatus
+}
+
 // NewDependencyUnavailable formats a dependency-unavailable runtime error.
 func NewDependencyUnavailable(runtime, format string, args ...any) *DependencyUnavailableError {
 	return &DependencyUnavailableError{
 		Runtime: runtime,
 		Message: fmt.Sprintf(format, args...),
+	}
+}
+
+// NewDependencyUnavailableStatus formats a dependency-unavailable runtime
+// error and records the associated HTTP status code.
+func NewDependencyUnavailableStatus(runtime string, status int, format string, args ...any) *DependencyUnavailableError {
+	return &DependencyUnavailableError{
+		Runtime:    runtime,
+		Message:    fmt.Sprintf(format, args...),
+		HTTPStatus: status,
 	}
 }
 
