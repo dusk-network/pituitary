@@ -34,7 +34,7 @@ Single binary. No Docker. No API keys required. One SQLite file.
 
 **Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
 
-**Stale docs.** A spec changed, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
+**Stale docs.** A spec changed, or a code diff implies docs likely went stale, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
 
 **Code that contradicts specs.** Pipe your diff in before you merge:
 
@@ -61,6 +61,7 @@ pituitary status                       # index health at a glance
 | First run on a repo | `pituitary init --path .` |
 | Scaffold a new draft spec | `pituitary new --title "Rate limiting policy" --domain api` |
 | Find stale docs | `pituitary check-doc-drift --scope all` |
+| Find stale docs implicated by a diff | `git diff origin/main...HEAD \| pituitary check-doc-drift --diff-file -` |
 | Check a PR diff against specs | `git diff origin/main...HEAD \| pituitary check-compliance --diff-file -` |
 | Full spec review | `pituitary review-spec --path specs/X` |
 | Auto-fix deterministic drift | `pituitary fix --scope all --dry-run` |
@@ -138,6 +139,7 @@ Add spec hygiene checks alongside your linter:
 ```yaml
 - run: pituitary index --rebuild
 - run: git diff origin/main...HEAD | pituitary check-compliance --diff-file -
+- run: git diff origin/main...HEAD | pituitary check-doc-drift --diff-file -
 - run: pituitary check-doc-drift --scope all
 ```
 

@@ -34,6 +34,7 @@ pituitary compare-specs --path specs/A --path specs/B  # side-by-side tradeoff
 pituitary analyze-impact --path specs/X         # what's affected if this changes?
 pituitary check-doc-drift --scope all           # find stale docs
 pituitary check-doc-drift --scope SPEC-042      # drift for one spec only
+git diff --cached | pituitary check-doc-drift --diff-file -  # change-scoped stale-doc analysis
 pituitary check-terminology --term repo \
   --canonical-term locality --spec-ref SPEC-042 # terminology migration audit
 pituitary fix --path docs/guides/api-rate-limits.md --dry-run  # preview deterministic drift fixes
@@ -107,6 +108,7 @@ Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact
 # First run on an existing repo
 pituitary init --path .
 pituitary check-doc-drift --scope all
+git diff --cached | pituitary check-doc-drift --diff-file -
 git diff --cached | pituitary check-compliance --diff-file -
 
 # Full review before a spec change lands

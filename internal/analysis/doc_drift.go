@@ -33,9 +33,11 @@ type docDocument struct {
 
 // DocDriftRequest is the normalized doc-drift input.
 type DocDriftRequest struct {
-	DocRef  string   `json:"doc_ref,omitempty"`
-	DocRefs []string `json:"doc_refs,omitempty"`
-	Scope   string   `json:"scope,omitempty"`
+	DocRef   string   `json:"doc_ref,omitempty"`
+	DocRefs  []string `json:"doc_refs,omitempty"`
+	Scope    string   `json:"scope,omitempty"`
+	DiffFile string   `json:"diff_file,omitempty"`
+	DiffText string   `json:"diff_text,omitempty"`
 }
 
 // DocDriftScope reports the normalized selector.
@@ -143,13 +145,16 @@ type DocRemediationResult struct {
 
 // DocDriftResult is the structured doc-drift response.
 type DocDriftResult struct {
-	Scope          DocDriftScope            `json:"scope"`
-	DriftItems     []DriftItem              `json:"drift_items"`
-	Assessments    []DocDriftAssessment     `json:"assessments,omitempty"`
-	SpecInferences []SpecInference          `json:"spec_inferences,omitempty"`
-	Remediation    *DocRemediationResult    `json:"remediation"`
-	Warnings       []Warning                `json:"warnings,omitempty"`
-	ContentTrust   *resultmeta.ContentTrust `json:"content_trust,omitempty"`
+	Scope           DocDriftScope            `json:"scope"`
+	ChangedFiles    []DriftChangedFile       `json:"changed_files,omitempty"`
+	ImplicatedSpecs []DriftImplicatedSpec    `json:"implicated_specs,omitempty"`
+	ImplicatedDocs  []DriftImplicatedDoc     `json:"implicated_docs,omitempty"`
+	DriftItems      []DriftItem              `json:"drift_items"`
+	Assessments     []DocDriftAssessment     `json:"assessments,omitempty"`
+	SpecInferences  []SpecInference          `json:"spec_inferences,omitempty"`
+	Remediation     *DocRemediationResult    `json:"remediation"`
+	Warnings        []Warning                `json:"warnings,omitempty"`
+	ContentTrust    *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type normalizedClaims struct {
@@ -207,28 +212,49 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 
-	selectedDocs, err := repo.loadDocs(scope.DocRefs)
-	if err != nil {
-		return nil, err
-	}
-	if len(scope.DocRefs) > 0 {
-		for _, ref := range scope.DocRefs {
-			if _, ok := selectedDocs[ref]; !ok {
-				return nil, newDocRefNotFoundError(ref)
+	var (
+		selectedDocs    map[string]docDocument
+		specs           map[string]specDocument
+		changedFiles    []DriftChangedFile
+		implicatedSpecs []DriftImplicatedSpec
+		implicatedDocs  []DriftImplicatedDoc
+	)
+	if scope.Mode == "diff" {
+		selectedDocs, specs, changedFiles, implicatedSpecs, implicatedDocs, err = resolveDiffDocDriftContext(ctx, repo, cfg, request.DiffText)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		selectedDocs, err = repo.loadDocs(scope.DocRefs)
+		if err != nil {
+			return nil, err
+		}
+		if len(scope.DocRefs) > 0 {
+			for _, ref := range scope.DocRefs {
+				if _, ok := selectedDocs[ref]; !ok {
+					return nil, newDocRefNotFoundError(ref)
+				}
 			}
+		}
+
+		specRefs, err := repo.relevantDocDriftSpecRefs(selectedDocs)
+		if err != nil {
+			return nil, err
+		}
+		specs, err = repo.loadSelectedSpecs(specRefs)
+		if err != nil {
+			return nil, err
 		}
 	}
 
-	specRefs, err := repo.relevantDocDriftSpecRefs(selectedDocs)
+	result, err := buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, repo.loadAllSpecs)
 	if err != nil {
 		return nil, err
 	}
-	specs, err := repo.loadSelectedSpecs(specRefs)
-	if err != nil {
-		return nil, err
-	}
-
-	return buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, repo.loadAllSpecs)
+	result.ChangedFiles = changedFiles
+	result.ImplicatedSpecs = implicatedSpecs
+	result.ImplicatedDocs = implicatedDocs
+	return result, nil
 }
 
 func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) (*DocDriftResult, error) {
@@ -340,6 +366,7 @@ func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
 	docRefs := uniqueStrings(request.DocRefs)
 	hasDocRefs := len(docRefs) > 0
 	hasScope := stringsTrimSpace(request.Scope) != ""
+	hasDiff := stringsTrimSpace(request.DiffText) != ""
 
 	count := 0
 	if hasDocRef {
@@ -351,8 +378,11 @@ func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
 	if hasScope {
 		count++
 	}
+	if hasDiff {
+		count++
+	}
 	if count != 1 {
-		return DocDriftScope{}, fmt.Errorf("exactly one of doc_ref, doc_refs, or scope is required")
+		return DocDriftScope{}, fmt.Errorf("exactly one of doc_ref, doc_refs, scope, or diff_text is required")
 	}
 
 	switch {
@@ -360,6 +390,8 @@ func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
 		return DocDriftScope{Mode: "doc_ref", DocRefs: []string{stringsTrimSpace(request.DocRef)}}, nil
 	case hasDocRefs:
 		return DocDriftScope{Mode: "doc_refs", DocRefs: docRefs}, nil
+	case hasDiff:
+		return DocDriftScope{Mode: "diff", DocRefs: nil}, nil
 	default:
 		if stringsTrimSpace(request.Scope) != "all" {
 			return DocDriftScope{}, fmt.Errorf("scope %q is invalid", request.Scope)

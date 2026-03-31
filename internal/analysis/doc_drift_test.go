@@ -138,6 +138,60 @@ func TestCheckDocDriftSupportsTargetedDocRefs(t *testing.T) {
 	}
 }
 
+func TestCheckDocDriftDiffTextShortlistsChangedFilesAndDocs(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{
+		DiffText: `
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+--- a/src/api/middleware/ratelimiter.go
++++ b/src/api/middleware/ratelimiter.go
+@@ -1,2 +1,2 @@
+-const defaultLimit = 100
++const defaultLimit = 200
+`,
+	})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+	if got, want := result.Scope.Mode, "diff"; got != want {
+		t.Fatalf("scope.mode = %q, want %q", got, want)
+	}
+	if len(result.ChangedFiles) != 1 || result.ChangedFiles[0].Path != "src/api/middleware/ratelimiter.go" {
+		t.Fatalf("changed_files = %+v, want ratelimiter.go", result.ChangedFiles)
+	}
+	if len(result.ImplicatedSpecs) == 0 || result.ImplicatedSpecs[0].Ref != "SPEC-042" {
+		t.Fatalf("implicated_specs = %+v, want SPEC-042 first", result.ImplicatedSpecs)
+	}
+	if len(result.ImplicatedSpecs[0].Reasons) == 0 || !strings.Contains(result.ImplicatedSpecs[0].Reasons[0], "applies_to matched changed path") {
+		t.Fatalf("implicated spec reasons = %+v, want applies_to basis", result.ImplicatedSpecs[0].Reasons)
+	}
+	var foundGuide bool
+	for _, item := range result.ImplicatedDocs {
+		if item.DocRef == "doc://guides/api-rate-limits" {
+			foundGuide = true
+			if len(item.Reasons) == 0 || !strings.Contains(item.Reasons[0], "SPEC-042") {
+				t.Fatalf("implicated doc reasons = %+v, want SPEC-042 linkage", item.Reasons)
+			}
+		}
+	}
+	if !foundGuide {
+		t.Fatalf("implicated_docs = %+v, want guide doc", result.ImplicatedDocs)
+	}
+	if len(result.DriftItems) == 0 || result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
+		t.Fatalf("drift_items = %+v, want guide drift", result.DriftItems)
+	}
+}
+
 func TestCheckDocDriftFlagsStaleNamedArtifacts(t *testing.T) {
 	t.Parallel()
 

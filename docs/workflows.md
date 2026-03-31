@@ -39,7 +39,8 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `check-terminology --term X --canonical-term Y --spec-ref Z` | Terminology migration audit |
 | `check-compliance --path PATH` | Check code paths against accepted specs |
 | `check-compliance --diff-file PATH\\|-` | Check a unified diff against accepted specs |
-| `check-doc-drift --scope all\\|SPEC_REF` | Find docs that have gone stale |
+| `check-doc-drift --scope all\\|SPEC_REF` | Find docs that have gone stale across the workspace |
+| `check-doc-drift --diff-file PATH\\|-` | Rank stale docs and specs implicated by a unified diff |
 | `fix --path PATH --dry-run` | Preview deterministic doc-drift remediations before writing |
 | `fix --scope all --yes` | Apply deterministic doc-drift remediations without prompting |
 | `review-spec --path SPEC` | Full review: overlap + comparison + impact + drift + remediation |
@@ -47,6 +48,15 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `serve --config FILE` | Start MCP server over stdio |
 
 `fix` is intentionally narrow: it only applies deterministic `replace_claim` remediations that `check-doc-drift` can justify from accepted specs and exact document evidence. Use `--dry-run` first, then rerun with `--yes` when the replacements look correct. After any successful apply, run `pituitary index --rebuild`.
+
+## Diff-Driven Doc Drift
+
+When you already have a patch, `check-doc-drift --diff-file` narrows the stale-doc search to the changed files, the implicated specs, and the docs linked through those specs. The JSON response includes `changed_files`, `implicated_specs`, `implicated_docs`, and the usual `drift_items` / `assessments` payload so agents can explain why each doc was shortlisted.
+
+```sh
+git diff --cached | pituitary check-doc-drift --diff-file -
+git diff origin/main...HEAD | pituitary check-doc-drift --diff-file - --format json
+```
 
 ## Agent-Friendly Input
 
@@ -58,7 +68,7 @@ pituitary check-doc-drift --request-file request.json --format json
 pituitary check-compliance --request-file request.json --format json
 ```
 
-`--request-file PATH|-` keeps requests explicit, avoids shell-escaping mistakes, and is workspace-scoped by default for local file inputs.
+`--request-file PATH|-` keeps requests explicit, avoids shell-escaping mistakes, and is workspace-scoped by default for local file inputs. For diff-driven drift or compliance checks, prefer embedding `diff_text` directly in the request JSON, or provide `diff_file` when you want the CLI to resolve the patch from disk or stdin first.
 
 ## Review Reports
 
@@ -74,11 +84,13 @@ Use `--format markdown` for PR-friendly reports and `--format html` for a richer
 
 ## CI
 
-`check-compliance --diff-file` is the easiest pre-merge guardrail:
+`check-compliance --diff-file` is the easiest pre-merge guardrail for spec/code alignment, and `check-doc-drift --diff-file` complements it when you want change-scoped stale-doc detection:
 
 ```sh
 git diff --cached | pituitary check-compliance --diff-file -
 git diff origin/main...HEAD | pituitary check-compliance --diff-file -
+git diff --cached | pituitary check-doc-drift --diff-file -
+git diff origin/main...HEAD | pituitary check-doc-drift --diff-file -
 ```
 
 For copy-paste workflow examples that install the released binary in CI and run both compliance and spec-hygiene checks, see [docs/development/ci-recipes.md](development/ci-recipes.md).

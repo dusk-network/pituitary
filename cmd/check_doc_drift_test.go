@@ -122,6 +122,140 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 	}
 }
 
+func TestRunCheckDocDriftWithDiffFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	oldStdin := cliStdin
+	cliStdin = strings.NewReader(strings.TrimSpace(`
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+--- a/src/api/middleware/ratelimiter.go
++++ b/src/api/middleware/ratelimiter.go
+@@ -1,2 +1,2 @@
+-const defaultLimit = 100
++const defaultLimit = 200
+`))
+	defer func() {
+		cliStdin = oldStdin
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--diff-file", "-", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			DiffFile string `json:"diff_file"`
+		} `json:"request"`
+		Result struct {
+			Scope struct {
+				Mode string `json:"mode"`
+			} `json:"scope"`
+			ChangedFiles []struct {
+				Path string `json:"path"`
+			} `json:"changed_files"`
+			ImplicatedSpecs []struct {
+				Ref     string   `json:"ref"`
+				Reasons []string `json:"reasons"`
+			} `json:"implicated_specs"`
+			ImplicatedDocs []struct {
+				DocRef    string   `json:"doc_ref"`
+				Reasons   []string `json:"reasons"`
+				SourceRef string   `json:"source_ref"`
+			} `json:"implicated_docs"`
+			DriftItems []struct {
+				DocRef string `json:"doc_ref"`
+			} `json:"drift_items"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal diff drift payload: %v", err)
+	}
+	if got, want := payload.Request.DiffFile, "-"; got != want {
+		t.Fatalf("request.diff_file = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Scope.Mode, "diff"; got != want {
+		t.Fatalf("result.scope.mode = %q, want %q", got, want)
+	}
+	if len(payload.Result.ChangedFiles) != 1 || payload.Result.ChangedFiles[0].Path != "src/api/middleware/ratelimiter.go" {
+		t.Fatalf("changed_files = %+v, want ratelimiter.go", payload.Result.ChangedFiles)
+	}
+	if len(payload.Result.ImplicatedSpecs) == 0 || payload.Result.ImplicatedSpecs[0].Ref != "SPEC-042" {
+		t.Fatalf("implicated_specs = %+v, want SPEC-042", payload.Result.ImplicatedSpecs)
+	}
+	if len(payload.Result.ImplicatedSpecs[0].Reasons) == 0 {
+		t.Fatalf("implicated_spec reasons = %+v, want linkage evidence", payload.Result.ImplicatedSpecs[0].Reasons)
+	}
+	if len(payload.Result.ImplicatedDocs) == 0 || payload.Result.ImplicatedDocs[0].DocRef == "" || len(payload.Result.ImplicatedDocs[0].Reasons) == 0 {
+		t.Fatalf("implicated_docs = %+v, want docs with reasons", payload.Result.ImplicatedDocs)
+	}
+	if len(payload.Result.DriftItems) == 0 || payload.Result.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
+		t.Fatalf("drift_items = %+v, want guide drift", payload.Result.DriftItems)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunCheckDocDriftWithDiffFileText(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	oldStdin := cliStdin
+	cliStdin = strings.NewReader(strings.TrimSpace(`
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+--- a/src/api/middleware/ratelimiter.go
++++ b/src/api/middleware/ratelimiter.go
+@@ -1,2 +1,2 @@
+-const defaultLimit = 100
++const defaultLimit = 200
+`))
+	defer func() {
+		cliStdin = oldStdin
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--diff-file", "-"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"CHANGED FILES",
+		"src/api/middleware/ratelimiter.go",
+		"IMPLICATED SPECS",
+		"SPEC-042",
+		"IMPLICATED DOCS",
+		"docs/guides/api-rate-limits.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runCheckDocDrift() output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunCheckDocDriftTargetedRefsJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

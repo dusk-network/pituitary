@@ -613,8 +613,8 @@ CLI exit codes should stay simple:
   - Request: `{ "terms": ["repo", "workflow"], "canonical_terms": ["locality", "continuity"], "spec_ref": "SPEC-LOCALITY", "scope": "all" | "docs" | "specs" }`
   - Result: `{ "scope": { "mode": "workspace" | "spec_ref", "artifact_kinds": ["doc", "spec"], "spec_ref": "SPEC-LOCALITY" }, "terms": [...], "canonical_terms": [...], "anchor_specs": [...], "findings": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [{ "section": "...", "terms": [...], "excerpt": "...", "assessment": "exact match in body text without compatibility-only markers", "evidence": { "spec_ref": "SPEC-LOCALITY", "section": "...", "score": 0.0 } | null }] }] }`
 - `check_doc_drift` (`pituitary check-doc-drift`)
-  - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, or `{ "scope": "all" }`
-  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all", "doc_refs": [...] }, "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "aligned" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
+  - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, `{ "scope": "all" }`, or `{ "diff_text": "..." }`; the CLI also accepts `--diff-file PATH|-` and resolves that into the same diff-backed request shape
+  - Result: `{ "scope": { "mode": "doc_ref" | "doc_refs" | "all" | "diff", "doc_refs": [...] }, "changed_files": [{ "path": "...", "added_line_count": 1, "removed_line_count": 1 }], "implicated_specs": [{ "ref": "SPEC-042", "reasons": ["..."], "files": ["..."], "score": 0.0 }], "implicated_docs": [{ "doc_ref": "...", "reasons": ["..."], "files": ["..."], "score": 0.0 }], "drift_items": [{ "doc_ref": "...", "findings": [{ "spec_ref": "SPEC-042", "code": "...", "message": "...", "rationale": "...", "evidence": { "spec_ref": "SPEC-042", "spec_section": "...", "doc_section": "..." }, "confidence": { "level": "high" | "medium" | "low", "score": 0.0 } }] }], "assessments": [{ "doc_ref": "...", "status": "drift" | "aligned" | "possible_drift", "rationale": "...", "evidence": { ... }, "confidence": { ... } }], "remediation": { ... } }`
 - `fix` (`pituitary fix`)
   - Request: exactly one of `{ "path": "docs/guides/api-rate-limits.md", "dry_run": true }`, `{ "scope": "all", "dry_run": true }`, or `{ "doc_refs": ["doc://guides/api-rate-limits"], "apply": true }`
   - Result: `{ "selector": "docs/guides/api-rate-limits.md" | "all" | "doc_refs", "applied": false, "files": [{ "doc_ref": "...", "path": "...", "status": "planned" | "applied" | "skipped", "reason": "...", "warnings": ["..."], "edits": [{ "code": "...", "action": "replace_claim", "replace": "...", "with": "...", "line": N, "start_byte": N, "end_byte": N, "before": "...", "after": "..." }] }], "planned_file_count": N, "planned_edit_count": N, "applied_file_count": N, "applied_edit_count": N, "guidance": ["..."] }`
@@ -747,12 +747,16 @@ Input:
   { doc_ref: "doc://guides/api-rate-limits" }
   OR { doc_refs: ["doc://guides/api-rate-limits", "doc://runbooks/rate-limit-rollout"] }
   OR { scope: "all" }
+  OR { diff_text: "..." }
 
 Output:
+  changed_files[]
+  implicated_specs[]
+  implicated_docs[]
   drift_items[]
 ```
 
-Exactly one selector must be present in v1: `doc_ref`, `doc_refs`, or `scope`. The only valid `scope` value is `"all"`.
+Exactly one selector must be present in v1: `doc_ref`, `doc_refs`, `scope`, or `diff_text`. The only valid `scope` value is `"all"`. The CLI additionally supports `--diff-file PATH|-` so git diffs can be piped in directly without manually embedding them in JSON.
 
 #### Tool: `search_specs`
 
