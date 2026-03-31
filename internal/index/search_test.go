@@ -116,6 +116,33 @@ func TestSearchSpecsAppliesDomainFilter(t *testing.T) {
 	}
 }
 
+func TestSearchSpecsIncludesRepoIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadMultiRepoFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	result, err := SearchSpecs(cfg, SearchSpecQuery{Query: "shared repo rollout", Limit: 5})
+	if err != nil {
+		t.Fatalf("SearchSpecs() error = %v", err)
+	}
+	if len(result.Matches) == 0 {
+		t.Fatal("SearchSpecs() returned no matches")
+	}
+	if got, want := result.Matches[0].Repo, "shared"; got != want {
+		t.Fatalf("top match repo = %q, want %q", got, want)
+	}
+	if got, want := result.Matches[0].SourceRef, "file://specs/shared-rollout/spec.toml"; got != want {
+		t.Fatalf("top match source_ref = %q, want %q", got, want)
+	}
+}
+
 func TestSearchSpecsRejectsInvalidStatuses(t *testing.T) {
 	t.Parallel()
 

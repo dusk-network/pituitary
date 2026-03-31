@@ -62,6 +62,74 @@ path = "docs"
 	}
 }
 
+func TestLoadResolvesMultiRepoSources(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustMkdirAll(t, filepath.Join(primary, "specs"))
+	mustMkdirAll(t, filepath.Join(shared, "docs"))
+
+	configPath := filepath.Join(root, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "primary"
+repo_id = "primary"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "shared"
+root = "shared"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := cfg.Workspace.RootPath, filepath.Clean(primary); got != want {
+		t.Fatalf("workspace root path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Workspace.RepoID, "primary"; got != want {
+		t.Fatalf("workspace repo_id = %q, want %q", got, want)
+	}
+	if got, want := len(cfg.Workspace.Repos), 1; got != want {
+		t.Fatalf("workspace repos = %d, want %d", got, want)
+	}
+	if got, want := cfg.Workspace.Repos[0].RootPath, filepath.Clean(shared); got != want {
+		t.Fatalf("workspace repo root path = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[0].ResolvedRepo, "primary"; got != want {
+		t.Fatalf("primary source repo = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[0].RepoRootPath, filepath.Clean(primary); got != want {
+		t.Fatalf("primary source repo root = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[1].ResolvedRepo, "shared"; got != want {
+		t.Fatalf("shared source repo = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[1].RepoRootPath, filepath.Clean(shared); got != want {
+		t.Fatalf("shared source repo root = %q, want %q", got, want)
+	}
+	if got, want := cfg.Sources[1].ResolvedPath, filepath.Join(shared, "docs"); got != want {
+		t.Fatalf("shared source path = %q, want %q", got, want)
+	}
+}
+
 func TestLoadResolvesLocalPituitaryConfigRelativeToRepoRoot(t *testing.T) {
 	t.Parallel()
 
@@ -945,6 +1013,77 @@ func TestRenderRoundTripsSourceRole(t *testing.T) {
 	}
 	if got, want := loaded.Sources[0].Role, SourceRoleMirror; got != want {
 		t.Fatalf("loaded role = %q, want %q", got, want)
+	}
+}
+
+func TestRenderRoundTripsWorkspaceRepos(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustMkdirAll(t, filepath.Join(primary, "specs"))
+	mustMkdirAll(t, filepath.Join(shared, "docs"))
+
+	configPath := filepath.Join(root, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     root,
+		Workspace: Workspace{
+			Root:      "primary",
+			RepoID:    "primary",
+			IndexPath: ".pituitary/pituitary.db",
+			Repos: []WorkspaceRepo{
+				{ID: "shared", Root: "shared"},
+			},
+		},
+		Sources: []Source{
+			{
+				Name:    "specs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindSpecBundle,
+				Path:    "specs",
+			},
+			{
+				Name:    "shared-docs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindMarkdownDocs,
+				Repo:    "shared",
+				Path:    "docs",
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(rendered, "repo_id = \"primary\"") {
+		t.Fatalf("rendered config %q does not contain workspace repo_id", rendered)
+	}
+	if !strings.Contains(rendered, "[[workspace.repos]]") || !strings.Contains(rendered, "id = \"shared\"") {
+		t.Fatalf("rendered config %q does not contain workspace.repos entry", rendered)
+	}
+	if !strings.Contains(rendered, "repo = \"shared\"") {
+		t.Fatalf("rendered config %q does not contain source repo", rendered)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if got, want := loaded.Workspace.RepoID, "primary"; got != want {
+		t.Fatalf("loaded workspace repo_id = %q, want %q", got, want)
+	}
+	if got, want := len(loaded.Workspace.Repos), 1; got != want {
+		t.Fatalf("loaded workspace repos = %d, want %d", got, want)
+	}
+	if got, want := loaded.Workspace.Repos[0].ID, "shared"; got != want {
+		t.Fatalf("loaded workspace repo id = %q, want %q", got, want)
+	}
+	if got, want := loaded.Sources[1].Repo, "shared"; got != want {
+		t.Fatalf("loaded source repo = %q, want %q", got, want)
 	}
 }
 

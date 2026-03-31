@@ -21,6 +21,7 @@ type SourceConfig struct {
 	Name    string         `json:"name"`
 	Adapter string         `json:"adapter"`
 	Kind    string         `json:"kind"`
+	Repo    string         `json:"repo,omitempty"`
 	Path    string         `json:"path,omitempty"`
 	Files   []string       `json:"files,omitempty"`
 	Include []string       `json:"include,omitempty"`
@@ -29,4 +30,5 @@ type SourceConfig struct {
 
 	// WorkspaceRoot is the absolute workspace root path.
 	WorkspaceRoot string `json:"-"`
+	PrimaryRepoID string `json:"-"`
 }

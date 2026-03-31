@@ -437,7 +437,7 @@ func discoverMarkdownContractIdentity(workspaceRoot, path string, body []byte) (
 	ref := strings.TrimSpace(fields.Ref)
 	if ref == "" {
 		var err error
-		ref, err = markdownContractRefForPath(workspaceRoot, path)
+		ref, err = markdownContractRefForPath(workspaceRoot, path, "", "")
 		if err != nil {
 			return "", "", err
 		}

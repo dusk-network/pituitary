@@ -46,6 +46,30 @@ path = "specs"
 	}
 }
 
+func TestRunIndexReportsRepoCoverage(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"repo: primary | items: 2 | specs: 1 | docs: 1",
+		"repo: shared | items: 2 | specs: 1 | docs: 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runIndex() output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunIndexRequiresRebuild(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `

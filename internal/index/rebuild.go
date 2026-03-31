@@ -36,6 +36,7 @@ type RebuildResult struct {
 	ReusedChunkCount    int                        `json:"reused_chunk_count,omitempty"`
 	EmbeddedChunkCount  int                        `json:"embedded_chunk_count,omitempty"`
 	ContentFingerprint  string                     `json:"content_fingerprint"`
+	Repos               []RepoCoverage             `json:"repo_coverage,omitempty"`
 	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`
 }
 
@@ -382,6 +383,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	result := &RebuildResult{
 		EmbedderDimension: dimension,
 		FullRebuild:       options.Full,
+		Repos:             repoCoverageFromRecords(records),
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
 	totalArtifacts := len(records.Specs) + len(records.Docs)

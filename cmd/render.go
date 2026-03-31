@@ -130,6 +130,7 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 		fmt.Fprintf(w, "dry run validated %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 		fmt.Fprintf(w, "index path: %s\n", result.IndexPath)
 		renderIndexReuseSummary(w, result)
+		renderIndexRepoCoverage(w, result.Repos)
 		renderIndexSourceSummaries(w, result.Sources)
 		fmt.Fprintln(w, "database write: skipped")
 		return
@@ -137,6 +138,7 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
 	renderIndexReuseSummary(w, result)
+	renderIndexRepoCoverage(w, result.Repos)
 	renderIndexSourceSummaries(w, result.Sources)
 }
 
@@ -299,6 +301,9 @@ func renderIndexSourceSummaries(w io.Writer, sources []source.LoadSourceSummary)
 		if summary.DocCount > 0 {
 			fmt.Fprintf(w, " | docs: %d", summary.DocCount)
 		}
+		if summary.Repo != "" {
+			fmt.Fprintf(w, " | repo: %s", summary.Repo)
+		}
 		fmt.Fprintln(w)
 	}
 }
@@ -350,6 +355,12 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("index:"), p.green("present"))
 	} else {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("index:"), p.red("missing"))
+	}
+	if len(result.Repos) > 0 {
+		fmt.Fprintf(w, "  %s\n", p.white("REPO COVERAGE"))
+		for i, repo := range result.Repos {
+			fmt.Fprintf(w, "  %s %s\n", p.treeItem(i == len(result.Repos)-1), renderRepoCoverageLine(repo))
+		}
 	}
 	if result.Freshness != nil {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("index freshness:"), renderFreshnessLabel(p, result.Freshness.State))
@@ -515,6 +526,9 @@ func renderSearchSpecsResult(w io.Writer, result *index.SearchSpecResult) {
 
 	for i, match := range result.Matches {
 		fmt.Fprintf(w, "%d. %s | %s | %.3f\n", i+1, match.Ref, match.SectionHeading, match.Score)
+		if details := searchMatchDetailLine(match); details != "" {
+			fmt.Fprintf(w, "   %s\n", details)
+		}
 		if match.Excerpt != "" {
 			fmt.Fprintln(w, match.Excerpt)
 		}
@@ -531,14 +545,16 @@ func renderSearchSpecsTable(w io.Writer, result *index.SearchSpecResult) {
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "REF\tTITLE\tSECTION\tSCORE")
+	fmt.Fprintln(tw, "REF\tREPO\tTITLE\tSECTION\tSOURCE\tSCORE")
 	for _, match := range result.Matches {
 		fmt.Fprintf(
 			tw,
-			"%s\t%s\t%s\t%.3f\n",
+			"%s\t%s\t%s\t%s\t%s\t%.3f\n",
 			renderTableValue(match.Ref, 12),
+			renderTableValue(match.Repo, 16),
 			renderTableValue(match.Title, 28),
 			renderTableValue(match.SectionHeading, 36),
+			renderTableValue(displaySourcePath(match.SourceRef), 40),
 			match.Score,
 		)
 	}
@@ -561,6 +577,34 @@ func renderTableValue(value string, maxWidth int) string {
 		return string(runes[:maxWidth])
 	}
 	return string(runes[:maxWidth-3]) + "..."
+}
+
+func searchMatchDetailLine(match index.SearchSpecMatch) string {
+	parts := make([]string, 0, 2)
+	if match.Repo != "" {
+		parts = append(parts, "repo: "+match.Repo)
+	}
+	if match.SourceRef != "" {
+		parts = append(parts, "source: "+displaySourcePath(match.SourceRef))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func renderIndexRepoCoverage(w io.Writer, repos []index.RepoCoverage) {
+	for _, repo := range repos {
+		fmt.Fprintf(w, "repo: %s\n", renderRepoCoverageLine(repo))
+	}
+}
+
+func renderRepoCoverageLine(repo index.RepoCoverage) string {
+	line := fmt.Sprintf("%s | items: %d", repo.Repo, repo.ItemCount)
+	if repo.SpecCount > 0 {
+		line += fmt.Sprintf(" | specs: %d", repo.SpecCount)
+	}
+	if repo.DocCount > 0 {
+		line += fmt.Sprintf(" | docs: %d", repo.DocCount)
+	}
+	return line
 }
 
 func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {
@@ -602,8 +646,39 @@ func renderCompareResult(w io.Writer, result *analysis.CompareResult) {
 func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult) {
 	fmt.Fprintf(w, "spec: %s | change_type: %s\n", result.SpecRef, result.ChangeType)
 	fmt.Fprintf(w, "affected specs: %d\n", len(result.AffectedSpecs))
+	for _, item := range result.AffectedSpecs {
+		fmt.Fprintf(w, "- %s", item.Ref)
+		if item.Repo != "" {
+			fmt.Fprintf(w, " | repo: %s", item.Repo)
+		}
+		fmt.Fprintf(w, " | %s", item.Relationship)
+		if item.Historical {
+			fmt.Fprint(w, " | historical")
+		}
+		if item.Title != "" {
+			fmt.Fprintf(w, " | %s", item.Title)
+		}
+		fmt.Fprintln(w)
+	}
 	fmt.Fprintf(w, "affected refs: %d\n", len(result.AffectedRefs))
+	for _, item := range result.AffectedRefs {
+		fmt.Fprintf(w, "- %s | %s\n", item.Ref, item.Kind)
+	}
 	fmt.Fprintf(w, "affected docs: %d\n", len(result.AffectedDocs))
+	for _, item := range result.AffectedDocs {
+		fmt.Fprintf(w, "- %s", item.Ref)
+		if item.Repo != "" {
+			fmt.Fprintf(w, " | repo: %s", item.Repo)
+		}
+		if item.SourceRef != "" {
+			fmt.Fprintf(w, " | source: %s", displaySourcePath(item.SourceRef))
+		}
+		fmt.Fprintf(w, " | %.3f", item.Score)
+		if item.Title != "" {
+			fmt.Fprintf(w, " | %s", item.Title)
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 func renderComplianceResult(w io.Writer, result *analysis.ComplianceResult) {
@@ -716,7 +791,7 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		docLabel := preferredDocLabel(assessment.DocRef, assessment.SourceRef)
+		docLabel := repoPathLabel(assessment.Repo, preferredDocLabel(assessment.DocRef, assessment.SourceRef))
 		fmt.Fprintf(w, "  %s", p.cyan(docLabel))
 		if padding := docDriftPadding(docLabel); padding > 0 {
 			fmt.Fprint(w, strings.Repeat(" ", padding))
@@ -739,12 +814,17 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 			fmt.Fprintf(w, "\n    %s %s\n", p.arrow(), assessment.Rationale)
 		}
 		if suggestions := remediation[assessment.DocRef]; len(suggestions) > 0 {
-			pathArg := docLabel
+			pathArg := preferredDocLabel(assessment.DocRef, assessment.SourceRef)
 			if assessment.SourceRef != "" {
-				pathArg = assessment.SourceRef
+				pathArg = displaySourcePath(assessment.SourceRef)
 			}
-			fmt.Fprintf(w, "\n    %s pituitary fix --path %s %s\n", p.green("fix:"), pathArg, p.dim(fmt.Sprintf("(%d edits)", len(suggestions))))
-			fmt.Fprintf(w, "    %s  run `pituitary review-spec --format html --path <spec>` for the full evidence report\n", p.info())
+			if isNonPrimaryRepoDoc(assessment.DocRef, assessment.Repo) {
+				fmt.Fprintf(w, "\n    %s  deterministic remediation is available, but `pituitary fix --path` only targets primary-workspace docs; inspect %s manually\n", p.info(), p.cyan(docLabel))
+				fmt.Fprintf(w, "    %s  run `pituitary review-spec --format html --path <spec>` for the full evidence report\n", p.info())
+			} else {
+				fmt.Fprintf(w, "\n    %s pituitary fix --path %s %s\n", p.green("fix:"), pathArg, p.dim(fmt.Sprintf("(%d edits)", len(suggestions))))
+				fmt.Fprintf(w, "    %s  run `pituitary review-spec --format html --path <spec>` for the full evidence report\n", p.info())
+			}
 		} else if assessment.Status == "drift" || assessment.Status == "possible_drift" {
 			fmt.Fprintf(w, "\n    %s  run `pituitary review-spec --format html --path <spec>` for the full evidence chain (no deterministic fix available)\n", p.info())
 		}
@@ -844,7 +924,7 @@ func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
 		fmt.Fprintf(w, "  %s %s\n", p.treeLast(), p.dim("no drifting docs detected"))
 	} else {
 		for i, assessment := range driftAssessments {
-			fmt.Fprintf(w, "  %s %s  %s\n", p.treeBranch(i == len(driftAssessments)-1), p.cyan(preferredDocLabel(assessment.DocRef, assessment.SourceRef)), driftAssessmentBadge(p, assessment.Status))
+			fmt.Fprintf(w, "  %s %s  %s\n", p.treeBranch(i == len(driftAssessments)-1), p.cyan(repoPathLabel(assessment.Repo, preferredDocLabel(assessment.DocRef, assessment.SourceRef))), driftAssessmentBadge(p, assessment.Status))
 			if suggestions := remediationItemsByDocRef(result.DocRemediation)[assessment.DocRef]; len(suggestions) > 0 {
 				fmt.Fprintf(w, "     %s %d suggested edits %s\n", p.arrow(), len(suggestions), p.dim("(see check-doc-drift for detail)"))
 			}
@@ -941,6 +1021,9 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 			fmt.Fprintln(w, "- Top impacted specs:")
 			for _, item := range topImpactedSpecs(result.Impact.AffectedSpecs, 3) {
 				fmt.Fprintf(w, "  - `%s` %s (%s", item.Ref, item.Title, item.Relationship)
+				if item.Repo != "" {
+					fmt.Fprintf(w, ", repo %s", item.Repo)
+				}
 				if item.Historical {
 					fmt.Fprint(w, ", historical")
 				}
@@ -956,6 +1039,9 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 			fmt.Fprintln(w, "- Top impacted docs:")
 			for _, item := range topImpactedDocs(result.Impact.AffectedDocs, 3) {
 				fmt.Fprintf(w, "  - `%s` %s (score %.3f", item.Ref, item.Title, item.Score)
+				if item.Repo != "" {
+					fmt.Fprintf(w, ", repo %s", item.Repo)
+				}
 				if item.SourceRef != "" {
 					fmt.Fprintf(w, ", %s", item.SourceRef)
 				}
@@ -1608,9 +1694,38 @@ func complianceBadge(p renderPresentation, label string) string {
 
 func preferredDocLabel(docRef, sourceRef string) string {
 	if strings.TrimSpace(sourceRef) != "" {
-		return sourceRef
+		return displaySourcePath(sourceRef)
 	}
 	return docRef
+}
+
+func displaySourcePath(sourceRef string) string {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if sourceRef == "" {
+		return ""
+	}
+	return strings.TrimPrefix(sourceRef, "file://")
+}
+
+func repoPathLabel(repo, label string) string {
+	repo = strings.TrimSpace(repo)
+	label = strings.TrimSpace(label)
+	switch {
+	case repo == "":
+		return label
+	case label == "":
+		return repo
+	default:
+		return fmt.Sprintf("[%s] %s", repo, label)
+	}
+}
+
+func isNonPrimaryRepoDoc(docRef, repo string) bool {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(docRef), "doc://"+repo+"/")
 }
 
 func docDriftPadding(label string) int {
@@ -1675,6 +1790,9 @@ func reviewImpactLines(result *analysis.AnalyzeImpactResult) []string {
 	lines := make([]string, 0, 6)
 	for _, item := range topImpactedSpecs(result.AffectedSpecs, 2) {
 		line := fmt.Sprintf("%s  %s · %s", item.Ref, item.Title, item.Relationship)
+		if item.Repo != "" {
+			line += " · repo: " + item.Repo
+		}
 		if item.Historical {
 			line += " · historical"
 		}
@@ -1682,6 +1800,12 @@ func reviewImpactLines(result *analysis.AnalyzeImpactResult) []string {
 	}
 	for _, item := range topImpactedDocs(result.AffectedDocs, 2) {
 		line := fmt.Sprintf("%s  %.3f", item.Ref, item.Score)
+		if item.Repo != "" {
+			line += " · repo: " + item.Repo
+		}
+		if item.SourceRef != "" {
+			line += " · " + displaySourcePath(item.SourceRef)
+		}
 		lines = append(lines, line)
 	}
 	return lines
@@ -1797,6 +1921,7 @@ func driftAssessmentsFromItems(items []analysis.DriftItem) []analysis.DocDriftAs
 		result = append(result, analysis.DocDriftAssessment{
 			DocRef:    item.DocRef,
 			Title:     item.Title,
+			Repo:      item.Repo,
 			SourceRef: item.SourceRef,
 			Status:    "drift",
 			SpecRefs:  append([]string(nil), item.SpecRefs...),

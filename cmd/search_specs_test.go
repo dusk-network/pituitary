@@ -68,6 +68,51 @@ func TestRunSearchSpecsJSON(t *testing.T) {
 	}
 }
 
+func TestRunSearchSpecsJSONIncludesRepoAndSource(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runSearchSpecs([]string{"--query", "shared repo rollout", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Matches []struct {
+				Ref       string `json:"ref"`
+				Repo      string `json:"repo"`
+				SourceRef string `json:"source_ref"`
+			} `json:"matches"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal search payload: %v", err)
+	}
+	if len(payload.Result.Matches) == 0 {
+		t.Fatal("payload returned no matches")
+	}
+	if got, want := payload.Result.Matches[0].Ref, "SPEC-200"; got != want {
+		t.Fatalf("top match ref = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Matches[0].Repo, "shared"; got != want {
+		t.Fatalf("top match repo = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Matches[0].SourceRef, "file://specs/shared-rollout/spec.toml"; got != want {
+		t.Fatalf("top match source_ref = %q, want %q", got, want)
+	}
+}
+
 func TestRunSearchSpecsTable(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
@@ -378,6 +423,102 @@ kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
 	`)
+	return root
+}
+
+func writeMultiRepoSearchWorkspace(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustWriteIndexFixture(t, root, `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+repo_id = "primary"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(shared)+`"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "primary-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "primary-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md"]
+
+[[sources]]
+name = "shared-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+repo = "shared"
+path = "specs"
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+include = ["guides/*.md"]
+	`)
+	mustWriteFileCmd(t, filepath.Join(primary, "specs", "tenant-rate-limits", "spec.toml"), `
+id = "SPEC-100"
+title = "Tenant Rate Limits"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFileCmd(t, filepath.Join(primary, "specs", "tenant-rate-limits", "body.md"), `
+# Tenant Rate Limits
+
+## Defaults
+
+The default rate limit is 200 requests per minute.
+`)
+	mustWriteFileCmd(t, filepath.Join(primary, "docs", "guides", "api-rate-limits.md"), `
+# API Rate Limits
+
+The default rate limit is 200 requests per minute.
+`)
+	mustWriteFileCmd(t, filepath.Join(shared, "specs", "shared-rollout", "spec.toml"), `
+id = "SPEC-200"
+title = "Shared Repo Rollout"
+status = "accepted"
+domain = "api"
+body = "body.md"
+depends_on = ["SPEC-100"]
+`)
+	mustWriteFileCmd(t, filepath.Join(shared, "specs", "shared-rollout", "body.md"), `
+# Shared Repo Rollout
+
+## Dependencies
+
+This rollout depends on SPEC-100.
+
+## Tasks
+
+Update shared consumers to respect the 200 requests per minute tenant default.
+`)
+	mustWriteFileCmd(t, filepath.Join(shared, "docs", "guides", "api-rate-limits.md"), `
+# API Rate Limits
+
+The default rate limit is 100 requests per minute.
+`)
 	return root
 }
 

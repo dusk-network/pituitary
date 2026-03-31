@@ -172,6 +172,56 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 }
 
+func TestRunStatusJSONIncludesRepoCoverage(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var rebuildStdout bytes.Buffer
+	var rebuildStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &rebuildStdout, &rebuildStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, rebuildStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Repos []struct {
+				Repo      string `json:"repo"`
+				ItemCount int    `json:"item_count"`
+				SpecCount int    `json:"spec_count"`
+				DocCount  int    `json:"doc_count"`
+			} `json:"repo_coverage"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if got, want := len(payload.Result.Repos), 2; got != want {
+		t.Fatalf("repo coverage = %+v, want %d repos", payload.Result.Repos, want)
+	}
+	for _, repo := range payload.Result.Repos {
+		if repo.Repo != "primary" && repo.Repo != "shared" {
+			t.Fatalf("unexpected repo coverage entry %+v", repo)
+		}
+		if repo.ItemCount != 2 || repo.SpecCount != 1 || repo.DocCount != 1 {
+			t.Fatalf("repo coverage entry %+v, want 2 items / 1 spec / 1 doc", repo)
+		}
+	}
+}
+
 func TestRunStatusReportsStaleIndexFreshness(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

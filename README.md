@@ -71,6 +71,8 @@ pituitary status                       # index health at a glance
 
 All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=json`, and redirected stdout defaults to JSON automatically. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
 
+One `pituitary.toml` can also span multiple repository roots. Bind a source to a named repo root with `repo = "..."`, and Pituitary carries that repo identity through search, drift, impact, status, and index output so cross-repo results stay unambiguous.
+
 For agent integrations, use `pituitary schema <command> --format json` to inspect request/response contracts, and prefer `--request-file PATH|-` on analysis commands when shell escaping would be brittle. Results that include raw repo excerpts or evidence now carry `result.content_trust` metadata so callers can treat returned workspace text as untrusted input instead of executable instructions.
 
 See the [cheatsheet](docs/cheatsheet.md) for every command, the [full reference](docs/reference.md) for configuration/runtime/spec details, the reusable multi-editor package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md), and [AGENTS.md](AGENTS.md) for repo-native agent instructions.

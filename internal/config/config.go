@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/dusk-network/pituitary/sdk"
 )
@@ -46,9 +47,19 @@ type Config struct {
 // Workspace describes the configured workspace root and index path.
 type Workspace struct {
 	Root              string
+	RepoID            string
 	RootPath          string
 	IndexPath         string
 	ResolvedIndexPath string
+	Repos             []WorkspaceRepo
+}
+
+// WorkspaceRepo describes one additional repo root that participates in the
+// logical multi-repo workspace.
+type WorkspaceRepo struct {
+	ID       string
+	Root     string
+	RootPath string
 }
 
 // Source describes one configured input source.
@@ -57,11 +68,15 @@ type Source struct {
 	Adapter      string
 	Kind         string
 	Role         string
+	Repo         string
 	Path         string
 	Files        []string
 	Include      []string
 	Exclude      []string
 	Options      map[string]any
+	ResolvedRepo string
+	PrimaryRepo  string
+	RepoRootPath string
 	ResolvedPath string
 }
 
@@ -89,8 +104,15 @@ type rawConfig struct {
 }
 
 type rawWorkspace struct {
-	Root      string `toml:"root"`
-	IndexPath string `toml:"index_path"`
+	Root      string             `toml:"root"`
+	RepoID    string             `toml:"repo_id"`
+	IndexPath string             `toml:"index_path"`
+	Repos     []rawWorkspaceRepo `toml:"repos"`
+}
+
+type rawWorkspaceRepo struct {
+	ID   string `toml:"id"`
+	Root string `toml:"root"`
 }
 
 type rawRuntime struct {
@@ -103,6 +125,7 @@ type rawSource struct {
 	Adapter string         `toml:"adapter"`
 	Kind    string         `toml:"kind"`
 	Role    string         `toml:"role"`
+	Repo    string         `toml:"repo"`
 	Path    string         `toml:"path"`
 	Files   []string       `toml:"files"`
 	Include []string       `toml:"include"`
@@ -188,7 +211,9 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 		ConfigDir:     configBaseDir(configPath),
 		Workspace: Workspace{
 			Root:      raw.Workspace.Root,
+			RepoID:    strings.TrimSpace(raw.Workspace.RepoID),
 			IndexPath: raw.Workspace.IndexPath,
+			Repos:     make([]WorkspaceRepo, 0, len(raw.Workspace.Repos)),
 		},
 		Runtime: Runtime{
 			Embedder: RuntimeProvider{
@@ -210,12 +235,19 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 		},
 		Sources: make([]Source, 0, len(raw.Sources)),
 	}
+	for _, repo := range raw.Workspace.Repos {
+		cfg.Workspace.Repos = append(cfg.Workspace.Repos, WorkspaceRepo{
+			ID:   strings.TrimSpace(repo.ID),
+			Root: repo.Root,
+		})
+	}
 	for _, source := range raw.Sources {
 		cfg.Sources = append(cfg.Sources, Source{
 			Name:    source.Name,
 			Adapter: source.Adapter,
 			Kind:    source.Kind,
 			Role:    NormalizeSourceRole(source.Role),
+			Repo:    strings.TrimSpace(source.Repo),
 			Path:    source.Path,
 			Files:   append([]string(nil), source.Files...),
 			Include: append([]string(nil), source.Include...),
@@ -338,6 +370,42 @@ func validate(cfg *Config) error {
 		}
 	}
 
+	if cfg.Workspace.RepoID != "" && !isValidRepoID(cfg.Workspace.RepoID) {
+		errs.add("workspace.repo_id: unsupported repo id %q", cfg.Workspace.RepoID)
+	}
+	primaryRepoID := effectiveWorkspaceRepoID(cfg.Workspace)
+	seenRepoIDs := map[string]struct{}{}
+	if primaryRepoID != "" {
+		seenRepoIDs[primaryRepoID] = struct{}{}
+	}
+	for i := range cfg.Workspace.Repos {
+		repo := &cfg.Workspace.Repos[i]
+		label := fmt.Sprintf("workspace.repos[%d]", i)
+		if repo.ID == "" {
+			errs.add("%s.id: value is required", label)
+		} else {
+			if !isValidRepoID(repo.ID) {
+				errs.add("%s.id: unsupported repo id %q", label, repo.ID)
+			} else if _, exists := seenRepoIDs[repo.ID]; exists {
+				errs.add("%s.id: %q is duplicated", label, repo.ID)
+			} else {
+				seenRepoIDs[repo.ID] = struct{}{}
+			}
+		}
+		if repo.Root == "" {
+			errs.add("%s.root: value is required", label)
+			continue
+		}
+		repo.RootPath = resolvePath(cfg.ConfigDir, repo.Root)
+		info, err := os.Stat(repo.RootPath)
+		switch {
+		case err == nil && !info.IsDir():
+			errs.add("%s.root: %q is not a directory", label, repo.Root)
+		case err != nil:
+			errs.add("%s.root: %q does not exist", label, repo.Root)
+		}
+	}
+
 	if cfg.Workspace.IndexPath == "" {
 		errs.add("workspace.index_path: value is required")
 	} else if cfg.Workspace.RootPath != "" {
@@ -381,6 +449,9 @@ func validate(cfg *Config) error {
 		}
 		if source.Role != "" && !IsValidSourceRole(source.Role) {
 			errs.add("%s.role: unsupported role %q", label, source.Role)
+		}
+		if source.Repo != "" && !isValidRepoID(source.Repo) {
+			errs.add("%s.repo: unsupported repo id %q", label, source.Repo)
 		}
 
 		filesystemSource := source.Adapter == AdapterFilesystem
@@ -434,8 +505,22 @@ func validate(cfg *Config) error {
 		if cfg.Workspace.RootPath == "" {
 			continue
 		}
+		repoID := primaryRepoID
+		repoRootPath := cfg.Workspace.RootPath
+		if source.Repo != "" {
+			repoID = source.Repo
+			resolved, ok := lookupWorkspaceRepoRoot(cfg.Workspace, repoID)
+			if !ok {
+				errs.add("%s.repo: unknown repo %q", label, source.Repo)
+				continue
+			}
+			repoRootPath = resolved
+		}
+		source.ResolvedRepo = repoID
+		source.PrimaryRepo = primaryRepoID
+		source.RepoRootPath = repoRootPath
 		if strings.TrimSpace(source.Path) != "" {
-			source.ResolvedPath = resolvePath(cfg.Workspace.RootPath, source.Path)
+			source.ResolvedPath = resolvePath(repoRootPath, source.Path)
 		}
 		if filesystemSource && source.ResolvedPath != "" {
 			info, err := os.Stat(source.ResolvedPath)
@@ -463,6 +548,58 @@ func validate(cfg *Config) error {
 	}
 
 	return errs.err()
+}
+
+func effectiveWorkspaceRepoID(workspace Workspace) string {
+	if explicit := strings.TrimSpace(workspace.RepoID); explicit != "" {
+		return explicit
+	}
+	candidate := strings.TrimSpace(filepath.Base(workspace.RootPath))
+	if isValidRepoID(candidate) {
+		return candidate
+	}
+	return "workspace"
+}
+
+// PrimaryRepoID returns the effective repo identity for the configured primary
+// workspace root.
+func PrimaryRepoID(cfg *Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return effectiveWorkspaceRepoID(cfg.Workspace)
+}
+
+func lookupWorkspaceRepoRoot(workspace Workspace, repoID string) (string, bool) {
+	repoID = strings.TrimSpace(repoID)
+	if repoID == "" {
+		return "", false
+	}
+	if repoID == effectiveWorkspaceRepoID(workspace) {
+		return workspace.RootPath, workspace.RootPath != ""
+	}
+	for _, repo := range workspace.Repos {
+		if strings.TrimSpace(repo.ID) == repoID {
+			return repo.RootPath, repo.RootPath != ""
+		}
+	}
+	return "", false
+}
+
+func isValidRepoID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeSourceFileSelector(value string) (string, error) {

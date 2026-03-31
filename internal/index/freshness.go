@@ -268,7 +268,11 @@ func sourceFingerprint(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	parts := make([]string, 0, len(cfg.Sources))
+	parts := make([]string, 0, len(cfg.Sources)+len(cfg.Workspace.Repos)+1)
+	parts = append(parts, "workspace_repo_id="+config.PrimaryRepoID(cfg))
+	for _, repo := range cfg.Workspace.Repos {
+		parts = append(parts, "workspace_repo="+strings.TrimSpace(repo.ID)+"|"+filepath.ToSlash(strings.TrimSpace(repo.Root))+"|"+filepath.ToSlash(strings.TrimSpace(repo.RootPath)))
+	}
 	for _, src := range cfg.Sources {
 		files := append([]string(nil), src.Files...)
 		include := append([]string(nil), src.Include...)
@@ -282,6 +286,9 @@ func sourceFingerprint(cfg *config.Config) string {
 			src.Name,
 			src.Adapter,
 			src.Kind,
+			src.Repo,
+			src.ResolvedRepo,
+			filepath.ToSlash(src.RepoRootPath),
 			filepath.ToSlash(src.Path),
 			filepath.ToSlash(src.ResolvedPath),
 			strings.Join(files, ","),

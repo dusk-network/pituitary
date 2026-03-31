@@ -81,6 +81,7 @@ type DriftFinding struct {
 type DriftItem struct {
 	DocRef    string         `json:"doc_ref"`
 	Title     string         `json:"title"`
+	Repo      string         `json:"repo,omitempty"`
 	SourceRef string         `json:"source_ref"`
 	SpecRefs  []string       `json:"spec_refs"`
 	Findings  []DriftFinding `json:"findings"`
@@ -90,6 +91,7 @@ type DriftItem struct {
 type DocDriftAssessment struct {
 	DocRef     string           `json:"doc_ref"`
 	Title      string           `json:"title"`
+	Repo       string           `json:"repo,omitempty"`
 	SourceRef  string           `json:"source_ref"`
 	Status     string           `json:"status"`
 	SpecRefs   []string         `json:"spec_refs,omitempty"`
@@ -129,6 +131,7 @@ type DocRemediationSuggestion struct {
 type DocRemediationItem struct {
 	DocRef      string                     `json:"doc_ref"`
 	Title       string                     `json:"title"`
+	Repo        string                     `json:"repo,omitempty"`
 	SourceRef   string                     `json:"source_ref"`
 	Suggestions []DocRemediationSuggestion `json:"suggestions"`
 }
@@ -539,6 +542,7 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 	item := &DriftItem{
 		DocRef:    doc.Record.Ref,
 		Title:     doc.Record.Title,
+		Repo:      artifactRepoID(doc.Record.Metadata),
 		SourceRef: doc.Record.SourceRef,
 		SpecRefs:  uniqueStrings(specRefs),
 		Findings:  findings,
@@ -562,6 +566,7 @@ func assessDocDrift(doc docDocument, relevant []specDocument, item *DriftItem) *
 		assessment := &DocDriftAssessment{
 			DocRef:    item.DocRef,
 			Title:     item.Title,
+			Repo:      item.Repo,
 			SourceRef: item.SourceRef,
 			Status:    "drift",
 			SpecRefs:  append([]string(nil), item.SpecRefs...),
@@ -589,6 +594,7 @@ func assessDocDrift(doc docDocument, relevant []specDocument, item *DriftItem) *
 	return &DocDriftAssessment{
 		DocRef:     doc.Record.Ref,
 		Title:      doc.Record.Title,
+		Repo:       artifactRepoID(doc.Record.Metadata),
 		SourceRef:  doc.Record.SourceRef,
 		Status:     "aligned",
 		SpecRefs:   []string{candidate.spec.Record.Ref},
@@ -610,6 +616,7 @@ func possibleDriftAssessment(doc docDocument, specs map[string]specDocument) *Do
 	return &DocDriftAssessment{
 		DocRef:     doc.Record.Ref,
 		Title:      doc.Record.Title,
+		Repo:       artifactRepoID(doc.Record.Metadata),
 		SourceRef:  doc.Record.SourceRef,
 		Status:     "possible_drift",
 		SpecRefs:   []string{bestSpec.Record.Ref},
@@ -684,6 +691,7 @@ func buildDocRemediationItem(doc docDocument, specs map[string]specDocument, fin
 	return &DocRemediationItem{
 		DocRef:      doc.Record.Ref,
 		Title:       doc.Record.Title,
+		Repo:        artifactRepoID(doc.Record.Metadata),
 		SourceRef:   doc.Record.SourceRef,
 		Suggestions: suggestions,
 	}
@@ -743,6 +751,7 @@ func historicalDocAssessment(doc docDocument, relevant []specDocument) *DocDrift
 	assessment := &DocDriftAssessment{
 		DocRef:    doc.Record.Ref,
 		Title:     doc.Record.Title,
+		Repo:      artifactRepoID(doc.Record.Metadata),
 		SourceRef: doc.Record.SourceRef,
 		Status:    "aligned",
 		Rationale: "doc source is marked historical, so historical terminology and superseded behavior are tolerated during drift checks",

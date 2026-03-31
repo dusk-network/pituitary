@@ -218,6 +218,37 @@ func TestRunCheckDocDriftTextIncludesRemediation(t *testing.T) {
 	}
 }
 
+func TestRunCheckDocDriftTextIncludesRepoIdentity(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--scope", "all"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"[shared] docs/guides/api-rate-limits.md",
+		"██ DRIFT",
+		"deterministic remediation is available, but `pituitary fix --path` only targets primary-workspace docs",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runCheckDocDrift() output %q does not contain %q", out, want)
+		}
+	}
+}
+
 func TestRunCheckDocDriftWarnsOnWeakAcceptedContracts(t *testing.T) {
 	repo := writeWeakAcceptedContractWorkspace(t)
 

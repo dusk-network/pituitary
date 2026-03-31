@@ -48,6 +48,7 @@ type SearchSpecMatch struct {
 	Title          string                     `json:"title"`
 	SectionHeading string                     `json:"section_heading"`
 	Excerpt        string                     `json:"excerpt"`
+	Repo           string                     `json:"repo,omitempty"`
 	SourceRef      string                     `json:"source_ref"`
 	Kind           string                     `json:"kind,omitempty"`
 	Status         string                     `json:"status,omitempty"`
@@ -68,6 +69,7 @@ type chunkCandidate struct {
 	Title          string
 	SectionHeading string
 	Content        string
+	Repo           string
 	SourceRef      string
 	Kind           string
 	Status         string
@@ -173,6 +175,7 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 			Title:          candidate.Title,
 			SectionHeading: candidate.SectionHeading,
 			Excerpt:        excerpt(candidate.Content),
+			Repo:           candidate.Repo,
 			SourceRef:      candidate.SourceRef,
 			Kind:           candidate.Kind,
 			Status:         candidate.Status,
@@ -312,6 +315,7 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 			if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
 				return nil, fmt.Errorf("parse search metadata for %s: %w", candidate.Ref, err)
 			}
+			candidate.Repo = strings.TrimSpace(metadata["repo_id"])
 			candidate.Inference, err = model.DecodeInferenceConfidence(metadata)
 			if err != nil {
 				return nil, fmt.Errorf("decode search inference for %s: %w", candidate.Ref, err)
