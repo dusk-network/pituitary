@@ -9,6 +9,10 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 )
 
+// driftImplicatedDocMinScore is the minimum doc/spec similarity required to
+// keep a doc in the diff-driven shortlist.
+const driftImplicatedDocMinScore = 0.35
+
 // DriftChangedFile summarizes one changed path from a diff-driven doc-drift run.
 type DriftChangedFile struct {
 	Path             string `json:"path"`
@@ -60,7 +64,7 @@ func resolveDiffDocDriftContext(ctx context.Context, repo *analysisRepository, c
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	targets, err := loadDiffComplianceTargetsContext(ctx, diffText)
+	targets, err := loadParsedDiffComplianceTargetsContext(ctx, parsed)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
@@ -131,7 +135,7 @@ func resolveDiffDocDriftContext(ctx context.Context, repo *analysisRepository, c
 		}
 		for docRef, doc := range docs {
 			score := documentSimilarity(spec.Sections, doc.Sections)
-			if score < 0.35 {
+			if score < driftImplicatedDocMinScore {
 				continue
 			}
 			state, ok := docStates[docRef]

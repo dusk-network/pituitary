@@ -463,3 +463,69 @@ func TestRunCheckDocDriftWithRequestFileJSON(t *testing.T) {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
+
+func TestRunCheckDocDriftWithRequestFileDiffFileJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "doc-drift-request.json"), map[string]any{
+		"diff_file": "-",
+	})
+
+	oldStdin := cliStdin
+	cliStdin = strings.NewReader(strings.TrimSpace(`
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+--- a/src/api/middleware/ratelimiter.go
++++ b/src/api/middleware/ratelimiter.go
+@@ -1,2 +1,2 @@
+-const defaultLimit = 100
++const defaultLimit = 200
+`))
+	defer func() {
+		cliStdin = oldStdin
+	}()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckDocDrift([]string{"--request-file", "doc-drift-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			DiffFile string `json:"diff_file"`
+		} `json:"request"`
+		Result struct {
+			Scope struct {
+				Mode string `json:"mode"`
+			} `json:"scope"`
+			ChangedFiles []struct {
+				Path string `json:"path"`
+			} `json:"changed_files"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal doc-drift request-file diff payload: %v", err)
+	}
+	if got, want := payload.Request.DiffFile, "-"; got != want {
+		t.Fatalf("request.diff_file = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Scope.Mode, "diff"; got != want {
+		t.Fatalf("result.scope.mode = %q, want %q", got, want)
+	}
+	if len(payload.Result.ChangedFiles) != 1 || payload.Result.ChangedFiles[0].Path != "src/api/middleware/ratelimiter.go" {
+		t.Fatalf("changed_files = %+v, want ratelimiter.go", payload.Result.ChangedFiles)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}

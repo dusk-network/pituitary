@@ -78,8 +78,11 @@ jobs:
       - name: Check changed code against accepted specs
         run: git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 
-      - name: Check doc drift
+      - name: Check doc drift from the PR diff
         run: git diff origin/main...HEAD | pituitary check-doc-drift --diff-file -
+
+      - name: Check doc drift across the full workspace
+        run: pituitary check-doc-drift --scope all
 ```
 
 ## Optional runtime preflight for real embeddings
