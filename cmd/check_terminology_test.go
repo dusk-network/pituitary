@@ -9,8 +9,6 @@ import (
 )
 
 func TestRunCheckTerminologyReportsAnchoredFindings(t *testing.T) {
-	t.Parallel()
-
 	repo := writeTerminologyWorkspaceCmd(t)
 	indexStdout := bytes.Buffer{}
 	indexStderr := bytes.Buffer{}
@@ -58,8 +56,6 @@ func TestRunCheckTerminologyReportsAnchoredFindings(t *testing.T) {
 }
 
 func TestRunCheckTerminologyUsesConfiguredPoliciesWithoutTerms(t *testing.T) {
-	t.Parallel()
-
 	repo := writeTerminologyWorkspaceCmd(t)
 	indexStdout := bytes.Buffer{}
 	indexStderr := bytes.Buffer{}
