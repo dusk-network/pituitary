@@ -497,6 +497,12 @@ func normalizeProvidedRemediation(base *DocRemediationItem, provided []DocRemedi
 		if summary := strings.TrimSpace(suggestion.Summary); summary != "" {
 			normalized.Summary = summary
 		}
+		if linkReason := strings.TrimSpace(suggestion.LinkReason); linkReason != "" {
+			normalized.LinkReason = linkReason
+		}
+		if bullets := normalizeStringList(suggestion.SuggestedBullets, 4); len(bullets) > 0 {
+			normalized.SuggestedBullets = bullets
+		}
 		if action := strings.TrimSpace(suggestion.SuggestedEdit.Action); action != "" {
 			normalized.SuggestedEdit.Action = action
 		}
@@ -521,6 +527,7 @@ func normalizeProvidedRemediation(base *DocRemediationItem, provided []DocRemedi
 	return &DocRemediationItem{
 		DocRef:      base.DocRef,
 		Title:       base.Title,
+		Repo:        base.Repo,
 		SourceRef:   base.SourceRef,
 		Suggestions: result,
 	}
@@ -528,11 +535,17 @@ func normalizeProvidedRemediation(base *DocRemediationItem, provided []DocRemedi
 
 func normalizeProvidedEvidence(base, provided DocRemediationEvidence) DocRemediationEvidence {
 	result := base
+	if value := strings.TrimSpace(provided.SpecSourceRef); value != "" {
+		result.SpecSourceRef = value
+	}
 	if value := strings.TrimSpace(provided.SpecSection); value != "" {
 		result.SpecSection = value
 	}
 	if value := strings.TrimSpace(provided.SpecExcerpt); value != "" {
 		result.SpecExcerpt = value
+	}
+	if value := strings.TrimSpace(provided.DocSourceRef); value != "" {
+		result.DocSourceRef = value
 	}
 	if value := strings.TrimSpace(provided.DocSection); value != "" {
 		result.DocSection = value
@@ -545,6 +558,9 @@ func normalizeProvidedEvidence(base, provided DocRemediationEvidence) DocRemedia
 	}
 	if value := strings.TrimSpace(provided.Observed); value != "" {
 		result.Observed = value
+	}
+	if value := strings.TrimSpace(provided.LinkReason); value != "" {
+		result.LinkReason = value
 	}
 	return result
 }

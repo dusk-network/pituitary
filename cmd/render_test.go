@@ -651,7 +651,23 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 		},
 		Impact: &analysis.AnalyzeImpactResult{
 			AffectedSpecs: []analysis.ImpactedSpec{{Ref: "SPEC-055", Title: "Tenant Overrides Rollout", Relationship: "depends_on"}},
-			AffectedDocs:  []analysis.ImpactedDoc{{Ref: "doc://guides/api-rate-limits", Title: "API Rate Limits", SourceRef: "file://docs/guides/api-rate-limits.md", Score: 0.912}},
+			AffectedDocs: []analysis.ImpactedDoc{{
+				Ref:            "doc://guides/api-rate-limits",
+				Title:          "API Rate Limits",
+				SourceRef:      "file://docs/guides/api-rate-limits.md",
+				Score:          0.912,
+				Classification: "semantic_neighbor",
+				Evidence: &analysis.ImpactEvidence{
+					SpecRef:      "SPEC-042",
+					SpecSection:  "Defaults",
+					DocSourceRef: "file://docs/guides/api-rate-limits.md",
+					DocSection:   "Defaults",
+				},
+				SuggestedTargets: []analysis.ImpactEditTarget{{
+					SourceRef: "file://docs/guides/api-rate-limits.md",
+					Section:   "Defaults",
+				}},
+			}},
 		},
 		DocDrift: &analysis.DocDriftResult{
 			DriftItems: []analysis.DriftItem{
@@ -669,12 +685,21 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 					DocRef: "doc://guides/api-rate-limits",
 					Suggestions: []analysis.DocRemediationSuggestion{
 						{
-							SpecRef: "SPEC-042",
-							Code:    "default_limit_mismatch",
-							Summary: "update the documented default rate limit to the accepted value",
+							SpecRef:         "SPEC-042",
+							Code:            "default_limit_mismatch",
+							Classification:  "semantic_contradiction",
+							Summary:         "update the documented default rate limit to the accepted value",
+							LinkReason:      "localized the strongest doc/spec evidence pair for default_limit_mismatch using deterministic keywords",
+							TargetSourceRef: "file://docs/guides/api-rate-limits.md",
+							TargetSection:   "Defaults",
+							SuggestedBullets: []string{
+								"Review Defaults in doc://guides/api-rate-limits against SPEC-042 / Defaults before editing nearby guidance.",
+							},
 							Evidence: analysis.DocRemediationEvidence{
-								SpecExcerpt: "Enforce a default limit of 200 requests per minute.",
-								DocExcerpt:  "The default limit is 100 requests per minute for each API key.",
+								SpecSourceRef: "file://specs/rate-limit-v2/body.md",
+								SpecExcerpt:   "Enforce a default limit of 200 requests per minute.",
+								DocExcerpt:    "The default limit is 100 requests per minute for each API key.",
+								LinkReason:    "localized the strongest doc/spec evidence pair for default_limit_mismatch using deterministic keywords",
 							},
 							SuggestedEdit: analysis.DocSuggestedEdit{
 								Action:  "replace_claim",
@@ -711,13 +736,18 @@ func TestRenderCommandMarkdownReviewSpec(t *testing.T) {
 		"Top impacted specs",
 		"`SPEC-055` Tenant Overrides Rollout (depends_on)",
 		"Top impacted docs",
-		"`doc://guides/api-rate-limits` API Rate Limits (score 0.912, file://docs/guides/api-rate-limits.md)",
+		"`doc://guides/api-rate-limits` API Rate Limits (score 0.912, semantic_neighbor, file://docs/guides/api-rate-limits.md)",
+		"Evidence: SPEC-042 / Defaults -> docs/guides/api-rate-limits.md / Defaults",
+		"Suggested target: file://docs/guides/api-rate-limits.md / Defaults",
 		"## Doc Drift",
 		"Summary: 1 doc(s) need follow-up",
 		"Finding `default_limit_mismatch` from `SPEC-042`: document reports a different default limit (expected `200`, observed `100`)",
 		"## Doc Remediation",
 		"Summary: 1 suggested update(s)",
-		"Update `default_limit_mismatch` from `SPEC-042`",
+		"Update `default_limit_mismatch` from `SPEC-042` [semantic_contradiction]",
+		"Target: file://docs/guides/api-rate-limits.md / Defaults",
+		"Link reason: localized the strongest doc/spec evidence pair for default_limit_mismatch using deterministic keywords",
+		"Next step: Review Defaults in doc://guides/api-rate-limits against SPEC-042 / Defaults before editing nearby guidance.",
 		"Suggested edit: replace",
 	} {
 		if !strings.Contains(output, want) {

@@ -54,6 +54,13 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 
 When you already have a patch, `check-doc-drift --diff-file` narrows the stale-doc search to the changed files, the implicated specs, and the docs linked through those specs. The JSON response includes `changed_files`, `implicated_specs`, `implicated_docs`, and the usual `drift_items` / `assessments` payload so agents can explain why each doc was shortlisted.
 
+Each drift finding and remediation suggestion now also carries a section-level evidence chain:
+
+- source refs for the accepted spec section and the drifting doc section
+- a `classification` and `link_reason`
+- likely edit targets such as `target_source_ref` / `target_section`
+- `suggested_bullets` for the next manual edit step when deterministic auto-fix is not appropriate
+
 ```sh
 git diff --cached | pituitary check-doc-drift --diff-file -
 git diff origin/main...HEAD | pituitary check-doc-drift --diff-file - --format json
@@ -98,6 +105,8 @@ pituitary check-compliance --request-file request.json --format json
 - remediation suggestions
 
 Use `--format markdown` for PR-friendly reports and `--format html` for a richer shareable report with expandable evidence.
+
+`analyze-impact` uses the same pattern for docs it shortlists: each impacted doc can include a `classification`, a source-linked `evidence` object, and `suggested_targets` with likely doc sections to inspect first.
 
 ## CI
 

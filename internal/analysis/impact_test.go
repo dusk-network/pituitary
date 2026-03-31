@@ -48,6 +48,9 @@ func TestAnalyzeImpactFindsDependentSpecsRefsAndDocs(t *testing.T) {
 
 	var foundGuide, foundRunbook bool
 	for _, doc := range result.AffectedDocs {
+		if doc.Classification == "" || doc.Evidence == nil || doc.Evidence.LinkReason == "" || len(doc.SuggestedTargets) == 0 || doc.SuggestedTargets[0].Section == "" {
+			t.Fatalf("affected doc = %+v, want classification, evidence, and suggested target", doc)
+		}
 		switch doc.Ref {
 		case "doc://guides/api-rate-limits":
 			foundGuide = true
@@ -135,6 +138,9 @@ func TestAnalyzeImpactIncludesCrossRepoArtifacts(t *testing.T) {
 			}
 			if got, want := doc.SourceRef, "file://docs/guides/api-rate-limits.md"; got != want {
 				t.Fatalf("shared doc source_ref = %q, want %q", got, want)
+			}
+			if doc.Evidence == nil || doc.Evidence.DocSourceRef == "" || len(doc.SuggestedTargets) == 0 || doc.SuggestedTargets[0].SourceRef == "" {
+				t.Fatalf("shared impacted doc = %+v, want evidence chain and target source", doc)
 			}
 		}
 	}

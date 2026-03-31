@@ -48,6 +48,16 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 				AffectedSpecs []struct {
 					Ref string `json:"ref"`
 				} `json:"affected_specs"`
+				AffectedDocs []struct {
+					Classification string `json:"classification"`
+					Evidence       struct {
+						DocSourceRef string `json:"doc_source_ref"`
+						LinkReason   string `json:"link_reason"`
+					} `json:"evidence"`
+					SuggestedTargets []struct {
+						Section string `json:"section"`
+					} `json:"suggested_targets"`
+				} `json:"affected_docs"`
 			} `json:"impact"`
 			DocDrift struct {
 				Scope struct {
@@ -61,8 +71,12 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 				Items []struct {
 					DocRef      string `json:"doc_ref"`
 					Suggestions []struct {
-						SpecRef string `json:"spec_ref"`
-						Code    string `json:"code"`
+						SpecRef          string   `json:"spec_ref"`
+						Code             string   `json:"code"`
+						Classification   string   `json:"classification"`
+						LinkReason       string   `json:"link_reason"`
+						TargetSection    string   `json:"target_section"`
+						SuggestedBullets []string `json:"suggested_bullets"`
 					} `json:"suggestions"`
 				} `json:"items"`
 			} `json:"doc_remediation"`
@@ -87,14 +101,27 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	if len(payload.Result.Impact.AffectedSpecs) == 0 || payload.Result.Impact.AffectedSpecs[0].Ref != "SPEC-055" {
 		t.Fatalf("impact = %+v, want SPEC-055 impacted", payload.Result.Impact)
 	}
+	if len(payload.Result.Impact.AffectedDocs) == 0 ||
+		payload.Result.Impact.AffectedDocs[0].Classification == "" ||
+		payload.Result.Impact.AffectedDocs[0].Evidence.DocSourceRef == "" ||
+		payload.Result.Impact.AffectedDocs[0].Evidence.LinkReason == "" ||
+		len(payload.Result.Impact.AffectedDocs[0].SuggestedTargets) == 0 ||
+		payload.Result.Impact.AffectedDocs[0].SuggestedTargets[0].Section == "" {
+		t.Fatalf("impact = %+v, want structured impacted docs", payload.Result.Impact)
+	}
 	if payload.Result.DocDrift.Scope.Mode != "doc_refs" || len(payload.Result.DocDrift.DriftItems) != 1 || payload.Result.DocDrift.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("doc_drift = %+v, want targeted guide drift", payload.Result.DocDrift)
 	}
 	if len(payload.Result.DocRemediation.Items) != 1 || payload.Result.DocRemediation.Items[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("doc_remediation = %+v, want targeted guide remediation", payload.Result.DocRemediation)
 	}
-	if len(payload.Result.DocRemediation.Items[0].Suggestions) == 0 || payload.Result.DocRemediation.Items[0].Suggestions[0].SpecRef == "" {
-		t.Fatalf("doc_remediation = %+v, want stable remediation suggestions", payload.Result.DocRemediation)
+	if len(payload.Result.DocRemediation.Items[0].Suggestions) == 0 ||
+		payload.Result.DocRemediation.Items[0].Suggestions[0].SpecRef == "" ||
+		payload.Result.DocRemediation.Items[0].Suggestions[0].Classification == "" ||
+		payload.Result.DocRemediation.Items[0].Suggestions[0].LinkReason == "" ||
+		payload.Result.DocRemediation.Items[0].Suggestions[0].TargetSection == "" ||
+		len(payload.Result.DocRemediation.Items[0].Suggestions[0].SuggestedBullets) == 0 {
+		t.Fatalf("doc_remediation = %+v, want stable structured remediation suggestions", payload.Result.DocRemediation)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)

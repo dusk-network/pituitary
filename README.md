@@ -76,6 +76,8 @@ One `pituitary.toml` can also span multiple repository roots. Bind a source to a
 
 For terminology migrations, you can keep running ad hoc audits with `--term` / `--canonical-term`, or declare reusable `[[terminology.policies]]` in config and run `pituitary check-terminology` directly. Results now separate actionable current-state violations from tolerated historical uses and include replacement suggestions in both text and JSON output.
 
+`analyze-impact`, `check-doc-drift`, and `review-spec` now emit section-level evidence chains in JSON: source refs on both sides of the match, a `classification`, a `link_reason`, and likely edit targets or suggested bullets. That gives agents enough structure to explain the next manual edit without scraping prose or auto-editing speculative changes.
+
 For agent integrations, use `pituitary schema <command> --format json` to inspect request/response contracts, and prefer `--request-file PATH|-` on analysis commands when shell escaping would be brittle. Results that include raw repo excerpts or evidence now carry `result.content_trust` metadata so callers can treat returned workspace text as untrusted input instead of executable instructions.
 
 See the [cheatsheet](docs/cheatsheet.md) for every command, the [full reference](docs/reference.md) for configuration/runtime/spec details, the reusable multi-editor package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md), and [AGENTS.md](AGENTS.md) for repo-native agent instructions.

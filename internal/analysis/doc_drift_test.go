@@ -41,8 +41,8 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 				t.Fatalf("guide drift item = %+v, want findings", item)
 			}
 			top := item.Findings[0]
-			if top.Rationale == "" || top.Evidence == nil || top.Evidence.SpecSection == "" || top.Evidence.DocSection == "" || top.Confidence == nil || top.Confidence.Level == "" {
-				t.Fatalf("top finding = %+v, want rationale, evidence, and confidence", top)
+			if top.Rationale == "" || top.Evidence == nil || top.Evidence.SpecSection == "" || top.Evidence.DocSection == "" || top.Evidence.SpecSourceRef == "" || top.Evidence.DocSourceRef == "" || top.Evidence.LinkReason == "" || top.Confidence == nil || top.Confidence.Level == "" {
+				t.Fatalf("top finding = %+v, want rationale, source-linked evidence, and confidence", top)
 			}
 		case "doc://runbooks/rate-limit-rollout":
 			foundRunbook = true
@@ -64,8 +64,8 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 		t.Fatalf("remediation suggestions = %+v, want multiple actionable suggestions", result.Remediation.Items[0].Suggestions)
 	}
 	top := result.Remediation.Items[0].Suggestions[0]
-	if top.SpecRef == "" || top.Evidence.SpecSection == "" || top.SuggestedEdit.Action == "" {
-		t.Fatalf("top remediation suggestion = %+v, want evidence and suggested edit", top)
+	if top.SpecRef == "" || top.Classification == "" || top.Evidence.SpecSection == "" || top.Evidence.SpecSourceRef == "" || top.LinkReason == "" || top.TargetSourceRef == "" || top.TargetSection == "" || len(top.SuggestedBullets) == 0 || top.SuggestedEdit.Action == "" {
+		t.Fatalf("top remediation suggestion = %+v, want classified evidence chain, target, bullets, and suggested edit", top)
 	}
 
 	var foundGuideAssessment, foundRunbookAssessment bool
@@ -76,16 +76,16 @@ func TestCheckDocDriftFlagsGuideButNotRunbook(t *testing.T) {
 			if assessment.Status != "drift" {
 				t.Fatalf("guide assessment = %+v, want drift status", assessment)
 			}
-			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
-				t.Fatalf("guide assessment = %+v, want rationale, evidence, and confidence", assessment)
+			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Evidence.LinkReason == "" || assessment.Confidence == nil || assessment.Confidence.Level == "" {
+				t.Fatalf("guide assessment = %+v, want rationale, linked evidence, and confidence", assessment)
 			}
 		case "doc://runbooks/rate-limit-rollout":
 			foundRunbookAssessment = true
 			if assessment.Status != "aligned" {
 				t.Fatalf("runbook assessment = %+v, want aligned status", assessment)
 			}
-			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Confidence == nil || assessment.Confidence.Level == "" {
-				t.Fatalf("runbook assessment = %+v, want rationale, evidence, and confidence", assessment)
+			if assessment.Rationale == "" || assessment.Evidence == nil || assessment.Evidence.LinkReason == "" || assessment.Confidence == nil || assessment.Confidence.Level == "" {
+				t.Fatalf("runbook assessment = %+v, want rationale, linked evidence, and confidence", assessment)
 			}
 		}
 	}
