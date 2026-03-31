@@ -1633,10 +1633,14 @@ func driftAssessmentBadge(p renderPresentation, status string) string {
 }
 
 func driftFindingSummary(finding analysis.DriftFinding) string {
+	summary := strings.TrimSpace(finding.Message)
 	if strings.TrimSpace(finding.Code) != "" {
-		return humanizeSymbol(finding.Code)
+		summary = humanizeSymbol(finding.Code)
 	}
-	return strings.TrimSpace(finding.Message)
+	if finding.Classification == "role_mismatch" {
+		return "role mismatch · " + summary
+	}
+	return summary
 }
 
 func overlapBlock(p renderPresentation, item analysis.OverlapItem) string {

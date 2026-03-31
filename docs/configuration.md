@@ -59,6 +59,7 @@ path = "specs"
 name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
+role = "current_state"
 path = "docs"
 include = ["guides/*.md", "runbooks/*.md"]
 
@@ -89,6 +90,20 @@ per_page = 100
 ```
 
 The built-in GitHub adapter indexes RFC/spec-style issues as `SpecRecord`s and other issues as `DocRecord`s. Keep GitHub-specific settings inside `sources.options`; the kernel still treats `name`, `adapter`, `kind`, `path`, `files`, `include`, and `exclude` as the explicit shared config surface.
+
+### Source Roles
+
+Set `role` on a source when its artifacts should be interpreted with an authority level during semantic workflows such as `check-doc-drift`.
+
+- `canonical`: stable source of truth for accepted design intent
+- `current_state`: current operational guidance or runtime-facing documentation
+- `runtime_authoritative`: runtime truth that should override softer documentation surfaces
+- `planning`: forward-looking design or rollout notes
+- `historical`: migration notes or superseded context that should not be treated as current drift by default
+- `generated`: generated output that should be checked against its stronger source
+- `mirror`: mirrored compatibility surface derived from another canonical document
+
+Roles are applied per source. If one directory mixes current-state and historical docs, split it into separate `[[sources]]` blocks with different `include` patterns.
 
 ### Example: Indexing AI agent instructions
 

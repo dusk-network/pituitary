@@ -21,6 +21,13 @@ const (
 	SourceKindSpecBundle       = "spec_bundle"
 	SourceKindMarkdownDocs     = "markdown_docs"
 	SourceKindMarkdownContract = "markdown_contract"
+	SourceRoleCanonical        = "canonical"
+	SourceRoleCurrentState     = "current_state"
+	SourceRoleRuntimeAuth      = "runtime_authoritative"
+	SourceRolePlanning         = "planning"
+	SourceRoleHistorical       = "historical"
+	SourceRoleGenerated        = "generated"
+	SourceRoleMirror           = "mirror"
 	RuntimeProviderFixture     = "fixture"
 	RuntimeProviderOpenAI      = "openai_compatible"
 	RuntimeProviderDisabled    = "disabled"
@@ -49,6 +56,7 @@ type Source struct {
 	Name         string
 	Adapter      string
 	Kind         string
+	Role         string
 	Path         string
 	Files        []string
 	Include      []string
@@ -94,6 +102,7 @@ type rawSource struct {
 	Name    string         `toml:"name"`
 	Adapter string         `toml:"adapter"`
 	Kind    string         `toml:"kind"`
+	Role    string         `toml:"role"`
 	Path    string         `toml:"path"`
 	Files   []string       `toml:"files"`
 	Include []string       `toml:"include"`
@@ -206,6 +215,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Name:    source.Name,
 			Adapter: source.Adapter,
 			Kind:    source.Kind,
+			Role:    NormalizeSourceRole(source.Role),
 			Path:    source.Path,
 			Files:   append([]string(nil), source.Files...),
 			Include: append([]string(nil), source.Include...),
@@ -369,6 +379,9 @@ func validate(cfg *Config) error {
 		if source.Kind == "" {
 			errs.add("%s.kind: value is required", label)
 		}
+		if source.Role != "" && !IsValidSourceRole(source.Role) {
+			errs.add("%s.role: unsupported role %q", label, source.Role)
+		}
 
 		filesystemSource := source.Adapter == AdapterFilesystem
 		if strings.TrimSpace(source.Path) == "" && filesystemSource {
@@ -469,6 +482,25 @@ func normalizeSourceFileSelector(value string) (string, error) {
 		return "", fmt.Errorf("%q escapes the source root", value)
 	}
 	return normalized, nil
+}
+
+func NormalizeSourceRole(role string) string {
+	return strings.ToLower(strings.TrimSpace(role))
+}
+
+func IsValidSourceRole(role string) bool {
+	switch NormalizeSourceRole(role) {
+	case SourceRoleCanonical,
+		SourceRoleCurrentState,
+		SourceRoleRuntimeAuth,
+		SourceRolePlanning,
+		SourceRoleHistorical,
+		SourceRoleGenerated,
+		SourceRoleMirror:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateRuntime(runtime Runtime) error {
