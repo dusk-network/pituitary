@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
@@ -19,6 +20,7 @@ type AnalyzeImpactRequest struct {
 	SpecRef    string            `json:"spec_ref,omitempty"`
 	SpecRecord *model.SpecRecord `json:"spec_record,omitempty"`
 	ChangeType string            `json:"change_type"`
+	Summary    bool              `json:"summary,omitempty"`
 }
 
 // ImpactedSpec reports one affected spec.
@@ -75,11 +77,26 @@ type ImpactedDoc struct {
 	SuggestedTargets []ImpactEditTarget `json:"suggested_targets,omitempty"`
 }
 
+// ImpactSummaryItem captures one high-priority follow-up target.
+type ImpactSummaryItem struct {
+	Rank        int     `json:"rank"`
+	Kind        string  `json:"kind"`
+	Ref         string  `json:"ref"`
+	Title       string  `json:"title,omitempty"`
+	Repo        string  `json:"repo,omitempty"`
+	SourceRef   string  `json:"source_ref,omitempty"`
+	Score       float64 `json:"score,omitempty"`
+	Why         string  `json:"why,omitempty"`
+	ReviewFirst string  `json:"review_first,omitempty"`
+}
+
 // AnalyzeImpactResult is the structured impact-analysis response.
 type AnalyzeImpactResult struct {
 	SpecRef       string                     `json:"spec_ref"`
 	SpecInference *model.InferenceConfidence `json:"spec_inference,omitempty"`
 	ChangeType    string                     `json:"change_type"`
+	SummaryOnly   bool                       `json:"summary_only,omitempty"`
+	RankedSummary []ImpactSummaryItem        `json:"ranked_summary,omitempty"`
 	AffectedSpecs []ImpactedSpec             `json:"affected_specs"`
 	AffectedRefs  []ImpactedRef              `json:"affected_refs"`
 	AffectedDocs  []ImpactedDoc              `json:"affected_docs"`
@@ -140,22 +157,26 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 		return nil, err
 	}
 
-	return buildAnalyzeImpactResult(candidate, request.ChangeType, specs, docs), nil
+	return buildAnalyzeImpactResult(candidate, request.ChangeType, request.Summary, specs, docs), nil
 }
 
-func buildAnalyzeImpactResult(candidate *specDocument, changeType string, specs map[string]specDocument, docs map[string]docDocument) *AnalyzeImpactResult {
+func buildAnalyzeImpactResult(candidate *specDocument, changeType string, summaryOnly bool, specs map[string]specDocument, docs map[string]docDocument) *AnalyzeImpactResult {
 	relevantSpecs := make([]specDocument, 0, len(specs)+1)
 	relevantSpecs = append(relevantSpecs, *candidate)
 	for _, spec := range specs {
 		relevantSpecs = append(relevantSpecs, spec)
 	}
+	affectedSpecs := impactedSpecs(candidate.Record, specs)
+	affectedDocs := impactedDocs(*candidate, docs)
 	return &AnalyzeImpactResult{
 		SpecRef:       candidate.Record.Ref,
 		SpecInference: candidate.Record.Inference,
 		ChangeType:    changeType,
-		AffectedSpecs: impactedSpecs(candidate.Record, specs),
+		SummaryOnly:   summaryOnly,
+		RankedSummary: buildImpactSummary(affectedSpecs, affectedDocs, 5),
+		AffectedSpecs: affectedSpecs,
 		AffectedRefs:  impactedRefs(candidate.Record, specs),
-		AffectedDocs:  impactedDocs(*candidate, docs),
+		AffectedDocs:  affectedDocs,
 		Warnings:      buildSpecInferenceWarnings("impact analysis", relevantSpecs...),
 	}
 }
@@ -265,6 +286,129 @@ func impactedDocs(candidate specDocument, docs map[string]docDocument) []Impacte
 		}
 	})
 	return result
+}
+
+func buildImpactSummary(specs []ImpactedSpec, docs []ImpactedDoc, limit int) []ImpactSummaryItem {
+	if limit <= 0 {
+		return nil
+	}
+
+	type scoredSummary struct {
+		item     ImpactSummaryItem
+		priority int
+		score    float64
+	}
+
+	scored := make([]scoredSummary, 0, len(specs)+len(docs))
+	for _, item := range specs {
+		why := "depends on this spec"
+		priority := 0
+		if item.Historical {
+			why = "historical spec superseded by this spec"
+			priority = 3
+		}
+		scored = append(scored, scoredSummary{
+			item: ImpactSummaryItem{
+				Kind:        "spec",
+				Ref:         item.Ref,
+				Title:       item.Title,
+				Repo:        item.Repo,
+				Why:         why,
+				ReviewFirst: impactSummarySpecTarget(item),
+			},
+			priority: priority,
+		})
+	}
+	for _, item := range docs {
+		priority := 2
+		if item.Classification == impactDocClassificationGovernedSurface {
+			priority = 1
+		}
+		scored = append(scored, scoredSummary{
+			item: ImpactSummaryItem{
+				Kind:        "doc",
+				Ref:         item.Ref,
+				Title:       item.Title,
+				Repo:        item.Repo,
+				SourceRef:   item.SourceRef,
+				Score:       item.Score,
+				Why:         impactSummaryDocReason(item),
+				ReviewFirst: impactSummaryDocTarget(item),
+			},
+			priority: priority,
+			score:    item.Score,
+		})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		switch {
+		case scored[i].priority != scored[j].priority:
+			return scored[i].priority < scored[j].priority
+		case scored[i].score != scored[j].score:
+			return scored[i].score > scored[j].score
+		case scored[i].item.Repo != scored[j].item.Repo:
+			return scored[i].item.Repo < scored[j].item.Repo
+		default:
+			return scored[i].item.Ref < scored[j].item.Ref
+		}
+	})
+
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+	result := make([]ImpactSummaryItem, 0, len(scored))
+	for i, item := range scored {
+		item.item.Rank = i + 1
+		result = append(result, item.item)
+	}
+	return result
+}
+
+func impactSummarySpecTarget(item ImpactedSpec) string {
+	if stringsTrimSpace(item.Title) == "" {
+		return item.Ref
+	}
+	return fmt.Sprintf("%s %s", item.Ref, item.Title)
+}
+
+func impactSummaryDocReason(item ImpactedDoc) string {
+	for _, reason := range item.Reasons {
+		if trimmed := stringsTrimSpace(reason); trimmed != "" {
+			return trimmed
+		}
+	}
+	if item.Evidence != nil {
+		if trimmed := stringsTrimSpace(item.Evidence.LinkReason); trimmed != "" {
+			return trimmed
+		}
+	}
+	return humanizeImpactSummaryLabel(item.Classification)
+}
+
+func impactSummaryDocTarget(item ImpactedDoc) string {
+	if len(item.SuggestedTargets) > 0 {
+		target := item.SuggestedTargets[0]
+		if trimmed := stringsTrimSpace(target.SourceRef); trimmed != "" {
+			if section := stringsTrimSpace(target.Section); section != "" {
+				return fmt.Sprintf("%s / %s", trimmed, section)
+			}
+			return trimmed
+		}
+		if section := stringsTrimSpace(target.Section); section != "" {
+			return section
+		}
+	}
+	if trimmed := stringsTrimSpace(item.SourceRef); trimmed != "" {
+		return trimmed
+	}
+	return item.Ref
+}
+
+func humanizeImpactSummaryLabel(value string) string {
+	value = stringsTrimSpace(value)
+	value = strings.ReplaceAll(value, "_", " ")
+	value = strings.ReplaceAll(value, "-", " ")
+	return value
 }
 
 func documentSimilarity(left, right []embeddedSection) float64 {
