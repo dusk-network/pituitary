@@ -309,7 +309,10 @@ func loadDiffComplianceTargetsContext(ctx context.Context, diffText string) ([]c
 	if err != nil {
 		return nil, err
 	}
+	return loadParsedDiffComplianceTargetsContext(ctx, parsed)
+}
 
+func loadParsedDiffComplianceTargetsContext(ctx context.Context, parsed []parsedDiffTarget) ([]complianceTarget, error) {
 	targets := make([]complianceTarget, 0, len(parsed))
 	for _, item := range parsed {
 		content, removedOnly := parsedDiffTargetContent(item)

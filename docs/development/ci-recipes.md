@@ -78,7 +78,10 @@ jobs:
       - name: Check changed code against accepted specs
         run: git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 
-      - name: Check doc drift
+      - name: Check doc drift from the PR diff
+        run: git diff origin/main...HEAD | pituitary check-doc-drift --diff-file -
+
+      - name: Check doc drift across the full workspace
         run: pituitary check-doc-drift --scope all
 ```
 
@@ -97,5 +100,7 @@ Keep that step out of deterministic fixture-only CI. In fixture mode, there is n
 
 - Prefer the release binary in consumer CI. This repo's own `main` CI builds from source because it is testing Pituitary itself, not consuming it.
 - Pin `PITUITARY_VERSION` to the exact release you want your repo to consume rather than floating on latest.
-- `check-compliance --diff-file` is best for change-scoped policy. `check-doc-drift --scope all` is best for workspace-wide spec hygiene.
+- `check-compliance --diff-file` is best for change-scoped policy.
+- `check-doc-drift --diff-file` is best for change-scoped stale-doc detection on the files under review.
+- `check-doc-drift --scope all` is still the broader workspace-wide hygiene sweep.
 - If you only want a deterministic CI baseline, keep the default fixture embedder and skip runtime preflight entirely.

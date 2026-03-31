@@ -776,9 +776,49 @@ func renderDocDriftResult(w io.Writer, result *analysis.DocDriftResult) {
 	fmt.Fprintln(w, p.headerLine("check-doc-drift", ""))
 	fmt.Fprintln(w)
 
-	if len(result.DriftItems) == 0 && len(result.Assessments) == 0 {
+	if len(result.DriftItems) == 0 && len(result.Assessments) == 0 && len(result.ChangedFiles) == 0 && len(result.ImplicatedSpecs) == 0 && len(result.ImplicatedDocs) == 0 {
 		fmt.Fprintf(w, "  %s no drift items\n", p.check())
 		return
+	}
+	if len(result.ChangedFiles) > 0 {
+		fmt.Fprintf(w, "  %s %d\n", p.white("CHANGED FILES"), len(result.ChangedFiles))
+		for i, file := range result.ChangedFiles {
+			fmt.Fprintf(w, "  %s %s", p.treeBranch(i == len(result.ChangedFiles)-1), file.Path)
+			if file.AddedLineCount > 0 || file.RemovedLineCount > 0 {
+				fmt.Fprintf(w, " %s", p.dim(fmt.Sprintf("(+%d/-%d)", file.AddedLineCount, file.RemovedLineCount)))
+			}
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintln(w)
+	}
+	if len(result.ImplicatedSpecs) > 0 {
+		fmt.Fprintf(w, "  %s %d\n", p.white("IMPLICATED SPECS"), len(result.ImplicatedSpecs))
+		for i, item := range result.ImplicatedSpecs {
+			line := item.Ref
+			if item.Title != "" {
+				line += " · " + item.Title
+			}
+			if item.Repo != "" {
+				line += " · repo: " + item.Repo
+			}
+			if len(item.Reasons) > 0 {
+				line += " · " + item.Reasons[0]
+			}
+			fmt.Fprintf(w, "  %s %s\n", p.treeBranch(i == len(result.ImplicatedSpecs)-1), line)
+		}
+		fmt.Fprintln(w)
+	}
+	if len(result.ImplicatedDocs) > 0 {
+		fmt.Fprintf(w, "  %s %d\n", p.white("IMPLICATED DOCS"), len(result.ImplicatedDocs))
+		for i, item := range result.ImplicatedDocs {
+			label := repoPathLabel(item.Repo, preferredDocLabel(item.DocRef, item.SourceRef))
+			line := fmt.Sprintf("%s  %.3f", label, item.Score)
+			if len(item.Reasons) > 0 {
+				line += " · " + item.Reasons[0]
+			}
+			fmt.Fprintf(w, "  %s %s\n", p.treeBranch(i == len(result.ImplicatedDocs)-1), line)
+		}
+		fmt.Fprintln(w)
 	}
 
 	assessments := result.Assessments

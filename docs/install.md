@@ -42,6 +42,7 @@ pituitary check-doc-drift --scope all
 
 # Optional pre-merge guardrail
 git diff --cached | pituitary check-compliance --diff-file -
+git diff --cached | pituitary check-doc-drift --diff-file -
 ```
 
 If your repo already has a config, skip `init` and go straight to `status`, `index --rebuild`, or the analysis commands.
