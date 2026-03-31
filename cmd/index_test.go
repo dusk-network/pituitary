@@ -382,7 +382,7 @@ func TestRunIndexVerboseTextReportsSourceCountsAndProgress(t *testing.T) {
 	}
 }
 
-func TestRunIndexVerboseJSONIncludesSourceSummariesAndNoProgressOutput(t *testing.T) {
+func TestRunIndexVerboseJSONIncludesSourceSummariesAndNDJSONProgress(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
 	var stdout bytes.Buffer
@@ -394,8 +394,15 @@ func TestRunIndexVerboseJSONIncludesSourceSummariesAndNoProgressOutput(t *testin
 	if exitCode != 0 {
 		t.Fatalf("runIndex(--verbose --format json) exit code = %d, want 0", exitCode)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("runIndex(--verbose --format json) wrote unexpected stderr: %q", stderr.String())
+	events := decodeIndexProgressEvents(t, stderr.String())
+	if len(events) == 0 {
+		t.Fatal("runIndex(--verbose --format json) wrote no progress events")
+	}
+	if !hasIndexProgressPhase(events, "chunking") {
+		t.Fatalf("progress events = %+v, want chunking phase", events)
+	}
+	if !hasIndexProgressPhase(events, "embedding") {
+		t.Fatalf("progress events = %+v, want embedding phase", events)
 	}
 
 	var payload struct {
@@ -575,8 +582,15 @@ func TestRunIndexRebuildReusesUnchangedCorpus(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("second runIndex(--rebuild) exit code = %d, want 0", exitCode)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("second runIndex(--rebuild) wrote unexpected stderr: %q", stderr.String())
+	events := decodeIndexProgressEvents(t, stderr.String())
+	if len(events) == 0 {
+		t.Fatal("second runIndex(--rebuild) wrote no progress events")
+	}
+	if !hasIndexProgressPhase(events, "chunking") {
+		t.Fatalf("progress events = %+v, want chunking phase", events)
+	}
+	if hasIndexProgressPhase(events, "embedding") {
+		t.Fatalf("progress events = %+v, want reused rebuild to avoid embedding phase", events)
 	}
 
 	var payload struct {
@@ -634,8 +648,12 @@ func TestRunIndexFullForcesReembedding(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("runIndex(--rebuild --full) exit code = %d, want 0", exitCode)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("runIndex(--rebuild --full) wrote unexpected stderr: %q", stderr.String())
+	events := decodeIndexProgressEvents(t, stderr.String())
+	if len(events) == 0 {
+		t.Fatal("runIndex(--rebuild --full) wrote no progress events")
+	}
+	if !hasIndexProgressPhase(events, "chunking") || !hasIndexProgressPhase(events, "embedding") {
+		t.Fatalf("progress events = %+v, want chunking and embedding phases", events)
 	}
 
 	var payload struct {
@@ -701,8 +719,12 @@ Canary the new limiter before the full rollout.
 	if exitCode != 0 {
 		t.Fatalf("incremental runIndex(--rebuild) exit code = %d, want 0", exitCode)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("incremental runIndex(--rebuild) wrote unexpected stderr: %q", stderr.String())
+	events := decodeIndexProgressEvents(t, stderr.String())
+	if len(events) == 0 {
+		t.Fatal("incremental runIndex(--rebuild) wrote no progress events")
+	}
+	if !hasIndexProgressPhase(events, "chunking") || !hasIndexProgressPhase(events, "embedding") {
+		t.Fatalf("progress events = %+v, want chunking and embedding phases", events)
 	}
 
 	var payload struct {
@@ -779,4 +801,50 @@ func fileHashCmd(t *testing.T, path string) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+type indexProgressJSONEvent struct {
+	Event        string `json:"event"`
+	Command      string `json:"command"`
+	Phase        string `json:"phase"`
+	ArtifactKind string `json:"artifact_kind"`
+	ArtifactRef  string `json:"artifact_ref"`
+	Current      int    `json:"current"`
+	Total        int    `json:"total"`
+	ChunkCount   int    `json:"chunk_count"`
+}
+
+func decodeIndexProgressEvents(t *testing.T, stderr string) []indexProgressJSONEvent {
+	t.Helper()
+	trimmed := strings.TrimSpace(stderr)
+	if trimmed == "" {
+		return nil
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	events := make([]indexProgressJSONEvent, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event indexProgressJSONEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("unmarshal index progress event %q: %v", line, err)
+		}
+		if event.Event != "rebuild_progress" || event.Command != "index" {
+			t.Fatalf("progress event = %+v, want rebuild_progress/index metadata", event)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+func hasIndexProgressPhase(events []indexProgressJSONEvent, phase string) bool {
+	for _, event := range events {
+		if event.Phase == phase {
+			return true
+		}
+	}
+	return false
 }
