@@ -411,16 +411,19 @@ Step 6: Atomic Swap
 - Unsupported runtime providers should fail during config validation with clear, intentional errors.
 - Provider-backed embeddings and bounded provider-backed analysis are both now part of the runtime contract.
 
-V1 runtime configuration should be explicit in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`:
+V1 runtime configuration should be explicit in `pituitary.toml` under `[runtime.embedder]` and `[runtime.analysis]`, with optional reusable named bases under `[runtime.profiles.<name>]`:
 
 | Field | Embedder | Analysis | Notes |
 |---|---|---|---|
 | `provider` | optional, defaults to `fixture` | optional, defaults to `disabled` | Embedder and analysis currently support `openai_compatible`; analysis also supports `disabled` |
+| `profile` | optional | optional | Selects one named reusable runtime profile and then applies per-block overrides on top |
 | `model` | defaults to `fixture-8d` for `fixture`; required for `openai_compatible` | required for `openai_compatible`, ignored when disabled | Part of the embedder fingerprint stored in index metadata |
 | `endpoint` | required for `openai_compatible`, ignored for `fixture` | required for `openai_compatible`, ignored when disabled | Expected to point at an OpenAI-compatible API root such as `http://host:1234/v1` |
 | `api_key_env` | optional | optional | Optional so local servers such as LM Studio can run without credentials |
 | `timeout_ms` | optional, defaults to `1000` | optional, defaults to `1000` | Active for `openai_compatible` embedding requests |
 | `max_retries` | optional, defaults to `0` | optional, defaults to `0` | Active for retryable `openai_compatible` runtime failures |
+
+`pituitary status` should surface the resolved runtime assumptions actually in force: active profile, provider, model, endpoint, timeout, and retry settings for both embedder and analysis. `pituitary status --check-runtime ...` should probe those same resolved values rather than a hidden alternate contract.
 
 Degraded behavior rules:
 

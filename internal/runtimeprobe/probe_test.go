@@ -80,6 +80,7 @@ func TestRunAnalysisUsesLightweightProbe(t *testing.T) {
 	result, err := Run(context.Background(), &config.Config{
 		Runtime: config.Runtime{
 			Analysis: config.RuntimeProvider{
+				Profile:    "local-lm-studio",
 				Provider:   config.RuntimeProviderOpenAI,
 				Model:      "pituitary-analysis",
 				Endpoint:   server.URL,
@@ -96,6 +97,12 @@ func TestRunAnalysisUsesLightweightProbe(t *testing.T) {
 	}
 	if got, want := result.Checks[0].Status, StatusReady; got != want {
 		t.Fatalf("checks[0].status = %q, want %q", got, want)
+	}
+	if got, want := result.Checks[0].Profile, "local-lm-studio"; got != want {
+		t.Fatalf("checks[0].profile = %q, want %q", got, want)
+	}
+	if got, want := result.Checks[0].Timeout, 1000; got != want {
+		t.Fatalf("checks[0].timeout_ms = %d, want %d", got, want)
 	}
 }
 

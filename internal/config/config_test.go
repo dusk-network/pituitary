@@ -213,6 +213,104 @@ path = "specs"
 	}
 }
 
+func TestLoadResolvesRuntimeProfiles(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.profiles.local-lm-studio]
+provider = "openai_compatible"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+
+[runtime.analysis]
+profile = "local-lm-studio"
+model = "qwen3.5-35b"
+timeout_ms = 120000
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got, want := len(cfg.Runtime.Profiles), 1; got != want {
+		t.Fatalf("len(runtime.profiles) = %d, want %d", got, want)
+	}
+	profile := cfg.Runtime.Profiles["local-lm-studio"]
+	if got, want := profile.Provider, RuntimeProviderOpenAI; got != want {
+		t.Fatalf("runtime.profiles[local-lm-studio].provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.Profile, "local-lm-studio"; got != want {
+		t.Fatalf("runtime.embedder.profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.Provider, RuntimeProviderOpenAI; got != want {
+		t.Fatalf("runtime.embedder.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.Endpoint, "http://127.0.0.1:1234/v1"; got != want {
+		t.Fatalf("runtime.embedder.endpoint = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Embedder.TimeoutMS, 30000; got != want {
+		t.Fatalf("runtime.embedder.timeout_ms = %d, want %d", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.Profile, "local-lm-studio"; got != want {
+		t.Fatalf("runtime.analysis.profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.Provider, RuntimeProviderOpenAI; got != want {
+		t.Fatalf("runtime.analysis.provider = %q, want %q", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.TimeoutMS, 120000; got != want {
+		t.Fatalf("runtime.analysis.timeout_ms = %d, want %d", got, want)
+	}
+}
+
+func TestLoadRejectsUnknownRuntimeProfile(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+profile = "missing"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), `runtime.embedder.profile: unknown profile "missing"`) {
+		t.Fatalf("Load() error = %q, want unknown profile detail", err)
+	}
+}
+
 func TestParseRejectsDuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -1084,6 +1182,82 @@ func TestRenderRoundTripsWorkspaceRepos(t *testing.T) {
 	}
 	if got, want := loaded.Sources[1].Repo, "shared"; got != want {
 		t.Fatalf("loaded source repo = %q, want %q", got, want)
+	}
+}
+
+func TestRenderRoundTripsRuntimeProfiles(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:      ".",
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Runtime: Runtime{
+			Profiles: map[string]RuntimeProvider{
+				"local-lm-studio": {
+					Provider:   RuntimeProviderOpenAI,
+					Endpoint:   "http://127.0.0.1:1234/v1",
+					TimeoutMS:  30000,
+					MaxRetries: 1,
+				},
+			},
+			Embedder: RuntimeProvider{
+				Profile:    "local-lm-studio",
+				Provider:   RuntimeProviderOpenAI,
+				Model:      "nomic-embed-text-v1.5",
+				Endpoint:   "http://127.0.0.1:1234/v1",
+				TimeoutMS:  30000,
+				MaxRetries: 1,
+			},
+			Analysis: RuntimeProvider{
+				Profile:    "local-lm-studio",
+				Provider:   RuntimeProviderOpenAI,
+				Model:      "qwen3.5-35b",
+				Endpoint:   "http://127.0.0.1:1234/v1",
+				TimeoutMS:  120000,
+				MaxRetries: 1,
+			},
+		},
+		Sources: []Source{
+			{
+				Name:    "specs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindSpecBundle,
+				Path:    "specs",
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(rendered, "[runtime.profiles.local-lm-studio]") {
+		t.Fatalf("rendered config %q does not contain runtime profile table", rendered)
+	}
+	if !strings.Contains(rendered, "profile = \"local-lm-studio\"") {
+		t.Fatalf("rendered config %q does not contain runtime profile selection", rendered)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if got, want := loaded.Runtime.Embedder.Profile, "local-lm-studio"; got != want {
+		t.Fatalf("loaded runtime.embedder.profile = %q, want %q", got, want)
+	}
+	if got, want := loaded.Runtime.Embedder.Endpoint, "http://127.0.0.1:1234/v1"; got != want {
+		t.Fatalf("loaded runtime.embedder.endpoint = %q, want %q", got, want)
+	}
+	if got, want := loaded.Runtime.Analysis.TimeoutMS, 120000; got != want {
+		t.Fatalf("loaded runtime.analysis.timeout_ms = %d, want %d", got, want)
 	}
 }
 

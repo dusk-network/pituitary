@@ -21,11 +21,26 @@ type StatusResult struct {
 	ConfigPath       string
 	EmbedderProvider string
 	AnalysisProvider string
+	RuntimeConfig    *RuntimeConfigStatus
 	Index            *index.Status
 	Freshness        *index.FreshnessStatus
 	RelationGraph    *index.RelationGraphStatus
 	Runtime          *runtimeprobe.Result
 	Guidance         []string
+}
+
+type RuntimeConfigStatus struct {
+	Embedder RuntimeProviderStatus
+	Analysis RuntimeProviderStatus
+}
+
+type RuntimeProviderStatus struct {
+	Profile    string
+	Provider   string
+	Model      string
+	Endpoint   string
+	TimeoutMS  int
+	MaxRetries int
 }
 
 // Status loads config, inspects the current index, and optionally probes runtime dependencies.
@@ -58,11 +73,15 @@ func Status(ctx context.Context, configPath string, request StatusRequest) Respo
 			ConfigPath:       cfg.ConfigPath,
 			EmbedderProvider: cfg.Runtime.Embedder.Provider,
 			AnalysisProvider: cfg.Runtime.Analysis.Provider,
-			Index:            status,
-			Freshness:        freshness,
-			RelationGraph:    index.InspectRelationGraph(records.Specs),
-			Runtime:          runtimeResult,
-			Guidance:         fixtureEmbedderGuidance(cfg, status),
+			RuntimeConfig: &RuntimeConfigStatus{
+				Embedder: runtimeProviderStatus(cfg.Runtime.Embedder),
+				Analysis: runtimeProviderStatus(cfg.Runtime.Analysis),
+			},
+			Index:         status,
+			Freshness:     freshness,
+			RelationGraph: index.InspectRelationGraph(records.Specs),
+			Runtime:       runtimeResult,
+			Guidance:      fixtureEmbedderGuidance(cfg, status),
 		}, nil
 	}, classifyStatusError)
 }
@@ -85,6 +104,17 @@ func fixtureEmbedderGuidance(cfg *config.Config, status *index.Status) []string 
 			totalArtifacts,
 			config.RuntimeProviderOpenAI,
 		),
+	}
+}
+
+func runtimeProviderStatus(provider config.RuntimeProvider) RuntimeProviderStatus {
+	return RuntimeProviderStatus{
+		Profile:    provider.Profile,
+		Provider:   provider.Provider,
+		Model:      provider.Model,
+		Endpoint:   provider.Endpoint,
+		TimeoutMS:  provider.TimeoutMS,
+		MaxRetries: provider.MaxRetries,
 	}
 }
 

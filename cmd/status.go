@@ -23,6 +23,7 @@ type statusResult struct {
 	ConfigPath        string                     `json:"config_path"`
 	EmbedderProvider  string                     `json:"embedder_provider,omitempty"`
 	AnalysisProvider  string                     `json:"analysis_provider,omitempty"`
+	RuntimeConfig     *statusRuntimeConfig       `json:"runtime_config,omitempty"`
 	ConfigResolution  *configResolution          `json:"config_resolution,omitempty"`
 	IndexPath         string                     `json:"index_path"`
 	IndexExists       bool                       `json:"index_exists"`
@@ -35,6 +36,20 @@ type statusResult struct {
 	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
 	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
 	Guidance          []string                   `json:"guidance,omitempty"`
+}
+
+type statusRuntimeConfig struct {
+	Embedder statusRuntimeProvider `json:"embedder"`
+	Analysis statusRuntimeProvider `json:"analysis"`
+}
+
+type statusRuntimeProvider struct {
+	Profile    string `json:"profile,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	TimeoutMS  int    `json:"timeout_ms,omitempty"`
+	MaxRetries int    `json:"max_retries,omitempty"`
 }
 
 type statusArtifactLocation struct {
@@ -123,6 +138,7 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		ConfigPath:        result.ConfigPath,
 		EmbedderProvider:  result.EmbedderProvider,
 		AnalysisProvider:  result.AnalysisProvider,
+		RuntimeConfig:     newStatusRuntimeConfig(result.RuntimeConfig),
 		ConfigResolution:  resolution,
 		IndexPath:         result.Index.IndexPath,
 		IndexExists:       result.Index.Exists,
@@ -135,6 +151,30 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,
 		Guidance:          append([]string(nil), result.Guidance...),
+	}
+}
+
+func newStatusRuntimeConfig(runtimeConfig *app.RuntimeConfigStatus) *statusRuntimeConfig {
+	if runtimeConfig == nil {
+		return nil
+	}
+	return &statusRuntimeConfig{
+		Embedder: statusRuntimeProvider{
+			Profile:    runtimeConfig.Embedder.Profile,
+			Provider:   runtimeConfig.Embedder.Provider,
+			Model:      runtimeConfig.Embedder.Model,
+			Endpoint:   runtimeConfig.Embedder.Endpoint,
+			TimeoutMS:  runtimeConfig.Embedder.TimeoutMS,
+			MaxRetries: runtimeConfig.Embedder.MaxRetries,
+		},
+		Analysis: statusRuntimeProvider{
+			Profile:    runtimeConfig.Analysis.Profile,
+			Provider:   runtimeConfig.Analysis.Provider,
+			Model:      runtimeConfig.Analysis.Model,
+			Endpoint:   runtimeConfig.Analysis.Endpoint,
+			TimeoutMS:  runtimeConfig.Analysis.TimeoutMS,
+			MaxRetries: runtimeConfig.Analysis.MaxRetries,
+		},
 	}
 }
 

@@ -29,9 +29,12 @@ type Result struct {
 
 type Check struct {
 	Name     string `json:"name"`
+	Profile  string `json:"profile,omitempty"`
 	Provider string `json:"provider"`
 	Model    string `json:"model,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
+	Timeout  int    `json:"timeout_ms,omitempty"`
+	Retries  int    `json:"max_retries,omitempty"`
 	Status   string `json:"status"`
 	Message  string `json:"message,omitempty"`
 }
@@ -109,8 +112,11 @@ func probeAnalysis(ctx context.Context, provider config.RuntimeProvider) (Check,
 func configuredCheck(name string, provider config.RuntimeProvider) Check {
 	return Check{
 		Name:     name,
+		Profile:  strings.TrimSpace(provider.Profile),
 		Provider: strings.TrimSpace(provider.Provider),
 		Model:    strings.TrimSpace(provider.Model),
 		Endpoint: strings.TrimSpace(provider.Endpoint),
+		Timeout:  provider.TimeoutMS,
+		Retries:  provider.MaxRetries,
 	}
 }

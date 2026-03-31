@@ -388,15 +388,36 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 			fmt.Fprintf(w, "  %s %s\n", p.arrow(), hint)
 		}
 	}
+	if result.RuntimeConfig != nil {
+		fmt.Fprintf(w, "  %s\n", p.white("RUNTIME CONFIG"))
+		for i, item := range []struct {
+			Name     string
+			Provider statusRuntimeProvider
+		}{
+			{Name: "runtime.embedder", Provider: result.RuntimeConfig.Embedder},
+			{Name: "runtime.analysis", Provider: result.RuntimeConfig.Analysis},
+		} {
+			fmt.Fprintf(w, "  %s %s\n", p.treeItem(i == 1), renderRuntimeProviderSummary(item.Name, item.Provider))
+		}
+	}
 	if result.Runtime != nil {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("runtime probe:"), result.Runtime.Scope)
 		for _, check := range result.Runtime.Checks {
 			fmt.Fprintf(w, "  %s %s %s | %s | provider: %s", p.dim("runtime:"), runtimeCheckGlyph(p, check.Status), check.Name, check.Status, check.Provider)
+			if check.Profile != "" {
+				fmt.Fprintf(w, " | profile: %s", check.Profile)
+			}
 			if check.Model != "" {
 				fmt.Fprintf(w, " | model: %s", check.Model)
 			}
 			if check.Endpoint != "" {
 				fmt.Fprintf(w, " | endpoint: %s", check.Endpoint)
+			}
+			if check.Timeout > 0 {
+				fmt.Fprintf(w, " | timeout_ms: %d", check.Timeout)
+			}
+			if check.Retries > 0 {
+				fmt.Fprintf(w, " | max_retries: %d", check.Retries)
 			}
 			fmt.Fprintln(w)
 			if check.Message != "" {
@@ -407,6 +428,29 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	for _, guidance := range result.Guidance {
 		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
 	}
+}
+
+func renderRuntimeProviderSummary(name string, provider statusRuntimeProvider) string {
+	parts := []string{name}
+	if provider.Profile != "" {
+		parts = append(parts, "profile: "+provider.Profile)
+	}
+	if provider.Provider != "" {
+		parts = append(parts, "provider: "+provider.Provider)
+	}
+	if provider.Model != "" {
+		parts = append(parts, "model: "+provider.Model)
+	}
+	if provider.Endpoint != "" {
+		parts = append(parts, "endpoint: "+provider.Endpoint)
+	}
+	if provider.TimeoutMS > 0 {
+		parts = append(parts, fmt.Sprintf("timeout_ms: %d", provider.TimeoutMS))
+	}
+	if provider.MaxRetries > 0 {
+		parts = append(parts, fmt.Sprintf("max_retries: %d", provider.MaxRetries))
+	}
+	return strings.Join(parts, " | ")
 }
 
 func renderVersionResult(w io.Writer, result *versionResult) {

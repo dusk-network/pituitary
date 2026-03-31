@@ -162,20 +162,23 @@ endpoint = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-**Local: LM Studio or Ollama** (no data leaves your machine)
+**Named runtime profiles** (recommended when embedder and analysis share the same host assumptions)
 
 ```toml
-[runtime.embedder]
+[runtime.profiles.local-lm-studio]
 provider = "openai_compatible"
-model = "nomic-embed-text-v1.5"
-endpoint = "http://127.0.0.1:1234/v1"
-
-[runtime.analysis]
-provider = "openai_compatible"
-model = "your-analysis-model"
 endpoint = "http://127.0.0.1:1234/v1"
 timeout_ms = 30000
 max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+
+[runtime.analysis]
+profile = "local-lm-studio"
+model = "your-analysis-model"
+timeout_ms = 120000
 ```
 
 For `runtime.analysis`, prefer a text model that is good at bounded adjudication rather than a generic embedding or agent stack:
@@ -190,9 +193,12 @@ Examples today include recent instruct models from the Qwen and Mistral families
 Then validate and rebuild:
 
 ```sh
+pituitary status
 pituitary status --check-runtime all
 pituitary index --rebuild
 ```
+
+`pituitary status` now shows the active runtime profile plus the resolved provider, model, endpoint, timeout, and retry settings for both embedder and analysis. `--check-runtime` probes those resolved settings directly.
 
 Retrieval remains deterministic. The analysis model only sees narrowly shortlisted context for `compare-specs` and `check-doc-drift`. Any OpenAI-compatible embedding or analysis API works. See [runtime docs](docs/runtime.md) for full setup.
 

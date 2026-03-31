@@ -82,18 +82,27 @@ type Source struct {
 
 // Runtime captures provider configuration needed by later pipeline stages.
 type Runtime struct {
+	Profiles map[string]RuntimeProvider
 	Embedder RuntimeProvider
 	Analysis RuntimeProvider
 }
 
 // RuntimeProvider describes one configured runtime dependency.
 type RuntimeProvider struct {
+	Profile    string
 	Provider   string
 	Model      string
 	Endpoint   string
 	APIKeyEnv  string
 	TimeoutMS  int
 	MaxRetries int
+
+	providerSet   bool
+	modelSet      bool
+	endpointSet   bool
+	apiKeyEnvSet  bool
+	timeoutMSSet  bool
+	maxRetriesSet bool
 }
 
 type rawConfig struct {
@@ -116,8 +125,9 @@ type rawWorkspaceRepo struct {
 }
 
 type rawRuntime struct {
-	Embedder rawRuntimeProvider `toml:"embedder"`
-	Analysis rawRuntimeProvider `toml:"analysis"`
+	Profiles map[string]rawRuntimeProvider `toml:"profiles"`
+	Embedder rawRuntimeProvider            `toml:"embedder"`
+	Analysis rawRuntimeProvider            `toml:"analysis"`
 }
 
 type rawSource struct {
@@ -134,6 +144,7 @@ type rawSource struct {
 }
 
 type rawRuntimeProvider struct {
+	Profile    string `toml:"profile"`
 	Provider   string `toml:"provider"`
 	Model      string `toml:"model"`
 	Endpoint   string `toml:"endpoint"`
@@ -216,24 +227,14 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Repos:     make([]WorkspaceRepo, 0, len(raw.Workspace.Repos)),
 		},
 		Runtime: Runtime{
-			Embedder: RuntimeProvider{
-				Provider:   defaultString(raw.Runtime.Embedder.Provider, RuntimeProviderFixture),
-				Model:      raw.Runtime.Embedder.Model,
-				Endpoint:   raw.Runtime.Embedder.Endpoint,
-				APIKeyEnv:  raw.Runtime.Embedder.APIKeyEnv,
-				TimeoutMS:  defaultOptionalInt(raw.Runtime.Embedder.TimeoutMS, 1000),
-				MaxRetries: defaultOptionalInt(raw.Runtime.Embedder.MaxRetries, 0),
-			},
-			Analysis: RuntimeProvider{
-				Provider:   defaultString(raw.Runtime.Analysis.Provider, RuntimeProviderDisabled),
-				Model:      raw.Runtime.Analysis.Model,
-				Endpoint:   raw.Runtime.Analysis.Endpoint,
-				APIKeyEnv:  raw.Runtime.Analysis.APIKeyEnv,
-				TimeoutMS:  defaultOptionalInt(raw.Runtime.Analysis.TimeoutMS, 1000),
-				MaxRetries: defaultOptionalInt(raw.Runtime.Analysis.MaxRetries, 0),
-			},
+			Profiles: make(map[string]RuntimeProvider, len(raw.Runtime.Profiles)),
+			Embedder: buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
+			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
 		},
 		Sources: make([]Source, 0, len(raw.Sources)),
+	}
+	for name, profile := range raw.Runtime.Profiles {
+		cfg.Runtime.Profiles[strings.TrimSpace(name)] = buildRuntimeProvider(profile, "")
 	}
 	for _, repo := range raw.Workspace.Repos {
 		cfg.Workspace.Repos = append(cfg.Workspace.Repos, WorkspaceRepo{
@@ -254,9 +255,6 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Exclude: append([]string(nil), source.Exclude...),
 			Options: CloneSourceOptions(source.Options),
 		})
-	}
-	if cfg.Runtime.Embedder.Provider == RuntimeProviderFixture && strings.TrimSpace(cfg.Runtime.Embedder.Model) == "" {
-		cfg.Runtime.Embedder.Model = "fixture-8d"
 	}
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = CurrentSchemaVersion
@@ -543,7 +541,7 @@ func validate(cfg *Config) error {
 		}
 	}
 
-	if err := validateRuntime(cfg.Runtime); err != nil {
+	if err := validateRuntime(&cfg.Runtime); err != nil {
 		errs.items = append(errs.items, err.Error())
 	}
 
@@ -640,8 +638,29 @@ func IsValidSourceRole(role string) bool {
 	}
 }
 
-func validateRuntime(runtime Runtime) error {
+func validateRuntime(runtime *Runtime) error {
 	var errs validationErrors
+	if runtime == nil {
+		return nil
+	}
+
+	for name, profile := range runtime.Profiles {
+		label := fmt.Sprintf("runtime.profiles.%s", name)
+		if !isValidRuntimeProfileName(name) {
+			errs.add("%s: unsupported profile name %q", label, name)
+		}
+		if strings.TrimSpace(profile.Profile) != "" {
+			errs.add("%s.profile: nested profile references are not supported", label)
+		}
+		validateRuntimeProfileFields(&errs, label, profile)
+	}
+
+	runtime.Embedder = resolveRuntimeProvider(runtime.Embedder, runtime.Profiles, RuntimeProviderFixture)
+	if profile := strings.TrimSpace(runtime.Embedder.Profile); profile != "" {
+		if _, ok := runtime.Profiles[profile]; !ok {
+			errs.add("runtime.embedder.profile: unknown profile %q", profile)
+		}
+	}
 
 	if runtime.Embedder.Provider == "" {
 		errs.add("runtime.embedder.provider: value is required")
@@ -684,6 +703,13 @@ func validateRuntime(runtime Runtime) error {
 		errs.add("runtime.embedder.max_retries: must be >= 0")
 	}
 
+	runtime.Analysis = resolveRuntimeProvider(runtime.Analysis, runtime.Profiles, RuntimeProviderDisabled)
+	if profile := strings.TrimSpace(runtime.Analysis.Profile); profile != "" {
+		if _, ok := runtime.Profiles[profile]; !ok {
+			errs.add("runtime.analysis.profile: unknown profile %q", profile)
+		}
+	}
+
 	if runtime.Analysis.Provider == "" {
 		errs.add("runtime.analysis.provider: value is required")
 	} else {
@@ -722,6 +748,116 @@ func validateRuntime(runtime Runtime) error {
 		errs.add("runtime.analysis.max_retries: must be >= 0")
 	}
 	return errs.err()
+}
+
+func buildRuntimeProvider(raw rawRuntimeProvider, defaultProvider string) RuntimeProvider {
+	return RuntimeProvider{
+		Profile:       strings.TrimSpace(raw.Profile),
+		Provider:      defaultString(strings.TrimSpace(raw.Provider), defaultProvider),
+		Model:         strings.TrimSpace(raw.Model),
+		Endpoint:      strings.TrimSpace(raw.Endpoint),
+		APIKeyEnv:     strings.TrimSpace(raw.APIKeyEnv),
+		TimeoutMS:     defaultOptionalInt(raw.TimeoutMS, 1000),
+		MaxRetries:    defaultOptionalInt(raw.MaxRetries, 0),
+		providerSet:   strings.TrimSpace(raw.Provider) != "",
+		modelSet:      strings.TrimSpace(raw.Model) != "",
+		endpointSet:   strings.TrimSpace(raw.Endpoint) != "",
+		apiKeyEnvSet:  strings.TrimSpace(raw.APIKeyEnv) != "",
+		timeoutMSSet:  raw.TimeoutMS != nil,
+		maxRetriesSet: raw.MaxRetries != nil,
+	}
+}
+
+func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]RuntimeProvider, defaultProvider string) RuntimeProvider {
+	profile := RuntimeProvider{}
+	hasProfile := false
+	if name := strings.TrimSpace(provider.Profile); name != "" {
+		profile, hasProfile = profiles[name]
+	}
+
+	resolved := provider
+	providerResolved := provider.providerSet
+	modelResolved := provider.modelSet
+	endpointResolved := provider.endpointSet
+	apiKeyEnvResolved := provider.apiKeyEnvSet
+	timeoutResolved := provider.timeoutMSSet
+	maxRetriesResolved := provider.maxRetriesSet
+
+	if !providerResolved && hasProfile && profile.providerSet {
+		resolved.Provider = profile.Provider
+		providerResolved = true
+	}
+	if !modelResolved && hasProfile && profile.modelSet {
+		resolved.Model = profile.Model
+		modelResolved = true
+	}
+	if !endpointResolved && hasProfile && profile.endpointSet {
+		resolved.Endpoint = profile.Endpoint
+		endpointResolved = true
+	}
+	if !apiKeyEnvResolved && hasProfile && profile.apiKeyEnvSet {
+		resolved.APIKeyEnv = profile.APIKeyEnv
+		apiKeyEnvResolved = true
+	}
+	if !timeoutResolved && hasProfile && profile.timeoutMSSet {
+		resolved.TimeoutMS = profile.TimeoutMS
+		timeoutResolved = true
+	}
+	if !maxRetriesResolved && hasProfile && profile.maxRetriesSet {
+		resolved.MaxRetries = profile.MaxRetries
+		maxRetriesResolved = true
+	}
+	if !providerResolved {
+		resolved.Provider = defaultProvider
+	}
+	if !timeoutResolved {
+		resolved.TimeoutMS = 1000
+	}
+	if !maxRetriesResolved {
+		resolved.MaxRetries = 0
+	}
+	if strings.TrimSpace(resolved.Provider) == RuntimeProviderFixture && !modelResolved {
+		resolved.Model = "fixture-8d"
+	}
+	return resolved
+}
+
+func validateRuntimeProfileFields(errs *validationErrors, label string, profile RuntimeProvider) {
+	if provider := strings.TrimSpace(profile.Provider); provider != "" {
+		switch provider {
+		case RuntimeProviderFixture, RuntimeProviderOpenAI, RuntimeProviderDisabled:
+		default:
+			errs.add(
+				"%s.provider: unsupported provider %q (supported providers: %q, %q, %q)",
+				label,
+				provider,
+				RuntimeProviderFixture,
+				RuntimeProviderOpenAI,
+				RuntimeProviderDisabled,
+			)
+		}
+	}
+	if endpoint := strings.TrimSpace(profile.Endpoint); endpoint != "" {
+		parsed, err := url.Parse(endpoint)
+		switch {
+		case err != nil:
+			errs.add("%s.endpoint: invalid URL %q: %v", label, profile.Endpoint, err)
+		case !parsed.IsAbs() || parsed.Host == "":
+			errs.add("%s.endpoint: %q must be an absolute URL", label, profile.Endpoint)
+		case parsed.Scheme != "http" && parsed.Scheme != "https":
+			errs.add("%s.endpoint: %q must use http or https", label, profile.Endpoint)
+		}
+	}
+	if profile.TimeoutMS < 0 {
+		errs.add("%s.timeout_ms: must be >= 0", label)
+	}
+	if profile.MaxRetries < 0 {
+		errs.add("%s.max_retries: must be >= 0", label)
+	}
+}
+
+func isValidRuntimeProfileName(value string) bool {
+	return isValidRepoID(value)
 }
 
 func resolvePath(base, value string) string {

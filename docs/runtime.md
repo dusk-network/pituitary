@@ -17,6 +17,20 @@ timeout_ms = 30000
 max_retries = 1
 ```
 
+If your embedder and analysis runtimes share a host or retry policy, prefer a named profile and select it from each runtime surface:
+
+```toml
+[runtime.profiles.local-lm-studio]
+provider = "openai_compatible"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+```
+
 A practical setup: load `nomic-embed-text-v1.5` in [LM Studio](https://lmstudio.ai), expose it on `localhost:1234`, then:
 
 ```sh
@@ -28,11 +42,9 @@ For provider-backed qualitative analysis used by `compare-specs` and `check-doc-
 
 ```toml
 [runtime.analysis]
-provider = "openai_compatible"
+profile = "local-lm-studio"
 model = "your-analysis-model"
-endpoint = "http://127.0.0.1:1234/v1"
-timeout_ms = 30000
-max_retries = 1
+timeout_ms = 120000
 ```
 
 Retrieval stays deterministic. The analysis model only touches narrowly shortlisted context.
@@ -50,8 +62,11 @@ Examples today include recent instruct-capable Qwen and Mistral models, but Pitu
 Validate both runtimes with:
 
 ```sh
+pituitary status
 pituitary status --check-runtime all
 ```
+
+`pituitary status` reports the resolved runtime config for `runtime.embedder` and `runtime.analysis`, including the active profile name when one is selected. `pituitary status --check-runtime ...` uses those resolved values for the live probe and echoes the same profile / provider / model / endpoint / timeout assumptions in the probe output.
 
 For Nomic-compatible models, Pituitary automatically applies the required `search_document:` / `search_query:` prefixes.
 

@@ -28,32 +28,24 @@ func Render(cfg *Config) (string, error) {
 		fmt.Fprintf(&builder, "root = %s\n", strconv.Quote(repo.Root))
 	}
 
-	builder.WriteString("\n[runtime.embedder]\n")
-	fmt.Fprintf(&builder, "provider = %s\n", strconv.Quote(cfg.Runtime.Embedder.Provider))
-	fmt.Fprintf(&builder, "model = %s\n", strconv.Quote(cfg.Runtime.Embedder.Model))
-	if cfg.Runtime.Embedder.Endpoint != "" {
-		fmt.Fprintf(&builder, "endpoint = %s\n", strconv.Quote(cfg.Runtime.Embedder.Endpoint))
+	profileNames := make([]string, 0, len(cfg.Runtime.Profiles))
+	for name := range cfg.Runtime.Profiles {
+		profileNames = append(profileNames, name)
 	}
-	if cfg.Runtime.Embedder.APIKeyEnv != "" {
-		fmt.Fprintf(&builder, "api_key_env = %s\n", strconv.Quote(cfg.Runtime.Embedder.APIKeyEnv))
+	sort.Strings(profileNames)
+	for _, name := range profileNames {
+		builder.WriteString("\n[runtime.profiles.")
+		builder.WriteString(name)
+		builder.WriteString("]\n")
+		writeRuntimeProviderConfig(&builder, cfg.Runtime.Profiles[name], nil)
 	}
-	fmt.Fprintf(&builder, "timeout_ms = %d\n", cfg.Runtime.Embedder.TimeoutMS)
-	fmt.Fprintf(&builder, "max_retries = %d\n", cfg.Runtime.Embedder.MaxRetries)
 
-	if provider := strings.TrimSpace(cfg.Runtime.Analysis.Provider); provider != "" && provider != "disabled" {
+	builder.WriteString("\n[runtime.embedder]\n")
+	writeRuntimeProviderConfig(&builder, cfg.Runtime.Embedder, runtimeProfileBase(cfg.Runtime.Profiles, cfg.Runtime.Embedder.Profile))
+
+	if provider := strings.TrimSpace(cfg.Runtime.Analysis.Provider); provider != "" && (provider != RuntimeProviderDisabled || strings.TrimSpace(cfg.Runtime.Analysis.Profile) != "") {
 		builder.WriteString("\n[runtime.analysis]\n")
-		fmt.Fprintf(&builder, "provider = %s\n", strconv.Quote(provider))
-		if cfg.Runtime.Analysis.Model != "" {
-			fmt.Fprintf(&builder, "model = %s\n", strconv.Quote(cfg.Runtime.Analysis.Model))
-		}
-		if cfg.Runtime.Analysis.Endpoint != "" {
-			fmt.Fprintf(&builder, "endpoint = %s\n", strconv.Quote(cfg.Runtime.Analysis.Endpoint))
-		}
-		if cfg.Runtime.Analysis.APIKeyEnv != "" {
-			fmt.Fprintf(&builder, "api_key_env = %s\n", strconv.Quote(cfg.Runtime.Analysis.APIKeyEnv))
-		}
-		fmt.Fprintf(&builder, "timeout_ms = %d\n", cfg.Runtime.Analysis.TimeoutMS)
-		fmt.Fprintf(&builder, "max_retries = %d\n", cfg.Runtime.Analysis.MaxRetries)
+		writeRuntimeProviderConfig(&builder, cfg.Runtime.Analysis, runtimeProfileBase(cfg.Runtime.Profiles, cfg.Runtime.Analysis.Profile))
 	}
 
 	for _, source := range cfg.Sources {
@@ -79,6 +71,42 @@ func Render(cfg *Config) (string, error) {
 	}
 
 	return builder.String(), nil
+}
+
+func runtimeProfileBase(profiles map[string]RuntimeProvider, name string) *RuntimeProvider {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	profile, ok := profiles[name]
+	if !ok {
+		return nil
+	}
+	return &profile
+}
+
+func writeRuntimeProviderConfig(builder *strings.Builder, provider RuntimeProvider, base *RuntimeProvider) {
+	if profile := strings.TrimSpace(provider.Profile); profile != "" {
+		fmt.Fprintf(builder, "profile = %s\n", strconv.Quote(profile))
+	}
+	if base == nil || provider.Provider != base.Provider {
+		fmt.Fprintf(builder, "provider = %s\n", strconv.Quote(provider.Provider))
+	}
+	if provider.Model != "" && (base == nil || provider.Model != base.Model) {
+		fmt.Fprintf(builder, "model = %s\n", strconv.Quote(provider.Model))
+	}
+	if provider.Endpoint != "" && (base == nil || provider.Endpoint != base.Endpoint) {
+		fmt.Fprintf(builder, "endpoint = %s\n", strconv.Quote(provider.Endpoint))
+	}
+	if provider.APIKeyEnv != "" && (base == nil || provider.APIKeyEnv != base.APIKeyEnv) {
+		fmt.Fprintf(builder, "api_key_env = %s\n", strconv.Quote(provider.APIKeyEnv))
+	}
+	if base == nil || provider.TimeoutMS != base.TimeoutMS {
+		fmt.Fprintf(builder, "timeout_ms = %d\n", provider.TimeoutMS)
+	}
+	if base == nil || provider.MaxRetries != base.MaxRetries {
+		fmt.Fprintf(builder, "max_retries = %d\n", provider.MaxRetries)
+	}
 }
 
 func writeQuotedArray(builder *strings.Builder, key string, values []string) {
