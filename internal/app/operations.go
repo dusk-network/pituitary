@@ -23,6 +23,7 @@ const (
 type Issue struct {
 	Code     string
 	Message  string
+	Details  map[string]any
 	ExitCode int
 }
 
@@ -58,7 +59,10 @@ func executeWithConfig[Req any, Res any](ctx context.Context, configPath string,
 	result, err := run(cfg)
 	if err != nil {
 		issue := classify(cfg, err)
-		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
+		return Response[Req, Res]{
+			Request: request,
+			Issue:   issue,
+		}
 	}
 
 	return success(request, result)
@@ -94,11 +98,7 @@ func classifyExecutionError(cfg *config.Config, err error, policy operationExecu
 			ExitCode: 2,
 		}
 	case index.IsDependencyUnavailable(err):
-		return &Issue{
-			Code:     CodeDependencyUnavailable,
-			Message:  FormatDependencyUnavailableMessage(cfg, err),
-			ExitCode: 3,
-		}
+		return dependencyUnavailableIssue(cfg, err)
 	default:
 		code := strings.TrimSpace(policy.DefaultCode)
 		if code == "" {
@@ -209,11 +209,7 @@ func ensureFreshIndex(ctx context.Context, cfg *config.Config) *Issue {
 	case err == nil:
 		return nil
 	case index.IsDependencyUnavailable(err):
-		return &Issue{
-			Code:     CodeDependencyUnavailable,
-			Message:  FormatDependencyUnavailableMessage(cfg, err),
-			ExitCode: 3,
-		}
+		return dependencyUnavailableIssue(cfg, err)
 	case index.IsStaleIndex(err):
 		return &Issue{
 			Code:     CodeConfigError,
@@ -244,6 +240,15 @@ func failure[Req any, Res any](request Req, code, message string, exitCode int) 
 			Message:  message,
 			ExitCode: exitCode,
 		},
+	}
+}
+
+func dependencyUnavailableIssue(cfg *config.Config, err error) *Issue {
+	return &Issue{
+		Code:     CodeDependencyUnavailable,
+		Message:  FormatDependencyUnavailableMessage(cfg, err),
+		Details:  index.DependencyUnavailableDetails(err),
+		ExitCode: 3,
 	}
 }
 

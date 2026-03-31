@@ -133,10 +133,7 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 
 	operation := app.CompareSpecs(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "compare-specs", operation.Request, cliIssue{
-			Code:    operation.Issue.Code,
-			Message: operation.Issue.Message,
-		}, operation.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "compare-specs", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "compare-specs", operation.Request, operation.Result, nil)

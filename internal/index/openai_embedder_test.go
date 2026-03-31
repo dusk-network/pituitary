@@ -113,6 +113,16 @@ func TestOpenAICompatibleEmbedderRequiresConfiguredAPIKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "missing API key for runtime.embedder") {
 		t.Fatalf("NewEmbedder() error = %q, want missing-API-key detail", err)
 	}
+	details := DependencyUnavailableDetails(err)
+	if got, want := details["runtime"], "runtime.embedder"; got != want {
+		t.Fatalf("details.runtime = %#v, want %q", got, want)
+	}
+	if got, want := details["provider"], config.RuntimeProviderOpenAI; got != want {
+		t.Fatalf("details.provider = %#v, want %q", got, want)
+	}
+	if got, want := details["failure_class"], "auth"; got != want {
+		t.Fatalf("details.failure_class = %#v, want %q", got, want)
+	}
 }
 
 func TestOpenAICompatibleEmbedderParsesStringErrorBodies(t *testing.T) {
@@ -151,6 +161,22 @@ func TestOpenAICompatibleEmbedderParsesStringErrorBodies(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), `{"error":"Model unloaded.."}`) {
 		t.Fatalf("EmbedQueries() error = %q, want parsed message instead of raw JSON", err)
+	}
+	details := DependencyUnavailableDetails(err)
+	if got, want := details["request_type"], "embeddings"; got != want {
+		t.Fatalf("details.request_type = %#v, want %q", got, want)
+	}
+	if got, want := details["batch_size"], 1; got != want {
+		t.Fatalf("details.batch_size = %#v, want %d", got, want)
+	}
+	if got, want := details["input_count"], 1; got != want {
+		t.Fatalf("details.input_count = %#v, want %d", got, want)
+	}
+	if got, want := details["http_status"], http.StatusBadRequest; got != want {
+		t.Fatalf("details.http_status = %#v, want %d", got, want)
+	}
+	if got, want := details["failure_class"], "dependency_unavailable"; got != want {
+		t.Fatalf("details.failure_class = %#v, want %q", got, want)
 	}
 }
 

@@ -106,10 +106,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	response := app.Status(ctx, resolvedConfigPath, app.StatusRequest{CheckRuntime: scope})
 	if response.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    response.Issue.Code,
-			Message: response.Issue.Message,
-		}, response.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "status", request, cliIssueFromAppIssue(response.Issue), response.Issue.ExitCode)
 	}
 	result := response.Result
 

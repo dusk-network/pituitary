@@ -21,9 +21,11 @@ const responseSizeLimit = 4 << 20
 
 type Client struct {
 	Runtime    string
+	Provider   string
 	Model      string
 	Endpoint   string
 	Token      string
+	TimeoutMS  int
 	MaxRetries int
 	HTTPClient *http.Client
 }
@@ -68,11 +70,20 @@ type chatChoiceMessage struct {
 }
 
 func NewClient(provider config.RuntimeProvider, runtime string) (*Client, error) {
+	endpoint := strings.TrimRight(strings.TrimSpace(provider.Endpoint), "/")
 	token := ""
 	if envVar := strings.TrimSpace(provider.APIKeyEnv); envVar != "" {
 		token = strings.TrimSpace(os.Getenv(envVar))
 		if token == "" {
-			return nil, NewDependencyUnavailable(runtime, "missing API key for %s", runtime)
+			return nil, NewDependencyUnavailableWithDetails(FailureDetails{
+				Runtime:      strings.TrimSpace(runtime),
+				Provider:     config.RuntimeProviderOpenAI,
+				Model:        strings.TrimSpace(provider.Model),
+				Endpoint:     endpoint,
+				FailureClass: FailureClassAuth,
+				TimeoutMS:    provider.TimeoutMS,
+				MaxRetries:   provider.MaxRetries,
+			}, "missing API key for %s", runtime)
 		}
 	}
 
@@ -83,9 +94,11 @@ func NewClient(provider config.RuntimeProvider, runtime string) (*Client, error)
 
 	return &Client{
 		Runtime:    strings.TrimSpace(runtime),
+		Provider:   config.RuntimeProviderOpenAI,
 		Model:      strings.TrimSpace(provider.Model),
-		Endpoint:   strings.TrimRight(strings.TrimSpace(provider.Endpoint), "/"),
+		Endpoint:   endpoint,
 		Token:      token,
+		TimeoutMS:  provider.TimeoutMS,
 		MaxRetries: provider.MaxRetries,
 		HTTPClient: httpClient,
 	}, nil
@@ -100,13 +113,20 @@ func (c *Client) Embeddings(ctx context.Context, input []string) (*EmbeddingsRes
 		return nil, fmt.Errorf("encode %s request: %w", c.Runtime, err)
 	}
 
-	return doWithRetries(ctx, c, "/embeddings", body, func(resp *http.Response, responseBody []byte) (*EmbeddingsResponse, error) {
+	details := c.RequestFailureDetails("embeddings")
+	details.BatchSize = len(input)
+	details.InputCount = len(input)
+
+	return doWithRetries(ctx, c, "/embeddings", body, details, func(resp *http.Response, responseBody []byte) (*EmbeddingsResponse, error) {
 		var payload EmbeddingsResponse
 		if err := json.Unmarshal(responseBody, &payload); err != nil {
-			return nil, NewDependencyUnavailable(c.Runtime, "decode %s response: %v", c.Runtime, err)
+			failure := details
+			failure.FailureClass = FailureClassSchemaMismatch
+			return nil, NewDependencyUnavailableWithDetails(failure, "decode %s response: %v", c.Runtime, err)
 		}
 		if message := ExtractErrorValue(payload.Err); message != "" {
-			return nil, NewDependencyUnavailable(c.Runtime, "%s endpoint %s returned an error: %s", c.Runtime, resp.Request.URL, message)
+			failure := classifiedFailureDetails(details, 0, nil, message)
+			return nil, NewDependencyUnavailableWithDetails(failure, "%s endpoint %s returned an error: %s", c.Runtime, resp.Request.URL, message)
 		}
 		return &payload, nil
 	})
@@ -122,24 +142,46 @@ func (c *Client) ChatCompletionText(ctx context.Context, messages []ChatMessage,
 		return "", fmt.Errorf("encode %s request: %w", c.Runtime, err)
 	}
 
-	return doWithRetries(ctx, c, "/chat/completions", body, func(resp *http.Response, responseBody []byte) (string, error) {
+	details := c.RequestFailureDetails("analysis")
+	details.InputCount = len(messages)
+
+	return doWithRetries(ctx, c, "/chat/completions", body, details, func(resp *http.Response, responseBody []byte) (string, error) {
 		var payload chatResponse
 		if err := json.Unmarshal(responseBody, &payload); err != nil {
-			return "", NewDependencyUnavailable(c.Runtime, "decode %s response: %v", c.Runtime, err)
+			failure := details
+			failure.FailureClass = FailureClassSchemaMismatch
+			return "", NewDependencyUnavailableWithDetails(failure, "decode %s response: %v", c.Runtime, err)
 		}
 		if message := ExtractErrorValue(payload.Err); message != "" {
-			return "", NewDependencyUnavailable(c.Runtime, "%s endpoint %s returned an error: %s", c.Runtime, resp.Request.URL, message)
+			failure := classifiedFailureDetails(details, 0, nil, message)
+			return "", NewDependencyUnavailableWithDetails(failure, "%s endpoint %s returned an error: %s", c.Runtime, resp.Request.URL, message)
 		}
 		if len(payload.Choices) == 0 {
-			return "", NewDependencyUnavailable(c.Runtime, "%s returned no choices", c.Runtime)
+			failure := details
+			failure.FailureClass = FailureClassSchemaMismatch
+			return "", NewDependencyUnavailableWithDetails(failure, "%s returned no choices", c.Runtime)
 		}
 
 		text := ExtractMessageText(payload.Choices[0].Message.Content)
 		if text == "" {
-			return "", NewDependencyUnavailable(c.Runtime, "%s returned an empty message", c.Runtime)
+			failure := details
+			failure.FailureClass = FailureClassSchemaMismatch
+			return "", NewDependencyUnavailableWithDetails(failure, "%s returned an empty message", c.Runtime)
 		}
 		return text, nil
 	})
+}
+
+func (c *Client) RequestFailureDetails(requestType string) FailureDetails {
+	return FailureDetails{
+		Runtime:     strings.TrimSpace(c.Runtime),
+		Provider:    strings.TrimSpace(c.Provider),
+		Model:       strings.TrimSpace(c.Model),
+		Endpoint:    strings.TrimSpace(c.Endpoint),
+		RequestType: strings.TrimSpace(requestType),
+		TimeoutMS:   c.TimeoutMS,
+		MaxRetries:  c.MaxRetries,
+	}
 }
 
 func ExtractMessageText(raw json.RawMessage) string {
@@ -169,7 +211,7 @@ func ExtractMessageText(raw json.RawMessage) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func doWithRetries[T any](ctx context.Context, client *Client, path string, body []byte, decode func(*http.Response, []byte) (T, error)) (T, error) {
+func doWithRetries[T any](ctx context.Context, client *Client, path string, body []byte, details FailureDetails, decode func(*http.Response, []byte) (T, error)) (T, error) {
 	var zero T
 	var lastErr error
 
@@ -188,7 +230,8 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 			if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) {
 				return zero, err
 			}
-			lastErr = NewDependencyUnavailable(client.Runtime, "call %s endpoint %s: %v", client.Runtime, client.Endpoint, err)
+			failure := classifiedFailureDetails(details, 0, err, err.Error())
+			lastErr = NewDependencyUnavailableWithDetails(failure, "call %s endpoint %s: %v", client.Runtime, client.Endpoint, err)
 			if shouldRetry(err, 0) && attempt < client.MaxRetries {
 				if waitErr := waitBeforeRetry(ctx, attempt, 0); waitErr != nil {
 					return zero, waitErr
@@ -202,7 +245,8 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, responseSizeLimit))
 		closeErr := resp.Body.Close()
 		if readErr != nil {
-			err = NewDependencyUnavailable(client.Runtime, "read %s response: %v", client.Runtime, readErr)
+			failure := classifiedFailureDetails(details, 0, readErr, readErr.Error())
+			err = NewDependencyUnavailableWithDetails(failure, "read %s response: %v", client.Runtime, readErr)
 		} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			message := ExtractErrorMessage(responseBody)
 			if message == "" {
@@ -211,19 +255,22 @@ func doWithRetries[T any](ctx context.Context, client *Client, path string, body
 			if message == "" {
 				message = http.StatusText(resp.StatusCode)
 			}
-			err = NewDependencyUnavailableStatus(client.Runtime, resp.StatusCode, "%s endpoint %s returned %s: %s", client.Runtime, resp.Request.URL, resp.Status, message)
+			failure := classifiedFailureDetails(details, resp.StatusCode, nil, message)
+			err = NewDependencyUnavailableStatusWithDetails(failure, resp.StatusCode, "%s endpoint %s returned %s: %s", client.Runtime, resp.Request.URL, resp.Status, message)
 		} else {
 			value, decodeErr := decode(resp, responseBody)
 			if decodeErr == nil {
 				if closeErr != nil {
-					return zero, NewDependencyUnavailable(client.Runtime, "close %s response: %v", client.Runtime, closeErr)
+					failure := classifiedFailureDetails(details, 0, closeErr, closeErr.Error())
+					return zero, NewDependencyUnavailableWithDetails(failure, "close %s response: %v", client.Runtime, closeErr)
 				}
 				return value, nil
 			}
 			err = decodeErr
 		}
 		if closeErr != nil && err == nil {
-			err = NewDependencyUnavailable(client.Runtime, "close %s response: %v", client.Runtime, closeErr)
+			failure := classifiedFailureDetails(details, 0, closeErr, closeErr.Error())
+			err = NewDependencyUnavailableWithDetails(failure, "close %s response: %v", client.Runtime, closeErr)
 		}
 
 		lastErr = err
@@ -258,6 +305,86 @@ func shouldRetry(err error, statusCode int) bool {
 	return strings.Contains(lower, "connection refused") ||
 		strings.Contains(lower, "connection reset") ||
 		strings.Contains(lower, "broken pipe")
+}
+
+func classifiedFailureDetails(details FailureDetails, statusCode int, err error, message string) FailureDetails {
+	failure := details
+	failure.HTTPStatus = statusCode
+	failure.FailureClass = normalizeFailureClass(statusCode, err, message)
+	return failure
+}
+
+func normalizeFailureClass(statusCode int, err error, message string) string {
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return FailureClassAuth
+	case http.StatusTooManyRequests:
+		return FailureClassRateLimit
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return FailureClassTimeout
+	}
+	if statusCode >= http.StatusInternalServerError {
+		return FailureClassServer
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case mentionsAuthFailure(lower):
+		return FailureClassAuth
+	case mentionsRateLimit(lower):
+		return FailureClassRateLimit
+	case isTimeoutFailure(err, lower):
+		return FailureClassTimeout
+	case isTransportFailure(err, lower):
+		return FailureClassTransport
+	default:
+		return FailureClassDependency
+	}
+}
+
+func mentionsAuthFailure(message string) bool {
+	return strings.Contains(message, "api key") ||
+		strings.Contains(message, "apikey") ||
+		strings.Contains(message, "auth") ||
+		strings.Contains(message, "unauthorized") ||
+		strings.Contains(message, "forbidden")
+}
+
+func mentionsRateLimit(message string) bool {
+	return strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "quota exceeded")
+}
+
+func isTimeoutFailure(err error, message string) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return strings.Contains(message, "context deadline exceeded") ||
+		strings.Contains(message, "client.timeout exceeded") ||
+		strings.Contains(message, "timeout awaiting response headers") ||
+		strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "timed out")
+}
+
+func isTransportFailure(err error, message string) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "couldn't connect to server") ||
+		strings.Contains(message, "failed to connect") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "network is unreachable") ||
+		strings.Contains(message, "unexpected eof") ||
+		message == "eof"
 }
 
 func retryAfterDuration(value string) time.Duration {

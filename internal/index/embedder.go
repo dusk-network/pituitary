@@ -27,6 +27,16 @@ func (e *DependencyUnavailableError) RuntimeName() string {
 	return strings.TrimSpace(e.Runtime)
 }
 
+func (e *DependencyUnavailableError) DiagnosticFields() map[string]any {
+	values := map[string]any{
+		"failure_class": "dependency_unavailable",
+	}
+	if runtime := strings.TrimSpace(e.Runtime); runtime != "" {
+		values["runtime"] = runtime
+	}
+	return values
+}
+
 // IsDependencyUnavailable reports whether err wraps a dependency-unavailable failure.
 func IsDependencyUnavailable(err error) bool {
 	var target interface {
@@ -47,6 +57,27 @@ func DependencyUnavailableRuntime(err error) string {
 		return ""
 	}
 	return strings.TrimSpace(target.RuntimeName())
+}
+
+// DependencyUnavailableDetails reports structured diagnostic fields associated
+// with a dependency-unavailable failure, if the wrapped error exposes any.
+func DependencyUnavailableDetails(err error) map[string]any {
+	var target interface {
+		error
+		DiagnosticFields() map[string]any
+	}
+	if !errors.As(err, &target) {
+		return nil
+	}
+	values := target.DiagnosticFields()
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // Embedder generates embeddings for rebuild and query-time retrieval.

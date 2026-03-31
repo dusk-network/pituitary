@@ -99,10 +99,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 		}
 		operation := app.CheckOverlap(ctx, resolvedConfigPath, request)
 		if operation.Issue != nil {
-			return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssue{
-				Code:    operation.Issue.Code,
-				Message: operation.Issue.Message,
-			}, operation.Issue.ExitCode)
+			return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 		}
 		return writeCLISuccess(stdout, stderr, format, "check-overlap", operation.Request, operation.Result, nil)
 	}
@@ -126,10 +123,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 
 	operation := app.CheckOverlap(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssue{
-			Code:    operation.Issue.Code,
-			Message: operation.Issue.Message,
-		}, operation.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "check-overlap", operation.Request, operation.Result, nil)
