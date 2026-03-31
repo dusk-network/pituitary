@@ -14,6 +14,7 @@ const (
 	embeddingStrategyPlain             = "plain_v1"
 	embeddingStrategyNomicSearchPrefix = "nomic_search_prefix_v1"
 	openAICompatibleEmbedderRuntime    = "runtime.embedder"
+	openAICompatibleEmbeddingBatchSize = 8
 )
 
 type openAICompatibleEmbedder struct {
@@ -81,6 +82,40 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 		input = append(input, prepareEmbeddingInput(e.strategy, purpose, text))
 	}
 
+	vectors := make([][]float64, 0, len(input))
+	for start := 0; start < len(input); start += openAICompatibleEmbeddingBatchSize {
+		end := start + openAICompatibleEmbeddingBatchSize
+		if end > len(input) {
+			end = len(input)
+		}
+		batchVectors, err := e.embedBatchAdaptive(ctx, input[start:end])
+		if err != nil {
+			return nil, err
+		}
+		vectors = append(vectors, batchVectors...)
+	}
+	return vectors, nil
+}
+
+func (e *openAICompatibleEmbedder) embedBatchAdaptive(ctx context.Context, input []string) ([][]float64, error) {
+	vectors, err := e.embedBatch(ctx, input)
+	if err == nil || len(input) <= 1 || !IsDependencyUnavailable(err) {
+		return vectors, err
+	}
+
+	mid := len(input) / 2
+	left, err := e.embedBatchAdaptive(ctx, input[:mid])
+	if err != nil {
+		return nil, err
+	}
+	right, err := e.embedBatchAdaptive(ctx, input[mid:])
+	if err != nil {
+		return nil, err
+	}
+	return append(left, right...), nil
+}
+
+func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []string) ([][]float64, error) {
 	payload, err := e.client.Embeddings(ctx, input)
 	if err != nil {
 		return nil, err

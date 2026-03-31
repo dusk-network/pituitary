@@ -3,10 +3,12 @@ package index
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -149,5 +151,144 @@ func TestOpenAICompatibleEmbedderParsesStringErrorBodies(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), `{"error":"Model unloaded.."}`) {
 		t.Fatalf("EmbedQueries() error = %q, want parsed message instead of raw JSON", err)
+	}
+}
+
+func TestOpenAICompatibleEmbedderBatchesLargeRequests(t *testing.T) {
+	t.Parallel()
+
+	var calls [][]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("request path = %q, want %q", r.URL.Path, "/v1/embeddings")
+		}
+		var request struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		calls = append(calls, append([]string(nil), request.Input...))
+
+		response := map[string]any{
+			"data": make([]map[string]any, 0, len(request.Input)),
+		}
+		for i, raw := range request.Input {
+			idx, err := strconv.Atoi(strings.TrimPrefix(raw, "text-"))
+			if err != nil {
+				t.Fatalf("parse input index from %q: %v", raw, err)
+			}
+			response["data"] = append(response["data"].([]map[string]any), map[string]any{
+				"index":     i,
+				"embedding": []float64{float64(idx)},
+			})
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	embedder, err := NewEmbedder(config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "pituitary-embed",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder() error = %v", err)
+	}
+
+	texts := make([]string, openAICompatibleEmbeddingBatchSize+3)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("text-%d", i)
+	}
+
+	vectors, err := embedder.EmbedDocuments(context.Background(), texts)
+	if err != nil {
+		t.Fatalf("EmbedDocuments() error = %v", err)
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("embedding request count = %d, want 2", len(calls))
+	}
+	if len(calls[0]) != openAICompatibleEmbeddingBatchSize {
+		t.Fatalf("first batch size = %d, want %d", len(calls[0]), openAICompatibleEmbeddingBatchSize)
+	}
+	if len(calls[1]) != 3 {
+		t.Fatalf("second batch size = %d, want 3", len(calls[1]))
+	}
+	if len(vectors) != len(texts) {
+		t.Fatalf("vector count = %d, want %d", len(vectors), len(texts))
+	}
+	for i, vector := range vectors {
+		if len(vector) != 1 || vector[0] != float64(i) {
+			t.Fatalf("vector[%d] = %v, want [%d]", i, vector, i)
+		}
+	}
+}
+
+func TestOpenAICompatibleEmbedderFallsBackToSmallerBatchesOnDependencyFailure(t *testing.T) {
+	t.Parallel()
+
+	var calls []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		calls = append(calls, len(request.Input))
+		if len(request.Input) > 1 {
+			http.Error(w, `{"error":"llama_decode returned -1"}`, http.StatusInternalServerError)
+			return
+		}
+
+		idx, err := strconv.Atoi(strings.TrimPrefix(request.Input[0], "text-"))
+		if err != nil {
+			t.Fatalf("parse input index from %q: %v", request.Input[0], err)
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{
+				"index":     0,
+				"embedding": []float64{float64(idx)},
+			}},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	embedder, err := NewEmbedder(config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "pituitary-embed",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder() error = %v", err)
+	}
+
+	vectors, err := embedder.EmbedDocuments(context.Background(), []string{"text-0", "text-1", "text-2"})
+	if err != nil {
+		t.Fatalf("EmbedDocuments() error = %v", err)
+	}
+
+	if len(vectors) != 3 {
+		t.Fatalf("vector count = %d, want 3", len(vectors))
+	}
+	for i, vector := range vectors {
+		if len(vector) != 1 || vector[0] != float64(i) {
+			t.Fatalf("vector[%d] = %v, want [%d]", i, vector, i)
+		}
+	}
+	if len(calls) < 4 {
+		t.Fatalf("call sizes = %v, want recursive fallback requests", calls)
+	}
+	if calls[0] != 3 {
+		t.Fatalf("first call batch size = %d, want 3", calls[0])
 	}
 }
