@@ -18,7 +18,15 @@ func Render(cfg *Config) (string, error) {
 	fmt.Fprintf(&builder, "schema_version = %d\n\n", CurrentSchemaVersion)
 	fmt.Fprintf(&builder, "[workspace]\n")
 	fmt.Fprintf(&builder, "root = %s\n", strconv.Quote(cfg.Workspace.Root))
+	if repoID := strings.TrimSpace(cfg.Workspace.RepoID); repoID != "" {
+		fmt.Fprintf(&builder, "repo_id = %s\n", strconv.Quote(repoID))
+	}
 	fmt.Fprintf(&builder, "index_path = %s\n", strconv.Quote(cfg.Workspace.IndexPath))
+	for _, repo := range cfg.Workspace.Repos {
+		builder.WriteString("\n[[workspace.repos]]\n")
+		fmt.Fprintf(&builder, "id = %s\n", strconv.Quote(repo.ID))
+		fmt.Fprintf(&builder, "root = %s\n", strconv.Quote(repo.Root))
+	}
 
 	builder.WriteString("\n[runtime.embedder]\n")
 	fmt.Fprintf(&builder, "provider = %s\n", strconv.Quote(cfg.Runtime.Embedder.Provider))
@@ -55,6 +63,9 @@ func Render(cfg *Config) (string, error) {
 		fmt.Fprintf(&builder, "kind = %s\n", strconv.Quote(source.Kind))
 		if source.Role != "" {
 			fmt.Fprintf(&builder, "role = %s\n", strconv.Quote(source.Role))
+		}
+		if source.Repo != "" {
+			fmt.Fprintf(&builder, "repo = %s\n", strconv.Quote(source.Repo))
 		}
 		if source.Path != "" {
 			fmt.Fprintf(&builder, "path = %s\n", strconv.Quote(source.Path))

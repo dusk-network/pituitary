@@ -551,6 +551,87 @@ path = "docs-b"
 	}
 }
 
+func TestLoadFromConfigScopesDocRefsByRepo(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustWriteFile(t, filepath.Join(root, "pituitary.toml"), `
+[workspace]
+root = "primary"
+repo_id = "primary"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "shared"
+root = "shared"
+
+[[sources]]
+name = "primary-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+`)
+	mustWriteFile(t, filepath.Join(primary, "docs", "guides", "api-rate-limits.md"), "# Primary Guide\n")
+	mustWriteFile(t, filepath.Join(shared, "docs", "guides", "api-rate-limits.md"), "# Shared Guide\n")
+
+	cfg, err := config.Load(filepath.Join(root, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Docs), 2; got != want {
+		t.Fatalf("doc count = %d, want %d", got, want)
+	}
+	if got, want := len(result.Sources), 2; got != want {
+		t.Fatalf("source count = %d, want %d", got, want)
+	}
+	if got, want := result.Sources[0].Repo, "primary"; got != want {
+		t.Fatalf("primary source repo = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[1].Repo, "shared"; got != want {
+		t.Fatalf("shared source repo = %q, want %q", got, want)
+	}
+
+	docsByRef := map[string]model.DocRecord{}
+	for _, doc := range result.Docs {
+		docsByRef[doc.Ref] = doc
+	}
+	primaryDoc, ok := docsByRef["doc://guides/api-rate-limits"]
+	if !ok {
+		t.Fatalf("docs = %+v, want primary doc ref", result.Docs)
+	}
+	if got, want := primaryDoc.Metadata["repo_id"], "primary"; got != want {
+		t.Fatalf("primary doc repo metadata = %q, want %q", got, want)
+	}
+	if got, want := primaryDoc.SourceRef, "file://docs/guides/api-rate-limits.md"; got != want {
+		t.Fatalf("primary doc source_ref = %q, want %q", got, want)
+	}
+
+	sharedDoc, ok := docsByRef["doc://shared/guides/api-rate-limits"]
+	if !ok {
+		t.Fatalf("docs = %+v, want shared doc ref", result.Docs)
+	}
+	if got, want := sharedDoc.Metadata["repo_id"], "shared"; got != want {
+		t.Fatalf("shared doc repo metadata = %q, want %q", got, want)
+	}
+	if got, want := sharedDoc.SourceRef, "file://docs/guides/api-rate-limits.md"; got != want {
+		t.Fatalf("shared doc source_ref = %q, want %q", got, want)
+	}
+}
+
 func TestLoadFromConfigFiltersMarkdownDocsBySelectors(t *testing.T) {
 	t.Parallel()
 

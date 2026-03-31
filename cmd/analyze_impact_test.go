@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -216,5 +217,37 @@ func TestRunAnalyzeImpactWithRequestFileJSON(t *testing.T) {
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
+func TestRunAnalyzeImpactTextIncludesCrossRepoArtifacts(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runAnalyzeImpact([]string{"--spec-ref", "SPEC-100"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"affected specs: 1",
+		"SPEC-200 | repo: shared | depends_on | Shared Repo Rollout",
+		"affected docs:",
+		"doc://shared/guides/api-rate-limits | repo: shared | source: docs/guides/api-rate-limits.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runAnalyzeImpact() output %q does not contain %q", out, want)
+		}
 	}
 }

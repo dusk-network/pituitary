@@ -20,6 +20,7 @@ type AnalyzeImpactRequest struct {
 type ImpactedSpec struct {
 	Ref          string                     `json:"ref"`
 	Title        string                     `json:"title"`
+	Repo         string                     `json:"repo,omitempty"`
 	Status       string                     `json:"status,omitempty"`
 	Relationship string                     `json:"relationship"`
 	Historical   bool                       `json:"historical"`
@@ -36,6 +37,7 @@ type ImpactedRef struct {
 type ImpactedDoc struct {
 	Ref       string  `json:"ref"`
 	Title     string  `json:"title"`
+	Repo      string  `json:"repo,omitempty"`
 	SourceRef string  `json:"source_ref"`
 	Score     float64 `json:"score"`
 }
@@ -137,6 +139,7 @@ func impactedSpecs(candidate model.SpecRecord, specs map[string]specDocument) []
 			result = append(result, ImpactedSpec{
 				Ref:          spec.Record.Ref,
 				Title:        spec.Record.Title,
+				Repo:         artifactRepoID(spec.Record.Metadata),
 				Status:       spec.Record.Status,
 				Relationship: string(model.RelationDependsOn),
 				Historical:   false,
@@ -146,6 +149,7 @@ func impactedSpecs(candidate model.SpecRecord, specs map[string]specDocument) []
 			result = append(result, ImpactedSpec{
 				Ref:          spec.Record.Ref,
 				Title:        spec.Record.Title,
+				Repo:         artifactRepoID(spec.Record.Metadata),
 				Status:       spec.Record.Status,
 				Relationship: string(model.RelationSupersedes),
 				Historical:   true,
@@ -207,6 +211,7 @@ func impactedDocs(candidate specDocument, docs map[string]docDocument) []Impacte
 		result = append(result, ImpactedDoc{
 			Ref:       doc.Record.Ref,
 			Title:     doc.Record.Title,
+			Repo:      artifactRepoID(doc.Record.Metadata),
 			SourceRef: doc.Record.SourceRef,
 			Score:     roundScore(score),
 		})

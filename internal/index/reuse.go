@@ -208,6 +208,7 @@ func summarizeRebuild(records *source.LoadResult, dimension int, state *reuseSta
 		DocCount:          len(records.Docs),
 		EmbedderDimension: dimension,
 		FullRebuild:       options.Full,
+		Repos:             repoCoverageFromRecords(records),
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
 

@@ -10,11 +10,12 @@ import (
 
 // Status reports whether the configured index exists and its basic counts.
 type Status struct {
-	IndexPath  string `json:"index_path"`
-	Exists     bool   `json:"index_exists"`
-	SpecCount  int    `json:"spec_count"`
-	DocCount   int    `json:"doc_count"`
-	ChunkCount int    `json:"chunk_count"`
+	IndexPath  string         `json:"index_path"`
+	Exists     bool           `json:"index_exists"`
+	SpecCount  int            `json:"spec_count"`
+	DocCount   int            `json:"doc_count"`
+	ChunkCount int            `json:"chunk_count"`
+	Repos      []RepoCoverage `json:"repo_coverage,omitempty"`
 }
 
 // ReadStatus inspects the configured index path and returns basic counts.
@@ -51,6 +52,10 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks`).Scan(&status.ChunkCount); err != nil {
 		return nil, fmt.Errorf("count indexed chunks: %w", err)
+	}
+	status.Repos, err = repoCoverageFromDBContext(ctx, db)
+	if err != nil {
+		return nil, err
 	}
 
 	return status, nil

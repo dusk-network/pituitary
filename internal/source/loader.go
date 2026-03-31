@@ -23,6 +23,7 @@ type LoadResult struct {
 // LoadSourceSummary describes the records contributed by one configured source.
 type LoadSourceSummary struct {
 	Name      string `json:"name"`
+	Repo      string `json:"repo,omitempty"`
 	Adapter   string `json:"adapter"`
 	Kind      string `json:"kind"`
 	Path      string `json:"path"`
@@ -52,9 +53,22 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 	logger.Infof("source", "loading %d configured source(s)", len(cfg.Sources))
 
 	for _, source := range cfg.Sources {
-		logger.Debugf("source", "loading source %q (%s %s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
+		resolvedRepo := strings.TrimSpace(source.ResolvedRepo)
+		if resolvedRepo == "" {
+			resolvedRepo = config.PrimaryRepoID(cfg)
+		}
+		primaryRepoID := strings.TrimSpace(source.PrimaryRepo)
+		if primaryRepoID == "" {
+			primaryRepoID = config.PrimaryRepoID(cfg)
+		}
+		repoRootPath := strings.TrimSpace(source.RepoRootPath)
+		if repoRootPath == "" {
+			repoRootPath = cfg.Workspace.RootPath
+		}
+		logger.Debugf("source", "loading %s (%s %s)", sourceDisplayName(source), source.Kind, filepath.ToSlash(source.Path))
 		summary := LoadSourceSummary{
 			Name:    source.Name,
+			Repo:    resolvedRepo,
 			Adapter: source.Adapter,
 			Kind:    source.Kind,
 			Path:    source.Path,
@@ -68,17 +82,20 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 			Name:          source.Name,
 			Adapter:       source.Adapter,
 			Kind:          source.Kind,
+			Repo:          resolvedRepo,
 			Path:          source.Path,
 			Files:         append([]string(nil), source.Files...),
 			Include:       append([]string(nil), source.Include...),
 			Exclude:       append([]string(nil), source.Exclude...),
 			Options:       config.CloneSourceOptions(source.Options),
-			WorkspaceRoot: cfg.Workspace.RootPath,
+			WorkspaceRoot: repoRootPath,
+			PrimaryRepoID: primaryRepoID,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("source %q: %w", source.Name, err)
+			return nil, fmt.Errorf("%s: %w", sourceDisplayName(source), err)
 		}
 		annotateSourceRoleMetadata(source.Role, adapterResult)
+		annotateSourceRepoMetadata(resolvedRepo, adapterResult)
 
 		if err := appendUniqueSpecRecords(result, seenSpecs, source, adapterResult.Specs); err != nil {
 			return nil, err
@@ -92,13 +109,13 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 
 		result.Sources = append(result.Sources, summary)
 		if summary.ItemCount == 0 {
-			logger.Warnf("source", "source %q (%s %s) matched 0 item(s)", source.Name, source.Kind, filepath.ToSlash(source.Path))
+			logger.Warnf("source", "%s (%s %s) matched 0 item(s)", sourceDisplayName(source), source.Kind, filepath.ToSlash(source.Path))
 			continue
 		}
 		logger.Infof(
 			"source",
-			"source %q (%s %s) loaded %d item(s) (%d spec(s), %d doc(s))",
-			source.Name,
+			"%s (%s %s) loaded %d item(s) (%d spec(s), %d doc(s))",
+			sourceDisplayName(source),
 			source.Kind,
 			filepath.ToSlash(source.Path),
 			summary.ItemCount,
@@ -149,4 +166,32 @@ func withSourceRole(metadata map[string]string, role string) map[string]string {
 	}
 	metadata["source_role"] = role
 	return metadata
+}
+
+func annotateSourceRepoMetadata(repoID string, result *sdk.AdapterResult) {
+	repoID = strings.TrimSpace(repoID)
+	if repoID == "" || result == nil {
+		return
+	}
+	for i := range result.Specs {
+		result.Specs[i].Metadata = withSourceRepo(result.Specs[i].Metadata, repoID)
+	}
+	for i := range result.Docs {
+		result.Docs[i].Metadata = withSourceRepo(result.Docs[i].Metadata, repoID)
+	}
+}
+
+func withSourceRepo(metadata map[string]string, repoID string) map[string]string {
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["repo_id"] = repoID
+	return metadata
+}
+
+func sourceDisplayName(source config.Source) string {
+	if strings.TrimSpace(source.Repo) != "" {
+		return fmt.Sprintf("source %q repo %q", source.Name, source.ResolvedRepo)
+	}
+	return fmt.Sprintf("source %q", source.Name)
 }

@@ -71,6 +71,29 @@ path = "rfcs"
 include = ["**/*.md"]
 ```
 
+`workspace.root` is the primary repo root for the logical workspace. For cross-repo analysis, name it with `workspace.repo_id`, declare additional roots under `[[workspace.repos]]`, and bind a source to a secondary root with `repo = "..."`:
+
+```toml
+[workspace]
+root = "."
+repo_id = "product-docs"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "runtime"
+root = "../runtime"
+
+[[sources]]
+name = "runtime-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "runtime"
+path = "docs"
+include = ["guides/*.md"]
+```
+
+Pituitary keeps source paths repo-relative, adds `repo` to search/drift/impact/status JSON, and scopes non-primary generated doc refs as `doc://<repo>/...` so duplicate paths from sibling repos stay distinct.
+
 ### Example: Optional GitHub issues source
 
 Schema `3` also supports adapter-specific typed options under `[sources.options]`:

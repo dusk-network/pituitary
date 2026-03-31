@@ -33,11 +33,15 @@ func (a *filesystemAdapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sd
 		Name:         cfg.Name,
 		Adapter:      cfg.Adapter,
 		Kind:         cfg.Kind,
+		Repo:         cfg.Repo,
 		Path:         cfg.Path,
 		Files:        append([]string(nil), cfg.Files...),
 		Include:      append([]string(nil), cfg.Include...),
 		Exclude:      append([]string(nil), cfg.Exclude...),
 		Options:      config.CloneSourceOptions(cfg.Options),
+		ResolvedRepo: strings.TrimSpace(cfg.Repo),
+		PrimaryRepo:  strings.TrimSpace(cfg.PrimaryRepoID),
+		RepoRootPath: cfg.WorkspaceRoot,
 		ResolvedPath: resolveFilesystemSourcePath(cfg.WorkspaceRoot, cfg.Path),
 	}
 
@@ -81,6 +85,7 @@ func resolveFilesystemSourcePath(workspaceRoot, sourcePath string) string {
 
 type artifactOrigin struct {
 	sourceName string
+	repoID     string
 	sourcePath string
 	itemPath   string
 }
@@ -121,6 +126,7 @@ func specOrigin(source config.Source, record model.SpecRecord) artifactOrigin {
 	}
 	return artifactOrigin{
 		sourceName: source.Name,
+		repoID:     source.ResolvedRepo,
 		sourcePath: source.Path,
 		itemPath:   itemPath,
 	}
@@ -129,12 +135,16 @@ func specOrigin(source config.Source, record model.SpecRecord) artifactOrigin {
 func docOrigin(source config.Source, record model.DocRecord) artifactOrigin {
 	return artifactOrigin{
 		sourceName: source.Name,
+		repoID:     source.ResolvedRepo,
 		sourcePath: source.Path,
 		itemPath:   record.Metadata["path"],
 	}
 }
 
 func describeOrigin(itemLabel string, origin artifactOrigin) string {
+	if origin.repoID != "" {
+		return fmt.Sprintf("source %q repo %q path %q %s %q", origin.sourceName, origin.repoID, origin.sourcePath, itemLabel, origin.itemPath)
+	}
 	return fmt.Sprintf("source %q path %q %s %q", origin.sourceName, origin.sourcePath, itemLabel, origin.itemPath)
 }
 
@@ -343,7 +353,7 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
-		docRef, err := docRefForPath(source.ResolvedPath, match.AbsolutePath)
+		docRef, err := docRefForPath(source.ResolvedPath, match.AbsolutePath, source.ResolvedRepo, source.PrimaryRepo)
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
@@ -432,7 +442,7 @@ func sourcePathAllowed(source config.Source, relPath string) (bool, error) {
 	return selection.Selected, nil
 }
 
-func docRefForPath(sourceRoot, path string) (string, error) {
+func docRefForPath(sourceRoot, path, repoID, primaryRepoID string) (string, error) {
 	rel, err := filepath.Rel(sourceRoot, path)
 	if err != nil {
 		return "", err
@@ -440,7 +450,7 @@ func docRefForPath(sourceRoot, path string) (string, error) {
 	if filepath.Ext(rel) != ".md" {
 		return "", fmt.Errorf("doc path %q is not markdown", rel)
 	}
-	return "doc://" + strings.TrimSuffix(filepath.ToSlash(rel), ".md"), nil
+	return repoScopedArtifactRef("doc://", strings.TrimSuffix(filepath.ToSlash(rel), ".md"), repoID, primaryRepoID), nil
 }
 
 func docTitle(path string, body []byte) string {
@@ -474,7 +484,7 @@ type markdownContractFields struct {
 
 func inferMarkdownContract(workspaceRoot string, source config.Source, path string, body []byte) (model.SpecRecord, error) {
 	fields := inferMarkdownContractFields(body)
-	fallbackRef, err := markdownContractRefForPath(workspaceRoot, path)
+	fallbackRef, err := markdownContractRefForPath(workspaceRoot, path, source.ResolvedRepo, source.PrimaryRepo)
 	if err != nil {
 		return model.SpecRecord{}, err
 	}
@@ -791,7 +801,7 @@ func uniqueStringValues(values []string) []string {
 	return result
 }
 
-func markdownContractRefForPath(workspaceRoot, path string) (string, error) {
+func markdownContractRefForPath(workspaceRoot, path, repoID, primaryRepoID string) (string, error) {
 	rel, err := filepath.Rel(workspaceRoot, path)
 	if err != nil {
 		return "", err
@@ -799,7 +809,17 @@ func markdownContractRefForPath(workspaceRoot, path string) (string, error) {
 	if filepath.Ext(rel) != ".md" {
 		return "", fmt.Errorf("contract path %q is not markdown", rel)
 	}
-	return "contract://" + strings.TrimSuffix(filepath.ToSlash(rel), ".md"), nil
+	return repoScopedArtifactRef("contract://", strings.TrimSuffix(filepath.ToSlash(rel), ".md"), repoID, primaryRepoID), nil
+}
+
+func repoScopedArtifactRef(prefix, relativePath, repoID, primaryRepoID string) string {
+	relativePath = strings.TrimPrefix(strings.TrimSpace(relativePath), "/")
+	repoID = strings.TrimSpace(repoID)
+	primaryRepoID = strings.TrimSpace(primaryRepoID)
+	if repoID == "" || repoID == primaryRepoID {
+		return prefix + relativePath
+	}
+	return prefix + repoID + "/" + relativePath
 }
 
 func parseSpecBundle(contents []byte) (rawSpecBundle, error) {

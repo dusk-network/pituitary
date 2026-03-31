@@ -195,6 +195,55 @@ func TestCheckDocDriftFlagsStaleNamedArtifacts(t *testing.T) {
 	}
 }
 
+func TestCheckDocDriftIncludesRepoIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadMultiRepoAnalysisConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+
+	var foundSharedDrift, foundSharedAssessment, foundSharedRemediation bool
+	for _, item := range result.DriftItems {
+		if item.DocRef == "doc://shared/guides/api-rate-limits" {
+			foundSharedDrift = true
+			if got, want := item.Repo, "shared"; got != want {
+				t.Fatalf("shared drift repo = %q, want %q", got, want)
+			}
+		}
+	}
+	for _, assessment := range result.Assessments {
+		if assessment.DocRef == "doc://shared/guides/api-rate-limits" {
+			foundSharedAssessment = true
+			if got, want := assessment.Repo, "shared"; got != want {
+				t.Fatalf("shared assessment repo = %q, want %q", got, want)
+			}
+		}
+	}
+	if result.Remediation != nil {
+		for _, item := range result.Remediation.Items {
+			if item.DocRef == "doc://shared/guides/api-rate-limits" {
+				foundSharedRemediation = true
+				if got, want := item.Repo, "shared"; got != want {
+					t.Fatalf("shared remediation repo = %q, want %q", got, want)
+				}
+			}
+		}
+	}
+	if !foundSharedDrift || !foundSharedAssessment || !foundSharedRemediation {
+		t.Fatalf("doc drift result = %+v, want shared repo drift, assessment, and remediation", result)
+	}
+}
+
 func TestCheckDocDriftUsesAnalysisProviderWhenEnabled(t *testing.T) {
 	t.Parallel()
 

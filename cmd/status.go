@@ -30,6 +30,7 @@ type statusResult struct {
 	SpecCount         int                        `json:"spec_count"`
 	DocCount          int                        `json:"doc_count"`
 	ChunkCount        int                        `json:"chunk_count"`
+	Repos             []index.RepoCoverage       `json:"repo_coverage,omitempty"`
 	ArtifactLocations *statusArtifactLocation    `json:"artifact_locations,omitempty"`
 	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
 	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
@@ -129,6 +130,7 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		SpecCount:         result.Index.SpecCount,
 		DocCount:          result.Index.DocCount,
 		ChunkCount:        result.Index.ChunkCount,
+		Repos:             append([]index.RepoCoverage(nil), result.Index.Repos...),
 		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.Index.IndexPath),
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,

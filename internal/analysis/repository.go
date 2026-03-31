@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
@@ -211,4 +212,11 @@ func missingDocRefs(source map[string]docDocument, refs []string) []string {
 		}
 	}
 	return missing
+}
+
+func artifactRepoID(metadata map[string]string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(metadata["repo_id"])
 }
