@@ -117,6 +117,38 @@ timeout_ms = 120000
 
 `pituitary status` reports the resolved runtime config, including the selected profile plus the effective provider, model, endpoint, timeout, and retry settings that commands will use.
 
+### Terminology Governance
+
+`check-terminology` can also load reusable policy from config instead of requiring `--term` flags every time:
+
+```toml
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+forbidden_current = ["repository"]
+docs_severity = "error"
+specs_severity = "warning"
+
+[[terminology.policies]]
+preferred = "continuity"
+deprecated_terms = ["workflow"]
+docs_severity = "error"
+specs_severity = "warning"
+```
+
+Each policy describes one preferred current-state term plus any combination of:
+
+- `historical_aliases`: tolerated in historical or compatibility-only context, but reported as current-state violations elsewhere
+- `deprecated_terms`: still reported, even in historical context, so migrations can fully remove them over time
+- `forbidden_current`: allowed historically, but never acceptable in current-state docs/specs
+
+Severity is configured per artifact scope:
+
+- `docs_severity`: `ignore`, `warning`, or `error`
+- `specs_severity`: `ignore`, `warning`, or `error`
+
+When `pituitary check-terminology` runs without `--term`, Pituitary audits every governed term from `[[terminology.policies]]`, infers `canonical_terms` from the configured `preferred` values, and emits structured `classification`, `context`, `severity`, `replacement`, and `tolerated` fields in JSON output.
+
 ### Example: Optional GitHub issues source
 
 Schema `3` also supports adapter-specific typed options under `[sources.options]`:

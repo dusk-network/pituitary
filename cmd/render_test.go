@@ -280,8 +280,18 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 				Terms:     []string{"repo", "workflow"},
 				Sections: []analysis.TerminologySectionFinding{
 					{
-						Section:    "Core Model",
-						Terms:      []string{"repo"},
+						Section: "Core Model",
+						Terms:   []string{"repo"},
+						Matches: []analysis.TerminologyTermMatch{
+							{
+								Term:           "repo",
+								PreferredTerm:  "locality",
+								Classification: "historical_alias",
+								Context:        "current_state",
+								Severity:       "error",
+								Replacement:    "locality",
+							},
+						},
 						Excerpt:    "The kernel keeps workflow continuity in each repo.",
 						Assessment: "exact match in body text without compatibility-only markers",
 						Evidence: &analysis.TerminologyEvidence{
@@ -294,6 +304,14 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 				},
 			},
 		},
+		Tolerated: []analysis.TerminologyFinding{
+			{
+				Ref:   "doc://guides/repo-compatibility",
+				Kind:  "doc",
+				Title: "Repo Compatibility Notes",
+				Terms: []string{"repo"},
+			},
+		},
 	})
 
 	output := stdout.String()
@@ -304,9 +322,12 @@ func TestRenderTerminologyAuditResultIncludesEvidence(t *testing.T) {
 		"terms: repo, workflow",
 		"canonical terms: locality, continuity",
 		"evidence specs: SPEC-LOCALITY",
+		"tolerated historical uses: 1 artifact(s)",
 		"doc://guides/repo-kernel | doc | Repo Kernel Guide | terms: repo, workflow",
+		"match: repo | class: historical_alias | context: current_state | severity: error | replace with: locality",
 		"assessment: exact match in body text without compatibility-only markers",
 		"evidence: SPEC-LOCALITY | Core Model | 0.812",
+		"doc://guides/repo-compatibility | doc | Repo Compatibility Notes | terms: repo",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderTerminologyAuditResult() output %q does not contain %q", output, want)

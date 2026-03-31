@@ -48,6 +48,16 @@ func Render(cfg *Config) (string, error) {
 		writeRuntimeProviderConfig(&builder, cfg.Runtime.Analysis, runtimeProfileBase(cfg.Runtime.Profiles, cfg.Runtime.Analysis.Profile))
 	}
 
+	for _, policy := range cfg.Terminology.Policies {
+		builder.WriteString("\n[[terminology.policies]]\n")
+		fmt.Fprintf(&builder, "preferred = %s\n", strconv.Quote(policy.Preferred))
+		writeQuotedArray(&builder, "historical_aliases", policy.HistoricalAliases)
+		writeQuotedArray(&builder, "deprecated_terms", policy.DeprecatedTerms)
+		writeQuotedArray(&builder, "forbidden_current", policy.ForbiddenCurrent)
+		fmt.Fprintf(&builder, "docs_severity = %s\n", strconv.Quote(NormalizeTerminologySeverity(policy.DocsSeverity)))
+		fmt.Fprintf(&builder, "specs_severity = %s\n", strconv.Quote(NormalizeTerminologySeverity(policy.SpecsSeverity)))
+	}
+
 	for _, source := range cfg.Sources {
 		builder.WriteString("\n[[sources]]\n")
 		fmt.Fprintf(&builder, "name = %s\n", strconv.Quote(source.Name))

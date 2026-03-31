@@ -70,6 +70,13 @@ func undecodedKeyMessage(key toml.Key) string {
 		default:
 			return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
 		}
+	case "terminology":
+		switch len(key) {
+		case 2:
+			return fmt.Sprintf("unsupported terminology field %q", key[1])
+		default:
+			return fmt.Sprintf("unsupported terminology.%s field %q", key[1], strings.Join(key[2:], "."))
+		}
 	case "sources":
 		return fmt.Sprintf("unsupported sources field %q", strings.Join(key[1:], "."))
 	default:

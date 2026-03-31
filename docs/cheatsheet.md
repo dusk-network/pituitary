@@ -35,6 +35,7 @@ pituitary analyze-impact --path specs/X         # what's affected if this change
 pituitary check-doc-drift --scope all           # find stale docs
 pituitary check-doc-drift --scope SPEC-042      # drift for one spec only
 git diff --cached | pituitary check-doc-drift --diff-file -  # change-scoped stale-doc analysis
+pituitary check-terminology --spec-ref SPEC-042  # terminology governance from configured policies
 pituitary check-terminology --term repo \
   --canonical-term locality --spec-ref SPEC-042 # terminology migration audit
 pituitary fix --path docs/guides/api-rate-limits.md --dry-run  # preview deterministic drift fixes

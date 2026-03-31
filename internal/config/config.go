@@ -32,6 +32,9 @@ const (
 	RuntimeProviderFixture     = "fixture"
 	RuntimeProviderOpenAI      = "openai_compatible"
 	RuntimeProviderDisabled    = "disabled"
+	TerminologySeverityIgnore  = "ignore"
+	TerminologySeverityWarning = "warning"
+	TerminologySeverityError   = "error"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -41,6 +44,7 @@ type Config struct {
 	ConfigDir     string
 	Workspace     Workspace
 	Runtime       Runtime
+	Terminology   Terminology
 	Sources       []Source
 }
 
@@ -105,11 +109,25 @@ type RuntimeProvider struct {
 	maxRetriesSet bool
 }
 
+type Terminology struct {
+	Policies []TerminologyPolicy
+}
+
+type TerminologyPolicy struct {
+	Preferred         string
+	HistoricalAliases []string
+	DeprecatedTerms   []string
+	ForbiddenCurrent  []string
+	DocsSeverity      string
+	SpecsSeverity     string
+}
+
 type rawConfig struct {
-	SchemaVersion int          `toml:"schema_version"`
-	Workspace     rawWorkspace `toml:"workspace"`
-	Runtime       rawRuntime   `toml:"runtime"`
-	Sources       []rawSource  `toml:"sources"`
+	SchemaVersion int            `toml:"schema_version"`
+	Workspace     rawWorkspace   `toml:"workspace"`
+	Runtime       rawRuntime     `toml:"runtime"`
+	Terminology   rawTerminology `toml:"terminology"`
+	Sources       []rawSource    `toml:"sources"`
 }
 
 type rawWorkspace struct {
@@ -141,6 +159,19 @@ type rawSource struct {
 	Include []string       `toml:"include"`
 	Exclude []string       `toml:"exclude"`
 	Options map[string]any `toml:"options"`
+}
+
+type rawTerminology struct {
+	Policies []rawTerminologyPolicy `toml:"policies"`
+}
+
+type rawTerminologyPolicy struct {
+	Preferred         string   `toml:"preferred"`
+	HistoricalAliases []string `toml:"historical_aliases"`
+	DeprecatedTerms   []string `toml:"deprecated_terms"`
+	ForbiddenCurrent  []string `toml:"forbidden_current"`
+	DocsSeverity      string   `toml:"docs_severity"`
+	SpecsSeverity     string   `toml:"specs_severity"`
 }
 
 type rawRuntimeProvider struct {
@@ -231,10 +262,23 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Embedder: buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
 			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
 		},
+		Terminology: Terminology{
+			Policies: make([]TerminologyPolicy, 0, len(raw.Terminology.Policies)),
+		},
 		Sources: make([]Source, 0, len(raw.Sources)),
 	}
 	for name, profile := range raw.Runtime.Profiles {
 		cfg.Runtime.Profiles[strings.TrimSpace(name)] = buildRuntimeProvider(profile, "")
+	}
+	for _, policy := range raw.Terminology.Policies {
+		cfg.Terminology.Policies = append(cfg.Terminology.Policies, TerminologyPolicy{
+			Preferred:         strings.TrimSpace(policy.Preferred),
+			HistoricalAliases: uniqueStringList(policy.HistoricalAliases),
+			DeprecatedTerms:   uniqueStringList(policy.DeprecatedTerms),
+			ForbiddenCurrent:  uniqueStringList(policy.ForbiddenCurrent),
+			DocsSeverity:      NormalizeTerminologySeverity(policy.DocsSeverity),
+			SpecsSeverity:     NormalizeTerminologySeverity(policy.SpecsSeverity),
+		})
 	}
 	for _, repo := range raw.Workspace.Repos {
 		cfg.Workspace.Repos = append(cfg.Workspace.Repos, WorkspaceRepo{
@@ -318,6 +362,48 @@ func CloneOptionValue(value any) any {
 		return append([]string(nil), typed...)
 	default:
 		return typed
+	}
+}
+
+func uniqueStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// NormalizeTerminologySeverity maps blank severities to the default warning
+// level while preserving unsupported values for later validation.
+func NormalizeTerminologySeverity(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return TerminologySeverityWarning
+	}
+	return value
+}
+
+// IsValidTerminologySeverity reports whether the configured terminology
+// governance severity is supported by the CLI and JSON contracts.
+func IsValidTerminologySeverity(value string) bool {
+	switch NormalizeTerminologySeverity(value) {
+	case TerminologySeverityIgnore, TerminologySeverityWarning, TerminologySeverityError:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -543,6 +629,97 @@ func validate(cfg *Config) error {
 
 	if err := validateRuntime(&cfg.Runtime); err != nil {
 		errs.items = append(errs.items, err.Error())
+	}
+	if err := validateTerminology(&cfg.Terminology); err != nil {
+		errs.items = append(errs.items, err.Error())
+	}
+
+	return errs.err()
+}
+
+func validateTerminology(terminology *Terminology) error {
+	if terminology == nil {
+		return nil
+	}
+
+	var errs validationErrors
+	seenPreferred := make(map[string]string, len(terminology.Policies))
+	seenGoverned := make(map[string]string)
+	for i := range terminology.Policies {
+		policy := &terminology.Policies[i]
+		label := fmt.Sprintf("terminology.policies[%d]", i)
+		policy.Preferred = strings.TrimSpace(policy.Preferred)
+		policy.HistoricalAliases = uniqueStringList(policy.HistoricalAliases)
+		policy.DeprecatedTerms = uniqueStringList(policy.DeprecatedTerms)
+		policy.ForbiddenCurrent = uniqueStringList(policy.ForbiddenCurrent)
+		policy.DocsSeverity = NormalizeTerminologySeverity(policy.DocsSeverity)
+		policy.SpecsSeverity = NormalizeTerminologySeverity(policy.SpecsSeverity)
+
+		if policy.Preferred == "" {
+			errs.add("%s.preferred: value is required", label)
+		}
+		if len(policy.HistoricalAliases) == 0 && len(policy.DeprecatedTerms) == 0 && len(policy.ForbiddenCurrent) == 0 {
+			errs.add("%s: at least one historical_aliases, deprecated_terms, or forbidden_current term is required", label)
+		}
+		if !IsValidTerminologySeverity(policy.DocsSeverity) {
+			errs.add(
+				"%s.docs_severity: unsupported severity %q (supported: %q, %q, %q)",
+				label,
+				policy.DocsSeverity,
+				TerminologySeverityIgnore,
+				TerminologySeverityWarning,
+				TerminologySeverityError,
+			)
+		}
+		if !IsValidTerminologySeverity(policy.SpecsSeverity) {
+			errs.add(
+				"%s.specs_severity: unsupported severity %q (supported: %q, %q, %q)",
+				label,
+				policy.SpecsSeverity,
+				TerminologySeverityIgnore,
+				TerminologySeverityWarning,
+				TerminologySeverityError,
+			)
+		}
+
+		preferredKey := strings.ToLower(policy.Preferred)
+		if policy.Preferred != "" {
+			if owner, exists := seenGoverned[preferredKey]; exists {
+				errs.add("%s.preferred: %q conflicts with governed term already declared by %s", label, policy.Preferred, owner)
+			}
+			if owner, exists := seenPreferred[preferredKey]; exists {
+				errs.add("%s.preferred: %q duplicates %s", label, policy.Preferred, owner)
+			} else {
+				seenPreferred[preferredKey] = label + ".preferred"
+			}
+		}
+
+		registerGoverned := func(field string, values []string) {
+			for j, term := range values {
+				term = strings.TrimSpace(term)
+				if term == "" {
+					continue
+				}
+				key := strings.ToLower(term)
+				if key == preferredKey && policy.Preferred != "" {
+					errs.add("%s.%s[%d]: %q duplicates the preferred term", label, field, j, term)
+					continue
+				}
+				if owner, exists := seenPreferred[key]; exists {
+					errs.add("%s.%s[%d]: %q conflicts with preferred term declared by %s", label, field, j, term, owner)
+					continue
+				}
+				if owner, exists := seenGoverned[key]; exists {
+					errs.add("%s.%s[%d]: %q is already governed by %s", label, field, j, term, owner)
+					continue
+				}
+				seenGoverned[key] = fmt.Sprintf("%s.%s[%d]", label, field, j)
+			}
+		}
+
+		registerGoverned("historical_aliases", policy.HistoricalAliases)
+		registerGoverned("deprecated_terms", policy.DeprecatedTerms)
+		registerGoverned("forbidden_current", policy.ForbiddenCurrent)
 	}
 
 	return errs.err()

@@ -36,7 +36,8 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `check-overlap --path SPEC` | Detect specs that cover overlapping ground |
 | `compare-specs --path A --path B` | Side-by-side tradeoff analysis |
 | `analyze-impact --path SPEC` | Trace what is affected by a change |
-| `check-terminology --term X --canonical-term Y --spec-ref Z` | Terminology migration audit |
+| `check-terminology --spec-ref Z` | Terminology governance audit from configured `[[terminology.policies]]` |
+| `check-terminology --term X --canonical-term Y --spec-ref Z` | Ad hoc terminology migration audit |
 | `check-compliance --path PATH` | Check code paths against accepted specs |
 | `check-compliance --diff-file PATH\\|-` | Check a unified diff against accepted specs |
 | `check-doc-drift --scope all\\|SPEC_REF` | Find docs that have gone stale across the workspace |
@@ -57,6 +58,22 @@ When you already have a patch, `check-doc-drift --diff-file` narrows the stale-d
 git diff --cached | pituitary check-doc-drift --diff-file -
 git diff origin/main...HEAD | pituitary check-doc-drift --diff-file - --format json
 ```
+
+## Terminology Governance
+
+When you declare `[[terminology.policies]]` in `pituitary.toml`, `check-terminology` no longer needs a repeated term list for common migrations:
+
+```sh
+pituitary check-terminology --spec-ref SPEC-LOCALITY
+pituitary check-terminology --scope docs --format json
+```
+
+The result now separates:
+
+- `findings`: actionable current-state violations
+- `tolerated`: historical or compatibility-only uses that are still indexed for context
+
+Each matched term includes structured `classification`, `context`, `severity`, and `replacement` fields so CI or editor tooling can turn JSON output into warnings or errors without scraping prose.
 
 ## Agent-Friendly Input
 
