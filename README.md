@@ -148,6 +148,10 @@ See [docs/development/ci-recipes.md](docs/development/ci-recipes.md) for a compl
 
 Pituitary works out of the box with no API keys and no external dependencies. For higher-quality semantic retrieval on a real corpus, configure an embedding runtime and rebuild the index. For bounded provider-backed adjudication in `compare-specs` and `check-doc-drift`, also configure a separate analysis runtime.
 
+> "Pituitary got me from a large architecture spec plus drifted docs to a scoped, inspectable set of affected files quickly."
+>
+> From a real Hermes/Raoh doc-convergence pass across `harper`, `openclaw`, `autoskiller`, and `souther`: semantic support was most useful for narrowing scope, tracing terminology drift, and reducing omission risk before manual code/runtime verification.
+
 **Cloud: OpenAI-compatible embeddings** (if you already have a key)
 
 ```toml
