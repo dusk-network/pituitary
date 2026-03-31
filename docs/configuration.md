@@ -94,6 +94,29 @@ include = ["guides/*.md"]
 
 Pituitary keeps source paths repo-relative, adds `repo` to search/drift/impact/status JSON, and scopes non-primary generated doc refs as `doc://<repo>/...` so duplicate paths from sibling repos stay distinct.
 
+### Runtime Profiles
+
+Runtime config also supports reusable named profiles under `[runtime.profiles.<name>]`. Select one from `[runtime.embedder]` or `[runtime.analysis]` with `profile = "..."`, then override only the fields that differ:
+
+```toml
+[runtime.profiles.local-lm-studio]
+provider = "openai_compatible"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+
+[runtime.analysis]
+profile = "local-lm-studio"
+model = "qwen3.5-35b"
+timeout_ms = 120000
+```
+
+`pituitary status` reports the resolved runtime config, including the selected profile plus the effective provider, model, endpoint, timeout, and retry settings that commands will use.
+
 ### Example: Optional GitHub issues source
 
 Schema `3` also supports adapter-specific typed options under `[sources.options]`:

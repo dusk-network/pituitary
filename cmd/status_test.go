@@ -102,8 +102,18 @@ func TestRunStatusJSON(t *testing.T) {
 	var payload struct {
 		Request struct{} `json:"request"`
 		Result  struct {
-			WorkspaceRoot    string `json:"workspace_root"`
-			ConfigPath       string `json:"config_path"`
+			WorkspaceRoot string `json:"workspace_root"`
+			ConfigPath    string `json:"config_path"`
+			RuntimeConfig struct {
+				Embedder struct {
+					Provider  string `json:"provider"`
+					Model     string `json:"model"`
+					TimeoutMS int    `json:"timeout_ms"`
+				} `json:"embedder"`
+				Analysis struct {
+					Provider string `json:"provider"`
+				} `json:"analysis"`
+			} `json:"runtime_config"`
 			ConfigResolution struct {
 				SelectedBy string `json:"selected_by"`
 				Reason     string `json:"reason"`
@@ -140,6 +150,18 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 	if payload.Result.WorkspaceRoot == "" || payload.Result.ConfigPath == "" || payload.Result.IndexPath == "" {
 		t.Fatalf("result = %+v, want non-empty workspace, config, and index paths", payload.Result)
+	}
+	if got, want := payload.Result.RuntimeConfig.Embedder.Provider, "fixture"; got != want {
+		t.Fatalf("result.runtime_config.embedder.provider = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Embedder.Model, "fixture-8d"; got != want {
+		t.Fatalf("result.runtime_config.embedder.model = %q, want %q", got, want)
+	}
+	if payload.Result.RuntimeConfig.Embedder.TimeoutMS == 0 {
+		t.Fatalf("result.runtime_config.embedder.timeout_ms = %d, want non-zero default", payload.Result.RuntimeConfig.Embedder.TimeoutMS)
+	}
+	if got, want := payload.Result.RuntimeConfig.Analysis.Provider, "disabled"; got != want {
+		t.Fatalf("result.runtime_config.analysis.provider = %q, want %q", got, want)
 	}
 	if !payload.Result.IndexExists {
 		t.Fatalf("result = %+v, want index_exists=true", payload.Result)
@@ -287,7 +309,9 @@ func TestRunStatusJSONIncludesRuntimeProbeResults(t *testing.T) {
 				Scope  string `json:"scope"`
 				Checks []struct {
 					Name     string `json:"name"`
+					Profile  string `json:"profile"`
 					Provider string `json:"provider"`
+					Timeout  int    `json:"timeout_ms"`
 					Status   string `json:"status"`
 					Message  string `json:"message"`
 				} `json:"checks"`
@@ -316,11 +340,162 @@ func TestRunStatusJSONIncludesRuntimeProbeResults(t *testing.T) {
 	if got, want := payload.Result.Runtime.Checks[0].Status, "ready"; got != want {
 		t.Fatalf("checks[0].status = %q, want %q", got, want)
 	}
+	if payload.Result.Runtime.Checks[0].Profile != "" {
+		t.Fatalf("checks[0].profile = %q, want empty for fixture default config", payload.Result.Runtime.Checks[0].Profile)
+	}
+	if payload.Result.Runtime.Checks[0].Timeout == 0 {
+		t.Fatalf("checks[0].timeout_ms = %d, want non-zero default", payload.Result.Runtime.Checks[0].Timeout)
+	}
 	if got, want := payload.Result.Runtime.Checks[1].Name, "runtime.analysis"; got != want {
 		t.Fatalf("checks[1].name = %q, want %q", got, want)
 	}
 	if got, want := payload.Result.Runtime.Checks[1].Status, "disabled"; got != want {
 		t.Fatalf("checks[1].status = %q, want %q", got, want)
+	}
+}
+
+func TestRunStatusJSONIncludesResolvedRuntimeProfiles(t *testing.T) {
+	repo := t.TempDir()
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.profiles.local-lm-studio]
+provider = "openai_compatible"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+
+[runtime.analysis]
+profile = "local-lm-studio"
+model = "qwen3.5-35b"
+timeout_ms = 120000
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			RuntimeConfig struct {
+				Embedder struct {
+					Profile    string `json:"profile"`
+					Provider   string `json:"provider"`
+					Model      string `json:"model"`
+					Endpoint   string `json:"endpoint"`
+					TimeoutMS  int    `json:"timeout_ms"`
+					MaxRetries int    `json:"max_retries"`
+				} `json:"embedder"`
+				Analysis struct {
+					Profile   string `json:"profile"`
+					Provider  string `json:"provider"`
+					Model     string `json:"model"`
+					Endpoint  string `json:"endpoint"`
+					TimeoutMS int    `json:"timeout_ms"`
+				} `json:"analysis"`
+			} `json:"runtime_config"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if got, want := payload.Result.RuntimeConfig.Embedder.Profile, "local-lm-studio"; got != want {
+		t.Fatalf("result.runtime_config.embedder.profile = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Embedder.Provider, "openai_compatible"; got != want {
+		t.Fatalf("result.runtime_config.embedder.provider = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Embedder.TimeoutMS, 30000; got != want {
+		t.Fatalf("result.runtime_config.embedder.timeout_ms = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Analysis.Profile, "local-lm-studio"; got != want {
+		t.Fatalf("result.runtime_config.analysis.profile = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Analysis.Model, "qwen3.5-35b"; got != want {
+		t.Fatalf("result.runtime_config.analysis.model = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RuntimeConfig.Analysis.TimeoutMS, 120000; got != want {
+		t.Fatalf("result.runtime_config.analysis.timeout_ms = %d, want %d", got, want)
+	}
+}
+
+func TestRunStatusTextIncludesResolvedRuntimeProfiles(t *testing.T) {
+	repo := t.TempDir()
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.profiles.local-lm-studio]
+provider = "openai_compatible"
+endpoint = "http://127.0.0.1:1234/v1"
+timeout_ms = 30000
+max_retries = 1
+
+[runtime.embedder]
+profile = "local-lm-studio"
+model = "nomic-embed-text-v1.5"
+
+[runtime.analysis]
+profile = "local-lm-studio"
+model = "qwen3.5-35b"
+timeout_ms = 120000
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus(nil, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"RUNTIME CONFIG",
+		"profile: local-lm-studio",
+		"model: nomic-embed-text-v1.5",
+		"timeout_ms: 120000",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runStatus() output %q does not contain %q", out, want)
+		}
 	}
 }
 

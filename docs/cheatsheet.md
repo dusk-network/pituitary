@@ -19,7 +19,7 @@ pituitary explain-file README.md                # why is this file in/out of sco
 pituitary index --rebuild                       # build/rebuild, reuse unchanged embeddings
 pituitary index --rebuild --full                # force complete re-embed
 pituitary index --dry-run                       # validate without writing
-pituitary status                                # index health, config, freshness
+pituitary status                                # index health + resolved runtime config
 pituitary status --check-runtime embedder       # probe embedder readiness
 pituitary status --check-runtime all            # probe embedder + analysis readiness
 pituitary schema review-spec --format json      # machine-readable command contract
