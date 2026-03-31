@@ -91,11 +91,7 @@ func fixtureEmbedderGuidance(cfg *config.Config, status *index.Status) []string 
 func classifyStatusError(cfg *config.Config, err error) *Issue {
 	switch {
 	case index.IsDependencyUnavailable(err):
-		return &Issue{
-			Code:     CodeDependencyUnavailable,
-			Message:  FormatDependencyUnavailableMessage(cfg, err),
-			ExitCode: 3,
-		}
+		return dependencyUnavailableIssue(cfg, err)
 	default:
 		return &Issue{
 			Code:     CodeInternalError,

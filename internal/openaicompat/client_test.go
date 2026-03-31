@@ -71,7 +71,7 @@ func TestDoWithRetriesReturnsCloseErrorOnSuccessfulResponse(t *testing.T) {
 		},
 	}
 
-	_, err := doWithRetries(context.Background(), client, "/v1/test", []byte(`{}`), func(resp *http.Response, body []byte) (string, error) {
+	_, err := doWithRetries(context.Background(), client, "/v1/test", []byte(`{}`), client.RequestFailureDetails("test"), func(resp *http.Response, body []byte) (string, error) {
 		return "ok", nil
 	})
 	if err == nil {

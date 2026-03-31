@@ -126,10 +126,7 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 
 	operation := app.CheckCompliance(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "check-compliance", operation.Request, cliIssue{
-			Code:    operation.Issue.Code,
-			Message: operation.Issue.Message,
-		}, operation.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "check-compliance", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "check-compliance", operation.Request, operation.Result, nil)

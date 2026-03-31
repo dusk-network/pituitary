@@ -341,6 +341,15 @@ path = "specs"
 	if !strings.Contains(payload.Errors[0].Message, "load or pin model") {
 		t.Fatalf("errors[0].message = %q, want model loading guidance", payload.Errors[0].Message)
 	}
+	if got, want := payload.Errors[0].Details["runtime"], "runtime.embedder"; got != want {
+		t.Fatalf("errors[0].details.runtime = %#v, want %q", got, want)
+	}
+	if got, want := payload.Errors[0].Details["request_type"], "embeddings"; got != want {
+		t.Fatalf("errors[0].details.request_type = %#v, want %q", got, want)
+	}
+	if got, want := payload.Errors[0].Details["failure_class"], "dependency_unavailable"; got != want {
+		t.Fatalf("errors[0].details.failure_class = %#v, want %q", got, want)
+	}
 }
 
 func TestRunStatusReportsConfigError(t *testing.T) {

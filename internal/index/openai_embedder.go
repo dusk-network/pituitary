@@ -3,7 +3,6 @@ package index
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -58,7 +57,7 @@ func (e *openAICompatibleEmbedder) Dimension(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if len(vectors) != 1 || len(vectors[0]) == 0 {
-		return 0, embedderDependencyUnavailable("%s returned no embedding dimensions", openAICompatibleEmbedderRuntime)
+		return 0, e.schemaMismatchError(1, "%s returned no embedding dimensions", openAICompatibleEmbedderRuntime)
 	}
 	return len(vectors[0]), nil
 }
@@ -142,10 +141,7 @@ func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []strin
 		return nil, err
 	}
 	if len(payload.Data) != len(input) {
-		return nil, &openaicompat.DependencyUnavailableError{
-			Runtime: openAICompatibleEmbedderRuntime,
-			Message: fmt.Sprintf("%s returned %d embedding(s) for %d input(s)", openAICompatibleEmbedderRuntime, len(payload.Data), len(input)),
-		}
+		return nil, e.schemaMismatchError(len(input), "%s returned %d embedding(s) for %d input(s)", openAICompatibleEmbedderRuntime, len(payload.Data), len(input))
 	}
 
 	vectors := make([][]float64, len(input))
@@ -155,10 +151,7 @@ func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []strin
 			index = i
 		}
 		if len(item.Embedding) == 0 {
-			return nil, &openaicompat.DependencyUnavailableError{
-				Runtime: openAICompatibleEmbedderRuntime,
-				Message: fmt.Sprintf("%s returned an empty embedding for input %d", openAICompatibleEmbedderRuntime, index),
-			}
+			return nil, e.schemaMismatchError(len(input), "%s returned an empty embedding for input %d", openAICompatibleEmbedderRuntime, index)
 		}
 		if err := e.cacheDimension(len(item.Embedding)); err != nil {
 			return nil, err
@@ -167,10 +160,7 @@ func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []strin
 	}
 	for i, vector := range vectors {
 		if len(vector) == 0 {
-			return nil, &openaicompat.DependencyUnavailableError{
-				Runtime: openAICompatibleEmbedderRuntime,
-				Message: fmt.Sprintf("%s omitted embedding for input %d", openAICompatibleEmbedderRuntime, i),
-			}
+			return nil, e.schemaMismatchError(len(input), "%s omitted embedding for input %d", openAICompatibleEmbedderRuntime, i)
 		}
 	}
 	return vectors, nil
@@ -205,7 +195,7 @@ func (e *openAICompatibleEmbedder) cachedDimension() int {
 
 func (e *openAICompatibleEmbedder) cacheDimension(dimension int) error {
 	if dimension <= 0 {
-		return embedderDependencyUnavailable("%s returned a non-positive embedding dimension", openAICompatibleEmbedderRuntime)
+		return e.schemaMismatchError(1, "%s returned a non-positive embedding dimension", openAICompatibleEmbedderRuntime)
 	}
 
 	e.mu.Lock()
@@ -215,14 +205,20 @@ func (e *openAICompatibleEmbedder) cacheDimension(dimension int) error {
 		return nil
 	}
 	if e.dimension != dimension {
-		return &openaicompat.DependencyUnavailableError{
-			Runtime: openAICompatibleEmbedderRuntime,
-			Message: fmt.Sprintf("%s changed embedding dimension from %d to %d", openAICompatibleEmbedderRuntime, e.dimension, dimension),
-		}
+		return e.schemaMismatchError(1, "%s changed embedding dimension from %d to %d", openAICompatibleEmbedderRuntime, e.dimension, dimension)
 	}
 	return nil
 }
 
-func embedderDependencyUnavailable(format string, args ...any) *openaicompat.DependencyUnavailableError {
-	return openaicompat.NewDependencyUnavailable(openAICompatibleEmbedderRuntime, format, args...)
+func (e *openAICompatibleEmbedder) embeddingFailureDetails(inputCount int) openaicompat.FailureDetails {
+	details := e.client.RequestFailureDetails("embeddings")
+	details.BatchSize = inputCount
+	details.InputCount = inputCount
+	return details
+}
+
+func (e *openAICompatibleEmbedder) schemaMismatchError(inputCount int, format string, args ...any) *openaicompat.DependencyUnavailableError {
+	details := e.embeddingFailureDetails(inputCount)
+	details.FailureClass = openaicompat.FailureClassSchemaMismatch
+	return openaicompat.NewDependencyUnavailableWithDetails(details, format, args...)
 }

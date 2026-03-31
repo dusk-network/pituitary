@@ -199,4 +199,58 @@ func TestOpenAICompatibleAnalysisProviderParsesStringErrorBodies(t *testing.T) {
 	if strings.Contains(err.Error(), `{"error":"Model unloaded.."}`) {
 		t.Fatalf("completeJSON() error = %q, want parsed message instead of raw JSON", err)
 	}
+	details := index.DependencyUnavailableDetails(err)
+	if got, want := details["request_type"], "analysis"; got != want {
+		t.Fatalf("details.request_type = %#v, want %q", got, want)
+	}
+	if got, want := details["http_status"], http.StatusBadRequest; got != want {
+		t.Fatalf("details.http_status = %#v, want %d", got, want)
+	}
+	if got, want := details["failure_class"], "dependency_unavailable"; got != want {
+		t.Fatalf("details.failure_class = %#v, want %q", got, want)
+	}
+}
+
+func TestOpenAICompatibleAnalysisProviderClassifiesSchemaMismatchDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "not-json"}},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	rawProvider, err := newOpenAICompatibleAnalysisProvider(config.RuntimeProvider{
+		Provider:   config.RuntimeProviderOpenAI,
+		Model:      "pituitary-analysis",
+		Endpoint:   server.URL,
+		TimeoutMS:  1000,
+		MaxRetries: 0,
+	})
+	if err != nil {
+		t.Fatalf("newOpenAICompatibleAnalysisProvider() error = %v", err)
+	}
+	provider := rawProvider.(*openAICompatibleAnalysisProvider)
+
+	var response map[string]any
+	err = provider.completeJSON(context.Background(), "system", map[string]string{"ping": "pong"}, &response)
+	if err == nil {
+		t.Fatal("completeJSON() error = nil, want dependency-unavailable failure")
+	}
+	if !index.IsDependencyUnavailable(err) {
+		t.Fatalf("completeJSON() error = %v, want dependency-unavailable classification", err)
+	}
+	details := index.DependencyUnavailableDetails(err)
+	if got, want := details["failure_class"], "schema_mismatch"; got != want {
+		t.Fatalf("details.failure_class = %#v, want %q", got, want)
+	}
+	if got, want := details["request_type"], "analysis"; got != want {
+		t.Fatalf("details.request_type = %#v, want %q", got, want)
+	}
 }

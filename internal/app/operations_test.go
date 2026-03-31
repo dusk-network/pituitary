@@ -17,6 +17,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/openaicompat"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -234,6 +235,41 @@ func TestFormatDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *testi
 	}
 	if strings.Contains(message, "OPENAI_API_KEY") {
 		t.Fatalf("FormatDependencyUnavailableMessage() = %q, did not want embedder env var", message)
+	}
+}
+
+func TestClassifyExecutionErrorCarriesDependencyDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	err := openaicompat.NewDependencyUnavailableStatusWithDetails(openaicompat.FailureDetails{
+		Runtime:      "runtime.embedder",
+		Provider:     config.RuntimeProviderOpenAI,
+		Model:        "pituitary-embed",
+		Endpoint:     "http://127.0.0.1:1234/v1",
+		RequestType:  "embeddings",
+		FailureClass: openaicompat.FailureClassServer,
+		HTTPStatus:   http.StatusInternalServerError,
+		TimeoutMS:    1000,
+		MaxRetries:   2,
+		BatchSize:    8,
+		InputCount:   8,
+	}, http.StatusInternalServerError, "runtime.embedder failed")
+
+	issue := classifyExecutionError(nil, err, operationExecutionPolicy{})
+	if issue.Code != CodeDependencyUnavailable {
+		t.Fatalf("classifyExecutionError() code = %q, want %q", issue.Code, CodeDependencyUnavailable)
+	}
+	if got, want := issue.Details["runtime"], "runtime.embedder"; got != want {
+		t.Fatalf("issue.details.runtime = %#v, want %q", got, want)
+	}
+	if got, want := issue.Details["provider"], config.RuntimeProviderOpenAI; got != want {
+		t.Fatalf("issue.details.provider = %#v, want %q", got, want)
+	}
+	if got, want := issue.Details["failure_class"], openaicompat.FailureClassServer; got != want {
+		t.Fatalf("issue.details.failure_class = %#v, want %q", got, want)
+	}
+	if got, want := issue.Details["http_status"], http.StatusInternalServerError; got != want {
+		t.Fatalf("issue.details.http_status = %#v, want %d", got, want)
 	}
 }
 

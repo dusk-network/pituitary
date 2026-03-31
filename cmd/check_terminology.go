@@ -139,10 +139,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 
 	operation := app.CheckTerminology(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "check-terminology", operation.Request, cliIssue{
-			Code:    operation.Issue.Code,
-			Message: operation.Issue.Message,
-		}, operation.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "check-terminology", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "check-terminology", operation.Request, operation.Result, nil)

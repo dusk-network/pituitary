@@ -6,13 +6,15 @@ import (
 	"io"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
+	"github.com/dusk-network/pituitary/internal/app"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
 type cliIssue struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Path    string `json:"path,omitempty"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
+	Path    string         `json:"path,omitempty"`
 }
 
 type cliEnvelope struct {
@@ -113,6 +115,17 @@ func writeCLIJSON(w io.Writer, payload cliEnvelope) int {
 		return 2
 	}
 	return 0
+}
+
+func cliIssueFromAppIssue(issue *app.Issue) cliIssue {
+	if issue == nil {
+		return cliIssue{}
+	}
+	return cliIssue{
+		Code:    issue.Code,
+		Message: issue.Message,
+		Details: issue.Details,
+	}
 }
 
 func cliWarningsForResult(result any) []cliIssue {

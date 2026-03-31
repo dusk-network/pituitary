@@ -117,10 +117,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 
 	operation := app.AnalyzeImpact(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssue{
-			Code:    operation.Issue.Code,
-			Message: operation.Issue.Message,
-		}, operation.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "analyze-impact", operation.Request, operation.Result, nil)

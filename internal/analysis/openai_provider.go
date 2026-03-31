@@ -127,7 +127,7 @@ func (p *openAICompatibleAnalysisProvider) Probe(ctx context.Context) error {
 		return err
 	}
 	if !response.OK {
-		return analysisDependencyUnavailable("%s probe returned ok=false", openAICompatibleAnalysisRuntime)
+		return p.dependencyError(openaicompat.FailureClassDependency, "%s probe returned ok=false", openAICompatibleAnalysisRuntime)
 	}
 	return nil
 }
@@ -193,7 +193,7 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, sys
 	}
 
 	if err := json.Unmarshal([]byte(responseBody), target); err != nil {
-		return openaicompat.NewDependencyUnavailable(openAICompatibleAnalysisRuntime, "decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err)
+		return p.dependencyError(openaicompat.FailureClassSchemaMismatch, "decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err)
 	}
 	return nil
 }
@@ -204,11 +204,11 @@ func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Con
 		return "", err
 	}
 	if text == "" {
-		return "", analysisDependencyUnavailable("%s returned an empty message", openAICompatibleAnalysisRuntime)
+		return "", p.dependencyError(openaicompat.FailureClassSchemaMismatch, "%s returned an empty message", openAICompatibleAnalysisRuntime)
 	}
 	text = normalizeJSONResponseText(text)
 	if text == "" {
-		return "", analysisDependencyUnavailable("%s returned no JSON object", openAICompatibleAnalysisRuntime)
+		return "", p.dependencyError(openaicompat.FailureClassSchemaMismatch, "%s returned no JSON object", openAICompatibleAnalysisRuntime)
 	}
 	return text, nil
 }
@@ -236,8 +236,10 @@ func normalizeJSONResponseText(text string) string {
 	return ""
 }
 
-func analysisDependencyUnavailable(format string, args ...any) *openaicompat.DependencyUnavailableError {
-	return openaicompat.NewDependencyUnavailable(openAICompatibleAnalysisRuntime, format, args...)
+func (p *openAICompatibleAnalysisProvider) dependencyError(failureClass, format string, args ...any) *openaicompat.DependencyUnavailableError {
+	details := p.client.RequestFailureDetails("analysis")
+	details.FailureClass = strings.TrimSpace(failureClass)
+	return openaicompat.NewDependencyUnavailableWithDetails(details, format, args...)
 }
 
 func analysisSpecsFromMap(specs map[string]specDocument, orderedRefs []string) []analysisSpecPrompt {
