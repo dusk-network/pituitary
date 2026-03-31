@@ -9,8 +9,6 @@ import (
 )
 
 func TestRunCheckTerminologyReportsAnchoredFindings(t *testing.T) {
-	t.Parallel()
-
 	repo := writeTerminologyWorkspaceCmd(t)
 	indexStdout := bytes.Buffer{}
 	indexStderr := bytes.Buffer{}
@@ -45,28 +43,78 @@ func TestRunCheckTerminologyReportsAnchoredFindings(t *testing.T) {
 		"anchor spec: SPEC-LOCALITY",
 		"doc://guides/repo-kernel | doc | Repo Kernel Guide | terms: repo, workflow",
 		"assessment: exact match in body text without compatibility-only markers",
+		"match: repo | class: historical_alias | context: current_state | severity: error | replace with: locality",
 		"evidence: SPEC-LOCALITY | Kernel Locality Contract / Core Model",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("runCheckTerminology() output %q does not contain %q", out, want)
 		}
 	}
-	if strings.Contains(out, "repo-compatibility") {
-		t.Fatalf("runCheckTerminology() output %q unexpectedly contains compatibility-only doc", out)
+	if !strings.Contains(out, "tolerated historical uses: 1 artifact(s)") || !strings.Contains(out, "doc://guides/repo-compatibility") {
+		t.Fatalf("runCheckTerminology() output %q does not contain tolerated compatibility guidance", out)
 	}
 }
 
-func TestRunCheckTerminologyRequiresTerms(t *testing.T) {
-	t.Parallel()
+func TestRunCheckTerminologyUsesConfiguredPoliciesWithoutTerms(t *testing.T) {
+	repo := writeTerminologyWorkspaceCmd(t)
+	indexStdout := bytes.Buffer{}
+	indexStderr := bytes.Buffer{}
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &indexStdout, &indexStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, indexStderr.String())
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := runCheckTerminology([]string{"--scope", "docs"}, &stdout, &stderr)
-	if exitCode != 2 {
-		t.Fatalf("runCheckTerminology() exit code = %d, want 2", exitCode)
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runCheckTerminology([]string{"--scope", "docs", "--spec-ref", "SPEC-LOCALITY", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckTerminology() exit code = %d, want 0", exitCode)
 	}
-	if !strings.Contains(stderr.String(), "at least one term is required") {
-		t.Fatalf("runCheckTerminology() stderr = %q, want term validation", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckTerminology() stderr = %q, want empty", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Findings []struct {
+				Ref      string `json:"ref"`
+				Sections []struct {
+					Matches []struct {
+						Term           string `json:"term"`
+						Classification string `json:"classification"`
+						Replacement    string `json:"replacement"`
+						Tolerated      bool   `json:"tolerated"`
+					} `json:"matches"`
+				} `json:"sections"`
+			} `json:"findings"`
+			Tolerated []struct {
+				Ref string `json:"ref"`
+			} `json:"tolerated"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal configured terminology payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Findings) != 1 || payload.Result.Findings[0].Ref != "doc://guides/repo-kernel" {
+		t.Fatalf("findings = %+v, want repo-kernel", payload.Result.Findings)
+	}
+	if len(payload.Result.Tolerated) != 1 || payload.Result.Tolerated[0].Ref != "doc://guides/repo-compatibility" {
+		t.Fatalf("tolerated = %+v, want compatibility doc", payload.Result.Tolerated)
+	}
+	if len(payload.Result.Findings[0].Sections) == 0 || len(payload.Result.Findings[0].Sections[0].Matches) == 0 {
+		t.Fatalf("sections = %+v, want structured terminology matches", payload.Result.Findings[0].Sections)
+	}
+	first := payload.Result.Findings[0].Sections[0].Matches[0]
+	if first.Classification == "" || first.Replacement == "" || first.Tolerated {
+		t.Fatalf("first match = %+v, want actionable classified replacement", first)
 	}
 }
 
@@ -106,7 +154,13 @@ func TestRunCheckTerminologyWithRequestFileJSON(t *testing.T) {
 		} `json:"request"`
 		Result struct {
 			Findings []struct {
-				Ref string `json:"ref"`
+				Ref      string `json:"ref"`
+				Sections []struct {
+					Matches []struct {
+						Classification string `json:"classification"`
+						Replacement    string `json:"replacement"`
+					} `json:"matches"`
+				} `json:"sections"`
 			} `json:"findings"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -119,6 +173,15 @@ func TestRunCheckTerminologyWithRequestFileJSON(t *testing.T) {
 	}
 	if len(payload.Result.Findings) == 0 {
 		t.Fatal("result.findings is empty, want terminology findings")
+	}
+	if len(payload.Result.Findings[0].Sections) == 0 || len(payload.Result.Findings[0].Sections[0].Matches) == 0 {
+		t.Fatalf("result.findings = %+v, want structured terminology matches", payload.Result.Findings)
+	}
+	if got := payload.Result.Findings[0].Sections[0].Matches[0].Classification; got == "" {
+		t.Fatalf("match classification = %q, want governance classification", got)
+	}
+	if got := payload.Result.Findings[0].Sections[0].Matches[0].Replacement; got == "" {
+		t.Fatalf("match replacement = %q, want replacement suggestion", got)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
@@ -165,6 +228,19 @@ provider = "fixture"
 model = "fixture-8d"
 timeout_ms = 1000
 max_retries = 0
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+forbidden_current = ["repository"]
+docs_severity = "error"
+specs_severity = "warning"
+
+[[terminology.policies]]
+preferred = "continuity"
+deprecated_terms = ["workflow"]
+docs_severity = "error"
+specs_severity = "warning"
 
 [[sources]]
 name = "specs"

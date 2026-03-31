@@ -30,7 +30,7 @@ func runCheckTerminology(args []string, stdout, stderr io.Writer) int {
 func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-terminology", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology (--term TERM... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT]")
 
 	var (
 		terms          stringList
@@ -42,7 +42,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		format         string
 		configPath     string
 	)
-	fs.Var(&terms, "term", "displaced term to audit; repeat to supply multiple terms")
+	fs.Var(&terms, "term", "displaced or governed term to audit; repeat to narrow a configured policy set or supply ad hoc terms")
 	fs.Var(&canonicalTerms, "canonical-term", "replacement or canonical term; repeat to supply multiple terms")
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref used to anchor the audit")
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec used to anchor the audit")
@@ -109,13 +109,6 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 			}, 2)
 		}
 	}
-	if trimmedRequestFile == "" && countNonEmptyStrings(request.Terms) == 0 {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "validation_error",
-			Message: "at least one term is required",
-		}, 2)
-	}
-
 	trimmedPath := strings.TrimSpace(specPath)
 	if trimmedRequestFile == "" && request.SpecRef != "" && trimmedPath != "" {
 		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{

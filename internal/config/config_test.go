@@ -1261,6 +1261,154 @@ func TestRenderRoundTripsRuntimeProfiles(t *testing.T) {
 	}
 }
 
+func TestLoadTerminologyPolicies(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+deprecated_terms = ["repository"]
+forbidden_current = ["repo mode"]
+docs_severity = "error"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := len(cfg.Terminology.Policies), 1; got != want {
+		t.Fatalf("len(terminology.policies) = %d, want %d", got, want)
+	}
+	policy := cfg.Terminology.Policies[0]
+	if got, want := policy.Preferred, "locality"; got != want {
+		t.Fatalf("preferred = %q, want %q", got, want)
+	}
+	if got, want := policy.HistoricalAliases, []string{"repo"}; !equalStringSlices(got, want) {
+		t.Fatalf("historical_aliases = %#v, want %#v", got, want)
+	}
+	if got, want := policy.DeprecatedTerms, []string{"repository"}; !equalStringSlices(got, want) {
+		t.Fatalf("deprecated_terms = %#v, want %#v", got, want)
+	}
+	if got, want := policy.ForbiddenCurrent, []string{"repo mode"}; !equalStringSlices(got, want) {
+		t.Fatalf("forbidden_current = %#v, want %#v", got, want)
+	}
+	if got, want := policy.DocsSeverity, TerminologySeverityError; got != want {
+		t.Fatalf("docs_severity = %q, want %q", got, want)
+	}
+	if got, want := policy.SpecsSeverity, TerminologySeverityWarning; got != want {
+		t.Fatalf("specs_severity = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidTerminologySeverity(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+docs_severity = "fatal"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want terminology validation error")
+	}
+	if !strings.Contains(err.Error(), `terminology.policies[0].docs_severity: unsupported severity "fatal"`) {
+		t.Fatalf("Load() error = %q, want terminology severity detail", err)
+	}
+}
+
+func TestRenderRoundTripsTerminologyPolicies(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:      ".",
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Terminology: Terminology{
+			Policies: []TerminologyPolicy{
+				{
+					Preferred:         "locality",
+					HistoricalAliases: []string{"repo"},
+					DeprecatedTerms:   []string{"repository"},
+					ForbiddenCurrent:  []string{"repo mode"},
+					DocsSeverity:      TerminologySeverityError,
+					SpecsSeverity:     TerminologySeverityIgnore,
+				},
+			},
+		},
+		Sources: []Source{
+			{
+				Name:    "specs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindSpecBundle,
+				Path:    "specs",
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(rendered, "[[terminology.policies]]") || !strings.Contains(rendered, `preferred = "locality"`) {
+		t.Fatalf("rendered config %q does not contain terminology policy", rendered)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if got, want := len(loaded.Terminology.Policies), 1; got != want {
+		t.Fatalf("len(loaded terminology policies) = %d, want %d", got, want)
+	}
+	policy := loaded.Terminology.Policies[0]
+	if got, want := policy.Preferred, "locality"; got != want {
+		t.Fatalf("loaded preferred = %q, want %q", got, want)
+	}
+	if got, want := policy.DocsSeverity, TerminologySeverityError; got != want {
+		t.Fatalf("loaded docs_severity = %q, want %q", got, want)
+	}
+	if got, want := policy.SpecsSeverity, TerminologySeverityIgnore; got != want {
+		t.Fatalf("loaded specs_severity = %q, want %q", got, want)
+	}
+}
+
 func TestLoadRejectsMissingSourcePath(t *testing.T) {
 	t.Parallel()
 
@@ -1335,6 +1483,38 @@ repo = "dusk-network/pituitary"
 	}
 	if !strings.Contains(err.Error(), `unsupported section "github"`) {
 		t.Fatalf("Load() error = %q, want unsupported section message", err)
+	}
+}
+
+func TestLoadRejectsUnknownTerminologyField(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+unexpected = "value"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want parse error")
+	}
+	if !strings.Contains(err.Error(), `unsupported terminology.policies field "unexpected"`) {
+		t.Fatalf("Load() error = %q, want unsupported terminology field message", err)
 	}
 }
 
