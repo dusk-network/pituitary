@@ -19,13 +19,14 @@ func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
 func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("analyze-impact", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF | --request-file PATH|-) [--change-type TYPE] [--format FORMAT]")
+	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF | --request-file PATH|-) [--change-type TYPE] [--summary] [--format FORMAT]")
 
 	var (
 		specRef     string
 		specPath    string
 		requestFile string
 		changeType  string
+		summary     bool
 		format      string
 		configPath  string
 	)
@@ -33,6 +34,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
 	fs.StringVar(&requestFile, "request-file", "", "path to impact request JSON, or - for stdin")
 	fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
+	fs.BoolVar(&summary, "summary", false, "emit a concise ranked summary in text output and include summary metadata in JSON")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
@@ -53,6 +55,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 
 	request := analysis.AnalyzeImpactRequest{
 		ChangeType: strings.TrimSpace(changeType),
+		Summary:    summary,
 	}
 	if err := validateCLIFormat("analyze-impact", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{

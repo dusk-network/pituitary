@@ -3,7 +3,10 @@ package cmd
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -71,7 +74,7 @@ func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io
 		}, 2)
 	}
 
-	targetPath, err := resolveExplainPath(cfg.Workspace.RootPath, request.Path)
+	targetPath, err := resolveExplainPath(cfg, request.Path)
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
 			Code:    "validation_error",
@@ -124,6 +127,55 @@ func explainFileFlagTakesValue(arg string) bool {
 	}
 }
 
-func resolveExplainPath(workspaceRoot, path string) (string, error) {
-	return resolveWorkspaceScopedCLIPath(workspaceRoot, path, "file path")
+func resolveExplainPath(cfg *config.Config, path string) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("config is required to resolve file path")
+	}
+	trimmed, err := validateCLIPathValue(path, "file path")
+	if err != nil {
+		return "", err
+	}
+
+	rootPath := filepath.Clean(cfg.Workspace.RootPath)
+	if !filepath.IsAbs(rootPath) {
+		rootPath, err = filepath.Abs(rootPath)
+		if err != nil {
+			return "", fmt.Errorf("resolve workspace root %q: %w", cfg.Workspace.RootPath, err)
+		}
+	}
+
+	absPath := trimmed
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(rootPath, absPath)
+	}
+	absPath, err = filepath.Abs(absPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve file path %q: %w", path, err)
+	}
+	absPath = filepath.Clean(absPath)
+	if !explainPathWithinConfiguredRoots(cfg, absPath) {
+		return "", fmt.Errorf("file path %q resolves outside workspace root %q and configured repo roots", path, filepath.ToSlash(rootPath))
+	}
+
+	info, err := os.Stat(absPath)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("stat file path %q: %w", path, err)
+	case info.IsDir():
+		return "", fmt.Errorf("file path %q is a directory", path)
+	default:
+		return absPath, nil
+	}
+}
+
+func explainPathWithinConfiguredRoots(cfg *config.Config, absPath string) bool {
+	if cliPathWithinRoot(cfg.Workspace.RootPath, absPath) {
+		return true
+	}
+	for _, repo := range cfg.Workspace.Repos {
+		if cliPathWithinRoot(repo.RootPath, absPath) {
+			return true
+		}
+	}
+	return false
 }

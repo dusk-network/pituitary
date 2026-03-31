@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,17 @@ type indexRequest struct {
 	DryRun  bool `json:"dry_run,omitempty"`
 	Full    bool `json:"full,omitempty"`
 	Verbose bool `json:"verbose,omitempty"`
+}
+
+type indexProgressLine struct {
+	Event        string `json:"event"`
+	Command      string `json:"command"`
+	Phase        string `json:"phase"`
+	ArtifactKind string `json:"artifact_kind"`
+	ArtifactRef  string `json:"artifact_ref"`
+	Current      int    `json:"current"`
+	Total        int    `json:"total"`
+	ChunkCount   int    `json:"chunk_count,omitempty"`
 }
 
 func runIndex(args []string, stdout, stderr io.Writer) int {
@@ -126,11 +138,26 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	var result *index.RebuildResult
-	if format == "text" {
+	switch format {
+	case commandFormatText:
 		result, err = index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, func(event index.RebuildProgressEvent) {
 			fmt.Fprintf(stderr, "pituitary index: %s %d/%d %s %s (%d chunk(s))\n", event.Phase, event.Current, event.Total, event.ArtifactKind, event.ArtifactRef, event.ChunkCount)
 		})
-	} else {
+	case commandFormatJSON:
+		encoder := json.NewEncoder(stderr)
+		result, err = index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, func(event index.RebuildProgressEvent) {
+			_ = encoder.Encode(indexProgressLine{
+				Event:        "rebuild_progress",
+				Command:      "index",
+				Phase:        event.Phase,
+				ArtifactKind: event.ArtifactKind,
+				ArtifactRef:  event.ArtifactRef,
+				Current:      event.Current,
+				Total:        event.Total,
+				ChunkCount:   event.ChunkCount,
+			})
+		})
+	default:
 		result, err = index.RebuildContextWithOptions(ctx, cfg, records, index.RebuildOptions{Full: full})
 	}
 	if err != nil {

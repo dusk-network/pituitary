@@ -676,3 +676,168 @@ path = "specs"
 		t.Fatalf("reason = %q, want shadowed root config path", payload.Result.ConfigResolution.Reason)
 	}
 }
+
+func TestRunStatusJSONWarnsWhenLocalConfigShadowsParentMultirepoConfig(t *testing.T) {
+	root, primary, _ := writeShadowedMultiRepoStatusWorkspace(t)
+	nested := filepath.Join(primary, "pkg", "nested")
+	mustMkdirAllCmd(t, nested)
+	resolvedPrimary, err := filepath.EvalSymlinks(primary)
+	if err != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", primary, err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, nested, func() int {
+		return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0 (stdout: %q, stderr: %q)", exitCode, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			ConfigPath string   `json:"config_path"`
+			Guidance   []string `json:"guidance"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	assertEquivalentPath(t, "config_path", payload.Result.ConfigPath, filepath.Join(resolvedPrimary, ".pituitary", "pituitary.toml"))
+	if len(payload.Result.Guidance) == 0 {
+		t.Fatalf("guidance = %v, want multirepo shadowing warning", payload.Result.Guidance)
+	}
+	sharedConfigPath := filepath.Join(root, ".pituitary", "pituitary.toml")
+	if !strings.Contains(payload.Result.Guidance[0], filepath.ToSlash(sharedConfigPath)) {
+		t.Fatalf("guidance = %q, want shared config path", payload.Result.Guidance[0])
+	}
+	if !strings.Contains(payload.Result.Guidance[0], "--config") {
+		t.Fatalf("guidance = %q, want --config suggestion", payload.Result.Guidance[0])
+	}
+}
+
+func TestRunStatusJSONUsesSelectedSharedConfigForArtifactLocations(t *testing.T) {
+	root, primary, sharedConfigPath := writeShadowedMultiRepoStatusWorkspace(t)
+	nested := filepath.Join(primary, "pkg", "nested")
+	mustMkdirAllCmd(t, nested)
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", root, err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, nested, func() int {
+		return runStatus([]string{"--config", sharedConfigPath, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0 (stdout: %q, stderr: %q)", exitCode, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			ArtifactLocations struct {
+				IndexDir               string   `json:"index_dir"`
+				DiscoverConfigPath     string   `json:"discover_config_path"`
+				CanonicalizeBundleRoot string   `json:"canonicalize_bundle_root"`
+				IgnorePatterns         []string `json:"ignore_patterns"`
+			} `json:"artifact_locations"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	assertEquivalentPath(t, "artifact_locations.index_dir", payload.Result.ArtifactLocations.IndexDir, filepath.Join(resolvedRoot, ".pituitary"))
+	assertEquivalentPath(t, "artifact_locations.discover_config_path", payload.Result.ArtifactLocations.DiscoverConfigPath, sharedConfigPath)
+	assertEquivalentPath(t, "artifact_locations.canonicalize_bundle_root", payload.Result.ArtifactLocations.CanonicalizeBundleRoot, filepath.Join(resolvedRoot, ".pituitary", "canonicalized"))
+	if len(payload.Result.ArtifactLocations.IgnorePatterns) != 0 {
+		t.Fatalf("artifact_locations.ignore_patterns = %v, want none for shared artifact dir outside workspace root", payload.Result.ArtifactLocations.IgnorePatterns)
+	}
+}
+
+func writeShadowedMultiRepoStatusWorkspace(t *testing.T) (string, string, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustMkdirAllCmd(t, filepath.Join(root, ".pituitary"))
+	mustMkdirAllCmd(t, filepath.Join(primary, ".pituitary"))
+	mustMkdirAllCmd(t, filepath.Join(primary, "specs"))
+	mustMkdirAllCmd(t, filepath.Join(shared, "docs"))
+
+	sharedConfigDir := filepath.Join(root, ".pituitary")
+	sharedConfigPath := filepath.Join(sharedConfigDir, "pituitary.toml")
+	mustWriteIndexFixture(t, sharedConfigDir, `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+repo_id = "primary"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(shared)+`"
+
+[[sources]]
+name = "primary-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+`)
+
+	mustWriteIndexFixture(t, filepath.Join(primary, ".pituitary"), `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	return root, primary, sharedConfigPath
+}
+
+func assertEquivalentPath(t *testing.T, label, got, want string) {
+	t.Helper()
+	if comparablePath(got) != comparablePath(want) {
+		t.Fatalf("%s = %q, want %q", label, got, want)
+	}
+}
+
+func comparablePath(path string) string {
+	path = filepath.Clean(path)
+	current := path
+	suffix := make([]string, 0, 4)
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 func TestRunExplainFileJSON(t *testing.T) {
@@ -153,7 +155,8 @@ func TestResolveExplainPathResolvesRelativePathFromWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	exitCode := withWorkingDir(t, root, func() int {
 		mustWriteFileCmd(t, filepath.Join(root, "docs", "guide.md"), "# guide\n")
-		got, err := resolveExplainPath(root, filepath.Join("docs", "guide.md"))
+		cfg := &config.Config{Workspace: config.Workspace{RootPath: root}}
+		got, err := resolveExplainPath(cfg, filepath.Join("docs", "guide.md"))
 		if err != nil {
 			t.Fatalf("resolveExplainPath() error = %v", err)
 		}
@@ -168,6 +171,95 @@ func TestResolveExplainPathResolvesRelativePathFromWorkspaceRoot(t *testing.T) {
 	})
 	if exitCode != 0 {
 		t.Fatalf("withWorkingDir() exit code = %d, want 0", exitCode)
+	}
+}
+
+func TestResolveExplainPathAllowsAbsolutePathFromConfiguredSecondaryRepo(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+	sharedDoc := filepath.Join(repo, "shared", "docs", "guides", "api-rate-limits.md")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	got, err := resolveExplainPath(cfg, sharedDoc)
+	if err != nil {
+		t.Fatalf("resolveExplainPath() error = %v", err)
+	}
+	want, err := filepath.Abs(sharedDoc)
+	if err != nil {
+		t.Fatalf("filepath.Abs() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolveExplainPath() = %q, want %q", got, want)
+	}
+}
+
+func TestRunExplainFileJSONSupportsAbsolutePathFromConfiguredSecondaryRepo(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+	sharedDoc := filepath.Join(repo, "shared", "docs", "guides", "api-rate-limits.md")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runExplainFile([]string{sharedDoc, "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runExplainFile() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runExplainFile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Path string `json:"path"`
+		} `json:"request"`
+		Result struct {
+			AbsolutePath  string `json:"absolute_path"`
+			WorkspacePath string `json:"workspace_path"`
+			Summary       struct {
+				Status    string   `json:"status"`
+				IndexedBy []string `json:"indexed_by"`
+			} `json:"summary"`
+			Sources []explainFileSourceJSON `json:"sources"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal explain payload: %v", err)
+	}
+	if got, want := payload.Request.Path, sharedDoc; got != want {
+		t.Fatalf("request path = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.AbsolutePath, sharedDoc; got != want {
+		t.Fatalf("absolute path = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.Summary.Status, "indexed"; got != want {
+		t.Fatalf("summary status = %q, want %q", got, want)
+	}
+	if payload.Result.WorkspacePath != "" {
+		t.Fatalf("workspace path = %q, want empty for secondary repo absolute path", payload.Result.WorkspacePath)
+	}
+	if len(payload.Result.Summary.IndexedBy) != 1 || payload.Result.Summary.IndexedBy[0] != "shared-docs" {
+		t.Fatalf("indexed_by = %+v, want shared-docs", payload.Result.Summary.IndexedBy)
+	}
+	sharedSource, ok := findExplainFileSource(payload.Result.Sources, func(src explainFileSourceJSON) bool {
+		return src.Name == "shared-docs"
+	})
+	if !ok {
+		t.Fatal("did not find shared-docs source in payload result")
+	}
+	if got, want := sharedSource.Reason, "indexed_markdown_doc"; got != want {
+		t.Fatalf("shared-docs reason = %q, want %q", got, want)
+	}
+	if !sharedSource.Selected {
+		t.Fatalf("shared-docs explanation = %+v, want selected source", sharedSource)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
 
