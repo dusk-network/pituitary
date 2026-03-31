@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -18,6 +19,12 @@ import (
 
 var requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
 var artifactReferencePattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._-]*\.(?:db|json|md|toml|yaml|yml)`)
+
+const (
+	driftClassificationSemantic = "semantic_contradiction"
+	driftClassificationRole     = "role_mismatch"
+	sourceRoleMetadataKey       = "source_role"
+)
 
 type docDocument struct {
 	Record   model.DocRecord
@@ -56,15 +63,18 @@ type DriftConfidence struct {
 
 // DriftFinding reports one contradiction between a doc and a spec.
 type DriftFinding struct {
-	SpecRef    string           `json:"spec_ref"`
-	Artifact   string           `json:"artifact,omitempty"`
-	Code       string           `json:"code"`
-	Message    string           `json:"message"`
-	Rationale  string           `json:"rationale,omitempty"`
-	Expected   string           `json:"expected,omitempty"`
-	Observed   string           `json:"observed,omitempty"`
-	Evidence   *DriftEvidence   `json:"evidence,omitempty"`
-	Confidence *DriftConfidence `json:"confidence,omitempty"`
+	SpecRef        string           `json:"spec_ref"`
+	Artifact       string           `json:"artifact,omitempty"`
+	Code           string           `json:"code"`
+	Classification string           `json:"classification,omitempty"`
+	DocRole        string           `json:"doc_role,omitempty"`
+	SpecRole       string           `json:"spec_role,omitempty"`
+	Message        string           `json:"message"`
+	Rationale      string           `json:"rationale,omitempty"`
+	Expected       string           `json:"expected,omitempty"`
+	Observed       string           `json:"observed,omitempty"`
+	Evidence       *DriftEvidence   `json:"evidence,omitempty"`
+	Confidence     *DriftConfidence `json:"confidence,omitempty"`
 }
 
 // DriftItem reports one doc that drifts from accepted specs.
@@ -241,6 +251,18 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 	for _, ref := range sortedDocRefs(selectedDocs) {
 		doc := selectedDocs[ref]
 		relevant := relevantAcceptedSpecs(doc, specs)
+		if roleToleratesHistoricalDrift(doc) {
+			if assessment := historicalDocAssessment(doc, relevant); assessment != nil {
+				assessments = append(assessments, *assessment)
+				relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
+				for _, specRef := range assessment.SpecRefs {
+					if spec, ok := specs[specRef]; ok {
+						warningSpecs = append(warningSpecs, spec)
+					}
+				}
+			}
+			continue
+		}
 		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
 		if item != nil && analyzer != nil {
 			relevantByRef := make(map[string]specDocument, len(relevant))
@@ -358,6 +380,7 @@ func loadIndexedDocsContext(ctx context.Context, db *sql.DB, refs []string) (map
 				Title:      row.Title,
 				SourceRef:  row.SourceRef,
 				BodyFormat: model.BodyFormatMarkdown,
+				Metadata:   row.Metadata,
 			},
 		}
 	}
@@ -372,6 +395,7 @@ func loadIndexedDocRowsContext(ctx context.Context, db *sql.DB, refs []string) (
 	args := make([]any, 0, len(refs)+1)
 	builder.WriteString(`
 SELECT ref, title, '', '', source_ref
+     , metadata_json
 FROM artifacts
 WHERE kind = ?`)
 	args = append(args, model.ArtifactKindDoc)
@@ -396,8 +420,14 @@ WHERE kind = ?`)
 	var result []indexedArtifactRow
 	for rows.Next() {
 		var row indexedArtifactRow
-		if err := rows.Scan(&row.Ref, &row.Title, &row.Status, &row.Domain, &row.SourceRef); err != nil {
+		var rawMetadata string
+		if err := rows.Scan(&row.Ref, &row.Title, &row.Status, &row.Domain, &row.SourceRef, &rawMetadata); err != nil {
 			return nil, fmt.Errorf("scan indexed doc: %w", err)
+		}
+		if strings.TrimSpace(rawMetadata) != "" {
+			if err := json.Unmarshal([]byte(rawMetadata), &row.Metadata); err != nil {
+				return nil, fmt.Errorf("parse indexed metadata for %s: %w", row.Ref, err)
+			}
 		}
 		result = append(result, row)
 	}
@@ -517,6 +547,9 @@ func driftAgainstAcceptedSpecs(doc docDocument, relevant []specDocument) (*Drift
 }
 
 func enrichDriftFinding(doc docDocument, spec specDocument, finding DriftFinding) DriftFinding {
+	finding.DocRole = sourceRoleFromMetadata(doc.Record.Metadata)
+	finding.SpecRole = sourceRoleFromMetadata(spec.Record.Metadata)
+	finding.Classification = classifyDriftFinding(finding.DocRole, finding.SpecRole)
 	evidence, score := driftEvidence(doc, spec, finding)
 	finding.Evidence = evidence
 	finding.Rationale = rationaleForFinding(finding)
@@ -592,13 +625,23 @@ func assessmentFallbackSpecs(doc docDocument, specs map[string]specDocument) []s
 		score float64
 	}
 
-	var scored []scoredSpec
+	var (
+		scored              []scoredSpec
+		authoritativeScored []scoredSpec
+	)
 	for _, spec := range specs {
 		if spec.Record.Status != model.StatusAccepted {
 			continue
 		}
 		score := assessmentSimilarity(doc.Sections, spec.Sections)
-		scored = append(scored, scoredSpec{spec: spec, score: score})
+		entry := scoredSpec{spec: spec, score: score}
+		scored = append(scored, entry)
+		if sourceRoleIsAuthoritative(spec.Record.Metadata) {
+			authoritativeScored = append(authoritativeScored, entry)
+		}
+	}
+	if len(authoritativeScored) > 0 {
+		scored = authoritativeScored
 	}
 	sort.Slice(scored, func(i, j int) bool {
 		switch {
@@ -652,7 +695,10 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		score float64
 	}
 	docArtifacts := artifactMentionSet(doc.Sections)
-	var scored []scoredSpec
+	var (
+		scored              []scoredSpec
+		authoritativeScored []scoredSpec
+	)
 	for _, spec := range specs {
 		if spec.Record.Status != model.StatusAccepted {
 			continue
@@ -664,7 +710,14 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		if score < 0.35 {
 			continue
 		}
-		scored = append(scored, scoredSpec{spec: spec, score: score})
+		entry := scoredSpec{spec: spec, score: score}
+		scored = append(scored, entry)
+		if sourceRoleIsAuthoritative(spec.Record.Metadata) {
+			authoritativeScored = append(authoritativeScored, entry)
+		}
+	}
+	if len(authoritativeScored) > 0 {
+		scored = authoritativeScored
 	}
 	sort.Slice(scored, func(i, j int) bool {
 		switch {
@@ -680,6 +733,86 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		result = append(result, item.spec)
 	}
 	return result
+}
+
+func roleToleratesHistoricalDrift(doc docDocument) bool {
+	return sourceRoleFromMetadata(doc.Record.Metadata) == config.SourceRoleHistorical
+}
+
+func historicalDocAssessment(doc docDocument, relevant []specDocument) *DocDriftAssessment {
+	assessment := &DocDriftAssessment{
+		DocRef:    doc.Record.Ref,
+		Title:     doc.Record.Title,
+		SourceRef: doc.Record.SourceRef,
+		Status:    "aligned",
+		Rationale: "doc source is marked historical, so historical terminology and superseded behavior are tolerated during drift checks",
+		Confidence: &DriftConfidence{
+			Level: "medium",
+			Basis: "source role marks this document as historical context rather than current operational truth",
+		},
+	}
+	if candidate := bestAlignedAssessmentCandidateForDocs(doc, relevant); shouldEmitAlignedAssessment(candidate) {
+		assessment.SpecRefs = []string{candidate.spec.Record.Ref}
+		assessment.Evidence = candidate.evidence
+		assessment.Confidence.Score = roundScore(candidate.score)
+	}
+	return assessment
+}
+
+func sourceRoleFromMetadata(metadata map[string]string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	return config.NormalizeSourceRole(metadata[sourceRoleMetadataKey])
+}
+
+func sourceRoleIsAuthoritative(metadata map[string]string) bool {
+	switch sourceRoleFromMetadata(metadata) {
+	case "":
+		return true
+	case config.SourceRoleCanonical, config.SourceRoleCurrentState, config.SourceRoleRuntimeAuth:
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyDriftFinding(docRole, specRole string) string {
+	docRole = config.NormalizeSourceRole(docRole)
+	specRole = config.NormalizeSourceRole(specRole)
+	if docRole == "" && specRole == "" {
+		return driftClassificationSemantic
+	}
+	if docRole != "" && specRole != "" && docRole != specRole {
+		return driftClassificationRole
+	}
+	switch docRole {
+	case config.SourceRolePlanning, config.SourceRoleGenerated, config.SourceRoleMirror:
+		return driftClassificationRole
+	default:
+		return driftClassificationSemantic
+	}
+}
+
+func humanizeSourceRole(role string) string {
+	switch config.NormalizeSourceRole(role) {
+	case config.SourceRoleCanonical:
+		return "canonical"
+	case config.SourceRoleCurrentState:
+		return "current-state"
+	case config.SourceRoleRuntimeAuth:
+		return "runtime-authoritative"
+	case config.SourceRolePlanning:
+		return "planning"
+	case config.SourceRoleHistorical:
+		return "historical"
+	case config.SourceRoleGenerated:
+		return "generated"
+	case config.SourceRoleMirror:
+		return "mirror"
+	default:
+		return ""
+	}
 }
 
 func joinDocumentText(sections []embeddedSection) string {
@@ -1219,25 +1352,43 @@ func stringsHasPrefix(value, prefix string) bool {
 }
 
 func rationaleForFinding(finding DriftFinding) string {
+	base := ""
 	switch finding.Code {
 	case "window_mismatch":
-		return fmt.Sprintf("accepted spec expects %s, but the doc still describes %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+		base = fmt.Sprintf("accepted spec expects %s, but the doc still describes %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
 	case "subject_mismatch":
-		return fmt.Sprintf("accepted spec expects %s, but the doc still targets %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+		base = fmt.Sprintf("accepted spec expects %s, but the doc still targets %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
 	case "default_limit_mismatch":
-		return fmt.Sprintf("accepted spec sets %s, but the doc still states %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+		base = fmt.Sprintf("accepted spec sets %s, but the doc still states %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
 	case "override_support_mismatch":
-		return fmt.Sprintf("accepted spec says %s, but the doc still says %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
+		base = fmt.Sprintf("accepted spec says %s, but the doc still says %s", humanizedDriftValue(finding.Code, finding.Expected), humanizedDriftValue(finding.Code, finding.Observed))
 	case "artifact_runtime_input_mismatch":
 		if finding.Artifact != "" {
-			return fmt.Sprintf("accepted spec says `%s` is not a canonical runtime input, but the doc still presents it as active startup input", finding.Artifact)
+			base = fmt.Sprintf("accepted spec says `%s` is not a canonical runtime input, but the doc still presents it as active startup input", finding.Artifact)
 		}
 	case "artifact_contract_mismatch":
 		if finding.Artifact != "" {
-			return fmt.Sprintf("accepted spec says `%s` is not part of the active runtime contract, but the doc still presents it as active runtime state", finding.Artifact)
+			base = fmt.Sprintf("accepted spec says `%s` is not part of the active runtime contract, but the doc still presents it as active runtime state", finding.Artifact)
 		}
 	}
-	return finding.Message
+	if base == "" {
+		base = finding.Message
+	}
+	if finding.Classification != driftClassificationRole {
+		return base
+	}
+	docRole := humanizeSourceRole(finding.DocRole)
+	specRole := humanizeSourceRole(finding.SpecRole)
+	switch {
+	case docRole != "" && specRole != "":
+		return fmt.Sprintf("%s (%s source contradicts %s source)", base, docRole, specRole)
+	case docRole != "":
+		return fmt.Sprintf("%s (%s source is not the active operational authority)", base, docRole)
+	case specRole != "":
+		return fmt.Sprintf("%s (%s source takes precedence here)", base, specRole)
+	default:
+		return base
+	}
 }
 
 func confidenceForDriftFinding(finding DriftFinding, score float64) *DriftConfidence {

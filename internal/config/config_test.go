@@ -853,6 +853,101 @@ func TestRenderRoundTripsSourceOptions(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsSourceRole(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+role = "historical"
+path = "docs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Sources[0].Role, SourceRoleHistorical; got != want {
+		t.Fatalf("source role = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidSourceRole(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+role = "activeish"
+path = "docs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), `source "docs".role: unsupported role "activeish"`) {
+		t.Fatalf("Load() error = %q, want unsupported role detail", err)
+	}
+}
+
+func TestRenderRoundTripsSourceRole(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "docs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:      ".",
+			IndexPath: ".pituitary/pituitary.db",
+		},
+		Sources: []Source{
+			{
+				Name:    "docs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindMarkdownDocs,
+				Role:    SourceRoleMirror,
+				Path:    "docs",
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if got, want := loaded.Sources[0].Role, SourceRoleMirror; got != want {
+		t.Fatalf("loaded role = %q, want %q", got, want)
+	}
+}
+
 func TestLoadRejectsMissingSourcePath(t *testing.T) {
 	t.Parallel()
 

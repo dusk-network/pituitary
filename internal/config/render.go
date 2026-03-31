@@ -53,6 +53,9 @@ func Render(cfg *Config) (string, error) {
 		fmt.Fprintf(&builder, "name = %s\n", strconv.Quote(source.Name))
 		fmt.Fprintf(&builder, "adapter = %s\n", strconv.Quote(source.Adapter))
 		fmt.Fprintf(&builder, "kind = %s\n", strconv.Quote(source.Kind))
+		if source.Role != "" {
+			fmt.Fprintf(&builder, "role = %s\n", strconv.Quote(source.Role))
+		}
 		if source.Path != "" {
 			fmt.Fprintf(&builder, "path = %s\n", strconv.Quote(source.Path))
 		}

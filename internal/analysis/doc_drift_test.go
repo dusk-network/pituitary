@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -361,6 +362,127 @@ func TestCheckDocDriftKeepsPossibleDriftInMixedBatches(t *testing.T) {
 	}
 }
 
+func TestCheckDocDriftToleratesHistoricalDocs(t *testing.T) {
+	t.Parallel()
+
+	cfg := writeRoleAwareDocDriftWorkspace(t, config.SourceRoleCanonical, `
+# Rate Limit Contract
+
+Use a sliding-window limiter with a default limit of 200 requests per minute.
+Apply limits per tenant.
+`, config.SourceRoleHistorical, `
+# 2024 Rollout Notes
+
+Use a fixed-window limiter with a default limit of 100 requests per minute.
+Apply limits per API key.
+`)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+	if len(result.DriftItems) != 0 {
+		t.Fatalf("drift_items = %+v, want historical doc to be tolerated", result.DriftItems)
+	}
+	if len(result.Assessments) != 1 {
+		t.Fatalf("assessments = %+v, want one historical assessment", result.Assessments)
+	}
+	assessment := result.Assessments[0]
+	if got, want := assessment.Status, "aligned"; got != want {
+		t.Fatalf("assessment.status = %q, want %q", got, want)
+	}
+	if assessment.Rationale == "" || assessment.Confidence == nil {
+		t.Fatalf("assessment = %+v, want rationale and confidence", assessment)
+	}
+	if want := "historical"; !containsSubstringFold(assessment.Rationale, want) {
+		t.Fatalf("assessment.rationale = %q, want substring %q", assessment.Rationale, want)
+	}
+}
+
+func TestCheckDocDriftClassifiesRoleMismatchAgainstRuntimeAuthority(t *testing.T) {
+	t.Parallel()
+
+	cfg := writeRoleAwareDocDriftWorkspace(t, config.SourceRoleRuntimeAuth, `
+# Runtime Rate Limit Contract
+
+Use a sliding-window limiter with a default limit of 200 requests per minute.
+Apply limits per tenant.
+`, config.SourceRoleCurrentState, `
+# Public API Runtime Guide
+
+Use a fixed-window limiter with a default limit of 100 requests per minute.
+Apply limits per API key.
+`)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+	if len(result.DriftItems) != 1 {
+		t.Fatalf("drift_items = %+v, want one role mismatch doc", result.DriftItems)
+	}
+	finding := result.DriftItems[0].Findings[0]
+	if got, want := finding.Classification, driftClassificationRole; got != want {
+		t.Fatalf("finding.classification = %q, want %q", got, want)
+	}
+	if got, want := finding.DocRole, config.SourceRoleCurrentState; got != want {
+		t.Fatalf("finding.doc_role = %q, want %q", got, want)
+	}
+	if got, want := finding.SpecRole, config.SourceRoleRuntimeAuth; got != want {
+		t.Fatalf("finding.spec_role = %q, want %q", got, want)
+	}
+}
+
+func TestCheckDocDriftIgnoresPlanningSpecsWhenAuthoritativeSpecExists(t *testing.T) {
+	t.Parallel()
+
+	cfg := writePlanningConflictDocDriftWorkspace(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := CheckDocDrift(cfg, DocDriftRequest{Scope: "all"})
+	if err != nil {
+		t.Fatalf("CheckDocDrift() error = %v", err)
+	}
+	if len(result.DriftItems) != 0 {
+		t.Fatalf("drift_items = %+v, want planning spec excluded from authoritative drift checks", result.DriftItems)
+	}
+	if len(result.Assessments) != 1 {
+		t.Fatalf("assessments = %+v, want one aligned assessment", result.Assessments)
+	}
+	assessment := result.Assessments[0]
+	if assessment.Status != "aligned" && assessment.Status != "possible_drift" {
+		t.Fatalf("assessment.status = %q, want aligned or possible_drift", assessment.Status)
+	}
+	for _, specRef := range assessment.SpecRefs {
+		if specRef == "SPEC-PLAN" {
+			t.Fatalf("assessment.spec_refs = %+v, did not expect planning spec", assessment.SpecRefs)
+		}
+	}
+	if len(assessment.SpecRefs) > 0 && assessment.SpecRefs[0] != "SPEC-CANON" {
+		t.Fatalf("assessment.spec_refs = %+v, want canonical spec when a spec ref is surfaced", assessment.SpecRefs)
+	}
+}
+
 func TestClassifyArtifactConstraintScopesRuntimeInputToLocalArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -427,6 +549,138 @@ kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md"]
 `)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		tb.Fatalf("config.Load() error = %v", err)
+	}
+	return cfg
+}
+
+func writeRoleAwareDocDriftWorkspace(tb testing.TB, specRole, specBody, docRole, docBody string) *config.Config {
+	tb.Helper()
+
+	root := tb.TempDir()
+	indexPath := filepath.Join(root, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(root, "pituitary.toml")
+
+	mustWriteFile(tb, filepath.Join(root, "specs", "rate-limit", "spec.toml"), `
+id = "SPEC-ROLE"
+title = "Role Aware Rate Limit Contract"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "specs", "rate-limit", "body.md"), specBody)
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "rate-limit.md"), docBody)
+
+	mustWriteFile(tb, configPath, fmt.Sprintf(`
+[workspace]
+root = %q
+index_path = %q
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+role = %q
+path = %q
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+role = %q
+path = %q
+`, root, indexPath, specRole, filepath.Join(root, "specs"), docRole, filepath.Join(root, "docs")))
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		tb.Fatalf("config.Load() error = %v", err)
+	}
+	return cfg
+}
+
+func writePlanningConflictDocDriftWorkspace(tb testing.TB) *config.Config {
+	tb.Helper()
+
+	root := tb.TempDir()
+	indexPath := filepath.Join(root, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(root, "pituitary.toml")
+
+	mustWriteFile(tb, filepath.Join(root, "specs", "canonical", "spec.toml"), `
+id = "SPEC-CANON"
+title = "Canonical Rate Limit Contract"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "specs", "canonical", "body.md"), `
+# Canonical Rate Limit Contract
+
+Use a sliding-window limiter with a default limit of 200 requests per minute.
+Apply limits per tenant.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "plans", "future-rollout", "spec.toml"), `
+id = "SPEC-PLAN"
+title = "Future Rate Limit Rollout"
+status = "accepted"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(tb, filepath.Join(root, "plans", "future-rollout", "body.md"), `
+# Future Rate Limit Rollout
+
+Use a fixed-window limiter with a default limit of 100 requests per minute.
+Apply limits per API key.
+`)
+
+	mustWriteFile(tb, filepath.Join(root, "docs", "guides", "rate-limit.md"), `
+# Public API Runtime Guide
+
+Use a sliding-window limiter with a default limit of 200 requests per minute.
+Apply limits per tenant.
+`)
+
+	mustWriteFile(tb, configPath, fmt.Sprintf(`
+[workspace]
+root = %q
+index_path = %q
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+role = "canonical"
+path = %q
+
+[[sources]]
+name = "plans"
+adapter = "filesystem"
+kind = "spec_bundle"
+role = "planning"
+path = %q
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+role = "current_state"
+path = %q
+`, root, indexPath, filepath.Join(root, "specs"), filepath.Join(root, "plans"), filepath.Join(root, "docs")))
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -592,4 +846,8 @@ path = %q
 		tb.Fatalf("config.Load() error = %v", err)
 	}
 	return cfg
+}
+
+func containsSubstringFold(value, needle string) bool {
+	return strings.Contains(strings.ToLower(value), strings.ToLower(needle))
 }

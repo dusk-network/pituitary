@@ -78,6 +78,7 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 		if err != nil {
 			return nil, fmt.Errorf("source %q: %w", source.Name, err)
 		}
+		annotateSourceRoleMetadata(source.Role, adapterResult)
 
 		if err := appendUniqueSpecRecords(result, seenSpecs, source, adapterResult.Specs); err != nil {
 			return nil, err
@@ -127,4 +128,25 @@ func unknownAdapterError(sourceName, adapter string) error {
 		adapter,
 		strings.Join(registered, ", "),
 	)
+}
+
+func annotateSourceRoleMetadata(role string, result *sdk.AdapterResult) {
+	role = config.NormalizeSourceRole(role)
+	if role == "" || result == nil {
+		return
+	}
+	for i := range result.Specs {
+		result.Specs[i].Metadata = withSourceRole(result.Specs[i].Metadata, role)
+	}
+	for i := range result.Docs {
+		result.Docs[i].Metadata = withSourceRole(result.Docs[i].Metadata, role)
+	}
+}
+
+func withSourceRole(metadata map[string]string, role string) map[string]string {
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["source_role"] = role
+	return metadata
 }
