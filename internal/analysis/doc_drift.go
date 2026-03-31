@@ -48,12 +48,15 @@ type DocDriftScope struct {
 
 // DriftEvidence reports the concrete spec/doc sections that support one drift judgment.
 type DriftEvidence struct {
-	SpecRef     string `json:"spec_ref,omitempty"`
-	SpecTitle   string `json:"spec_title,omitempty"`
-	SpecSection string `json:"spec_section,omitempty"`
-	SpecExcerpt string `json:"spec_excerpt,omitempty"`
-	DocSection  string `json:"doc_section,omitempty"`
-	DocExcerpt  string `json:"doc_excerpt,omitempty"`
+	SpecRef       string `json:"spec_ref,omitempty"`
+	SpecTitle     string `json:"spec_title,omitempty"`
+	SpecSourceRef string `json:"spec_source_ref,omitempty"`
+	SpecSection   string `json:"spec_section,omitempty"`
+	SpecExcerpt   string `json:"spec_excerpt,omitempty"`
+	DocSourceRef  string `json:"doc_source_ref,omitempty"`
+	DocSection    string `json:"doc_section,omitempty"`
+	DocExcerpt    string `json:"doc_excerpt,omitempty"`
+	LinkReason    string `json:"link_reason,omitempty"`
 }
 
 // DriftConfidence reports how certain the analysis is about one judgment.
@@ -104,12 +107,15 @@ type DocDriftAssessment struct {
 
 // DocRemediationEvidence separates the observed contradiction from the accepted spec evidence.
 type DocRemediationEvidence struct {
-	SpecSection string `json:"spec_section,omitempty"`
-	SpecExcerpt string `json:"spec_excerpt,omitempty"`
-	DocSection  string `json:"doc_section,omitempty"`
-	DocExcerpt  string `json:"doc_excerpt,omitempty"`
-	Expected    string `json:"expected,omitempty"`
-	Observed    string `json:"observed,omitempty"`
+	SpecSourceRef string `json:"spec_source_ref,omitempty"`
+	SpecSection   string `json:"spec_section,omitempty"`
+	SpecExcerpt   string `json:"spec_excerpt,omitempty"`
+	DocSourceRef  string `json:"doc_source_ref,omitempty"`
+	DocSection    string `json:"doc_section,omitempty"`
+	DocExcerpt    string `json:"doc_excerpt,omitempty"`
+	Expected      string `json:"expected,omitempty"`
+	Observed      string `json:"observed,omitempty"`
+	LinkReason    string `json:"link_reason,omitempty"`
 }
 
 // DocSuggestedEdit is one actionable update recommendation.
@@ -122,11 +128,17 @@ type DocSuggestedEdit struct {
 
 // DocRemediationSuggestion is one actionable guidance item derived from a drift finding.
 type DocRemediationSuggestion struct {
-	SpecRef       string                 `json:"spec_ref"`
-	Code          string                 `json:"code"`
-	Summary       string                 `json:"summary"`
-	Evidence      DocRemediationEvidence `json:"evidence"`
-	SuggestedEdit DocSuggestedEdit       `json:"suggested_edit"`
+	SpecRef          string                 `json:"spec_ref"`
+	Code             string                 `json:"code"`
+	Classification   string                 `json:"classification,omitempty"`
+	Summary          string                 `json:"summary"`
+	LinkReason       string                 `json:"link_reason,omitempty"`
+	TargetSourceRef  string                 `json:"target_source_ref,omitempty"`
+	TargetSection    string                 `json:"target_section,omitempty"`
+	TargetExcerpt    string                 `json:"target_excerpt,omitempty"`
+	SuggestedBullets []string               `json:"suggested_bullets,omitempty"`
+	Evidence         DocRemediationEvidence `json:"evidence"`
+	SuggestedEdit    DocSuggestedEdit       `json:"suggested_edit"`
 }
 
 // DocRemediationItem groups all remediation suggestions for one drifting doc.
@@ -709,12 +721,19 @@ func buildDocRemediationItem(doc docDocument, specs map[string]specDocument, fin
 		if !ok {
 			continue
 		}
+		evidence := remediationEvidence(doc, spec, finding)
 		suggestions = append(suggestions, DocRemediationSuggestion{
-			SpecRef:       finding.SpecRef,
-			Code:          finding.Code,
-			Summary:       remediationSummaryForFinding(finding),
-			Evidence:      remediationEvidence(doc, spec, finding),
-			SuggestedEdit: suggestedEditForFinding(finding),
+			SpecRef:          finding.SpecRef,
+			Code:             finding.Code,
+			Classification:   finding.Classification,
+			Summary:          remediationSummaryForFinding(finding),
+			LinkReason:       defaultString(stringsTrimSpace(evidence.LinkReason), defaultString(stringsTrimSpace(finding.Rationale), finding.Message)),
+			TargetSourceRef:  evidence.DocSourceRef,
+			TargetSection:    evidence.DocSection,
+			TargetExcerpt:    evidence.DocExcerpt,
+			SuggestedBullets: remediationSuggestedBullets(doc, spec, finding, evidence),
+			Evidence:         evidence,
+			SuggestedEdit:    suggestedEditForFinding(finding),
 		})
 	}
 	if len(suggestions) == 0 {
@@ -1198,18 +1217,51 @@ func remediationEvidence(doc docDocument, spec specDocument, finding DriftFindin
 	evidence, _ := driftEvidence(doc, spec, finding)
 	if evidence == nil {
 		return DocRemediationEvidence{
-			Expected: humanizedDriftValue(finding.Code, finding.Expected),
-			Observed: humanizedDriftValue(finding.Code, finding.Observed),
+			SpecSourceRef: spec.Record.SourceRef,
+			DocSourceRef:  doc.Record.SourceRef,
+			Expected:      humanizedDriftValue(finding.Code, finding.Expected),
+			Observed:      humanizedDriftValue(finding.Code, finding.Observed),
+			LinkReason:    defaultString(stringsTrimSpace(finding.Rationale), finding.Message),
 		}
 	}
 	return DocRemediationEvidence{
-		SpecSection: evidence.SpecSection,
-		SpecExcerpt: evidence.SpecExcerpt,
-		DocSection:  evidence.DocSection,
-		DocExcerpt:  evidence.DocExcerpt,
-		Expected:    humanizedDriftValue(finding.Code, finding.Expected),
-		Observed:    humanizedDriftValue(finding.Code, finding.Observed),
+		SpecSourceRef: evidence.SpecSourceRef,
+		SpecSection:   evidence.SpecSection,
+		SpecExcerpt:   evidence.SpecExcerpt,
+		DocSourceRef:  evidence.DocSourceRef,
+		DocSection:    evidence.DocSection,
+		DocExcerpt:    evidence.DocExcerpt,
+		Expected:      humanizedDriftValue(finding.Code, finding.Expected),
+		Observed:      humanizedDriftValue(finding.Code, finding.Observed),
+		LinkReason:    evidence.LinkReason,
 	}
+}
+
+func remediationSuggestedBullets(doc docDocument, spec specDocument, finding DriftFinding, evidence DocRemediationEvidence) []string {
+	bullets := make([]string, 0, 3)
+	targetSection := defaultString(stringsTrimSpace(evidence.DocSection), "(body)")
+	specSection := defaultString(stringsTrimSpace(evidence.SpecSection), "(body)")
+	bullets = append(bullets, fmt.Sprintf("Review %s in %s against %s / %s before editing nearby guidance.", targetSection, doc.Record.Ref, spec.Record.Ref, specSection))
+	switch finding.Code {
+	case "window_mismatch", "subject_mismatch", "default_limit_mismatch", "override_support_mismatch":
+		if observed := humanizedDriftValue(finding.Code, finding.Observed); observed != "" {
+			if expected := humanizedDriftValue(finding.Code, finding.Expected); expected != "" {
+				bullets = append(bullets, fmt.Sprintf("Replace the stale claim %q with the accepted value %q.", observed, expected))
+			}
+		}
+	case "artifact_runtime_input_mismatch":
+		if finding.Artifact != "" {
+			bullets = append(bullets, fmt.Sprintf("Rewrite the `%s` paragraph so it is described as derived output rather than canonical runtime input.", finding.Artifact))
+		}
+	case "artifact_contract_mismatch":
+		if finding.Artifact != "" {
+			bullets = append(bullets, fmt.Sprintf("Remove or qualify `%s` so the doc no longer presents it as active runtime state.", finding.Artifact))
+		}
+	}
+	if evidence.SpecExcerpt != "" {
+		bullets = append(bullets, "Anchor the replacement text on the accepted spec excerpt instead of paraphrasing from memory.")
+	}
+	return normalizeStringList(bullets, 4)
 }
 
 func suggestedEditForFinding(finding DriftFinding) DocSuggestedEdit {
@@ -1468,8 +1520,11 @@ func driftEvidence(doc docDocument, spec specDocument, finding DriftFinding) (*D
 	}
 
 	evidence := &DriftEvidence{
-		SpecRef:   spec.Record.Ref,
-		SpecTitle: spec.Record.Title,
+		SpecRef:       spec.Record.Ref,
+		SpecTitle:     spec.Record.Title,
+		SpecSourceRef: spec.Record.SourceRef,
+		DocSourceRef:  doc.Record.SourceRef,
+		LinkReason:    driftEvidenceLinkReason(finding, score, docSection != nil, specSection != nil),
 	}
 	if specSection != nil {
 		evidence.SpecSection = defaultString(stringsTrimSpace(specSection.Heading), "(body)")
@@ -1480,6 +1535,21 @@ func driftEvidence(doc docDocument, spec specDocument, finding DriftFinding) (*D
 		evidence.DocExcerpt = sectionExcerpt(*docSection)
 	}
 	return evidence, score
+}
+
+func driftEvidenceLinkReason(finding DriftFinding, score float64, hasDocSection, hasSpecSection bool) string {
+	switch {
+	case hasDocSection && hasSpecSection && score > 0:
+		return fmt.Sprintf("localized the strongest doc/spec evidence pair for %s using deterministic keywords (score %.3f)", finding.Code, roundScore(score))
+	case hasDocSection && hasSpecSection:
+		return fmt.Sprintf("localized matching doc/spec sections for %s using deterministic keywords", finding.Code)
+	case hasSpecSection:
+		return fmt.Sprintf("localized the accepted spec section for %s and mapped the contradiction back to the reviewed doc", finding.Code)
+	case hasDocSection:
+		return fmt.Sprintf("localized the reviewed doc section for %s and paired it with the accepted spec finding", finding.Code)
+	default:
+		return ""
+	}
 }
 
 func bestSectionForKeywords(sections []embeddedSection, keywords []string) *embeddedSection {
@@ -1555,12 +1625,15 @@ func bestAlignedAssessmentCandidateForDocs(doc docDocument, relevant []specDocum
 				best = &alignedAssessmentCandidate{
 					spec: spec,
 					evidence: &DriftEvidence{
-						SpecRef:     spec.Record.Ref,
-						SpecTitle:   spec.Record.Title,
-						SpecSection: defaultString(stringsTrimSpace(specSection.Heading), "(body)"),
-						SpecExcerpt: defaultString(sectionExcerpt(*specSection), stringsTrimSpace(spec.Record.Title)),
-						DocSection:  defaultString(stringsTrimSpace(docSection.Heading), "(body)"),
-						DocExcerpt:  sectionExcerpt(*docSection),
+						SpecRef:       spec.Record.Ref,
+						SpecTitle:     spec.Record.Title,
+						SpecSourceRef: spec.Record.SourceRef,
+						SpecSection:   defaultString(stringsTrimSpace(specSection.Heading), "(body)"),
+						SpecExcerpt:   defaultString(sectionExcerpt(*specSection), stringsTrimSpace(spec.Record.Title)),
+						DocSourceRef:  doc.Record.SourceRef,
+						DocSection:    defaultString(stringsTrimSpace(docSection.Heading), "(body)"),
+						DocExcerpt:    sectionExcerpt(*docSection),
+						LinkReason:    fmt.Sprintf("highest section-level alignment between %s and %s (score %.3f)", spec.Record.Ref, doc.Record.Ref, roundScore(score)),
 					},
 					score:           score,
 					docMentionsSpec: strings.Contains(docText, strings.ToLower(spec.Record.Ref)),

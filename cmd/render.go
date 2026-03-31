@@ -718,10 +718,37 @@ func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult
 			fmt.Fprintf(w, " | source: %s", displaySourcePath(item.SourceRef))
 		}
 		fmt.Fprintf(w, " | %.3f", item.Score)
+		if item.Classification != "" {
+			fmt.Fprintf(w, " | %s", item.Classification)
+		}
 		if item.Title != "" {
 			fmt.Fprintf(w, " | %s", item.Title)
 		}
 		fmt.Fprintln(w)
+		if len(item.Reasons) > 0 {
+			fmt.Fprintf(w, "  reason: %s\n", item.Reasons[0])
+		}
+		if item.Evidence != nil {
+			fmt.Fprintf(
+				w,
+				"  evidence: %s / %s -> %s / %s\n",
+				displaySourcePath(item.Evidence.SpecSourceRef),
+				displayDefault(item.Evidence.SpecSection, "(body)"),
+				displaySourcePath(item.Evidence.DocSourceRef),
+				displayDefault(item.Evidence.DocSection, "(body)"),
+			)
+			if strings.TrimSpace(item.Evidence.LinkReason) != "" {
+				fmt.Fprintf(w, "  why: %s\n", item.Evidence.LinkReason)
+			}
+		}
+		if len(item.SuggestedTargets) > 0 {
+			target := item.SuggestedTargets[0]
+			fmt.Fprintf(w, "  target: %s", displaySourcePath(target.SourceRef))
+			if strings.TrimSpace(target.Section) != "" {
+				fmt.Fprintf(w, " / %s", target.Section)
+			}
+			fmt.Fprintln(w)
+		}
 	}
 }
 
@@ -1146,6 +1173,9 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 			fmt.Fprintln(w, "- Top impacted docs:")
 			for _, item := range topImpactedDocs(result.Impact.AffectedDocs, 3) {
 				fmt.Fprintf(w, "  - `%s` %s (score %.3f", item.Ref, item.Title, item.Score)
+				if item.Classification != "" {
+					fmt.Fprintf(w, ", %s", item.Classification)
+				}
 				if item.Repo != "" {
 					fmt.Fprintf(w, ", repo %s", item.Repo)
 				}
@@ -1153,6 +1183,24 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 					fmt.Fprintf(w, ", %s", item.SourceRef)
 				}
 				fmt.Fprintln(w, ")")
+				if item.Evidence != nil {
+					fmt.Fprintf(
+						w,
+						"    - Evidence: %s / %s -> %s / %s\n",
+						item.Evidence.SpecRef,
+						displayDefault(item.Evidence.SpecSection, "(body)"),
+						displaySourcePath(item.Evidence.DocSourceRef),
+						displayDefault(item.Evidence.DocSection, "(body)"),
+					)
+				}
+				if len(item.SuggestedTargets) > 0 {
+					target := item.SuggestedTargets[0]
+					fmt.Fprintf(w, "    - Suggested target: %s", target.SourceRef)
+					if target.Section != "" {
+						fmt.Fprintf(w, " / %s", target.Section)
+					}
+					fmt.Fprintln(w)
+				}
 			}
 			if extra := len(result.Impact.AffectedDocs) - minInt(len(result.Impact.AffectedDocs), 3); extra > 0 {
 				fmt.Fprintf(w, "  - `%d` more impacted doc(s)\n", extra)
@@ -1226,13 +1274,30 @@ func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
 			fmt.Fprintf(w, "- Source: %s\n", item.SourceRef)
 		}
 		for _, suggestion := range item.Suggestions {
-			fmt.Fprintf(w, "- Update `%s` from `%s`: %s\n", suggestion.Code, suggestion.SpecRef, suggestion.Summary)
+			fmt.Fprintf(w, "- Update `%s` from `%s`", suggestion.Code, suggestion.SpecRef)
+			if suggestion.Classification != "" {
+				fmt.Fprintf(w, " [%s]", suggestion.Classification)
+			}
+			fmt.Fprintf(w, ": %s\n", suggestion.Summary)
 			if suggestion.Evidence.SpecExcerpt != "" {
 				fmt.Fprintf(w, "  - Evidence: spec says %q", suggestion.Evidence.SpecExcerpt)
 				if suggestion.Evidence.DocExcerpt != "" {
 					fmt.Fprintf(w, "; doc says %q", suggestion.Evidence.DocExcerpt)
 				}
 				fmt.Fprintln(w)
+			}
+			if suggestion.TargetSourceRef != "" || suggestion.TargetSection != "" {
+				fmt.Fprintf(w, "  - Target: %s", suggestion.TargetSourceRef)
+				if suggestion.TargetSection != "" {
+					fmt.Fprintf(w, " / %s", suggestion.TargetSection)
+				}
+				fmt.Fprintln(w)
+			}
+			if suggestion.LinkReason != "" {
+				fmt.Fprintf(w, "  - Link reason: %s\n", suggestion.LinkReason)
+			}
+			for _, bullet := range suggestion.SuggestedBullets {
+				fmt.Fprintf(w, "  - Next step: %s\n", bullet)
 			}
 			switch {
 			case suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "":
@@ -1496,10 +1561,22 @@ summary {
 			fmt.Fprint(w, "<ul class=\"compact-list\">")
 			for _, item := range docs {
 				fmt.Fprintf(w, "<li><strong><code>%s</code></strong> %s <span class=\"muted\">(score %.3f", escape(item.Ref), escape(item.Title), item.Score)
+				if item.Classification != "" {
+					fmt.Fprintf(w, ", %s", escape(item.Classification))
+				}
 				if item.SourceRef != "" {
 					fmt.Fprintf(w, ", %s", escape(item.SourceRef))
 				}
-				fmt.Fprint(w, ")</span></li>")
+				fmt.Fprint(w, ")</span>")
+				if item.Evidence != nil {
+					fmt.Fprintf(w, "<br><span class=\"subtle\">Evidence: %s / %s -> %s / %s</span>",
+						escape(item.Evidence.SpecRef),
+						escape(displayDefault(item.Evidence.SpecSection, "(body)")),
+						escape(item.Evidence.DocSourceRef),
+						escape(displayDefault(item.Evidence.DocSection, "(body)")),
+					)
+				}
+				fmt.Fprint(w, "</li>")
 			}
 			fmt.Fprint(w, "</ul>")
 		}
@@ -1569,9 +1646,30 @@ summary {
 				fmt.Fprintf(w, "<div><strong>Source</strong><br>%s</div>", escape(item.SourceRef))
 			}
 			for _, suggestion := range item.Suggestions {
-				fmt.Fprintf(w, "<div><strong>%s</strong><br>%s", escape(suggestion.Code), escape(suggestion.Summary))
+				fmt.Fprintf(w, "<div><strong>%s</strong>", escape(suggestion.Code))
+				if suggestion.Classification != "" {
+					fmt.Fprintf(w, " <span class=\"subtle\">(%s)</span>", escape(suggestion.Classification))
+				}
+				fmt.Fprintf(w, "<br>%s", escape(suggestion.Summary))
 				if suggestion.Evidence.SpecExcerpt != "" || suggestion.Evidence.DocExcerpt != "" {
 					fmt.Fprintf(w, "<br>%s", reviewHTMLRemediationEvidence(suggestion.Evidence))
+				}
+				if suggestion.TargetSourceRef != "" || suggestion.TargetSection != "" {
+					fmt.Fprintf(w, "<br><span class=\"subtle\">Target %s", escape(suggestion.TargetSourceRef))
+					if suggestion.TargetSection != "" {
+						fmt.Fprintf(w, " / %s", escape(suggestion.TargetSection))
+					}
+					fmt.Fprint(w, "</span>")
+				}
+				if suggestion.LinkReason != "" {
+					fmt.Fprintf(w, "<br><span class=\"subtle\">%s</span>", escape(suggestion.LinkReason))
+				}
+				if len(suggestion.SuggestedBullets) > 0 {
+					fmt.Fprint(w, "<ul class=\"compact-list\">")
+					for _, bullet := range suggestion.SuggestedBullets {
+						fmt.Fprintf(w, "<li>%s</li>", escape(bullet))
+					}
+					fmt.Fprint(w, "</ul>")
 				}
 				switch {
 				case suggestion.SuggestedEdit.Replace != "" || suggestion.SuggestedEdit.With != "":
@@ -1630,13 +1728,16 @@ func reviewHTMLDriftEvidence(evidence *analysis.DriftEvidence) string {
 
 func reviewHTMLRemediationEvidence(evidence analysis.DocRemediationEvidence) string {
 	escape := htemplate.HTMLEscapeString
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
 		spec := "<strong>Spec</strong> "
 		if evidence.SpecSection != "" {
 			spec += escape(evidence.SpecSection)
 		} else {
 			spec += "matched section"
+		}
+		if evidence.SpecSourceRef != "" {
+			spec += "<br><span class=\"subtle\">" + escape(evidence.SpecSourceRef) + "</span>"
 		}
 		if evidence.SpecExcerpt != "" {
 			spec += "<br><span class=\"subtle\">" + escape(evidence.SpecExcerpt) + "</span>"
@@ -1650,10 +1751,16 @@ func reviewHTMLRemediationEvidence(evidence analysis.DocRemediationEvidence) str
 		} else {
 			doc += "matched section"
 		}
+		if evidence.DocSourceRef != "" {
+			doc += "<br><span class=\"subtle\">" + escape(evidence.DocSourceRef) + "</span>"
+		}
 		if evidence.DocExcerpt != "" {
 			doc += "<br><span class=\"subtle\">" + escape(evidence.DocExcerpt) + "</span>"
 		}
 		parts = append(parts, doc)
+	}
+	if evidence.LinkReason != "" {
+		parts = append(parts, "<strong>Link</strong><br><span class=\"subtle\">"+escape(evidence.LinkReason)+"</span>")
 	}
 	return strings.Join(parts, "<br>")
 }
@@ -1814,6 +1921,14 @@ func displaySourcePath(sourceRef string) string {
 	return strings.TrimPrefix(sourceRef, "file://")
 }
 
+func displayDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 func repoPathLabel(repo, label string) string {
 	repo = strings.TrimSpace(repo)
 	label = strings.TrimSpace(label)
@@ -1907,11 +2022,17 @@ func reviewImpactLines(result *analysis.AnalyzeImpactResult) []string {
 	}
 	for _, item := range topImpactedDocs(result.AffectedDocs, 2) {
 		line := fmt.Sprintf("%s  %.3f", item.Ref, item.Score)
+		if item.Classification != "" {
+			line += " · " + item.Classification
+		}
 		if item.Repo != "" {
 			line += " · repo: " + item.Repo
 		}
 		if item.SourceRef != "" {
 			line += " · " + displaySourcePath(item.SourceRef)
+		}
+		if len(item.SuggestedTargets) > 0 && item.SuggestedTargets[0].Section != "" {
+			line += " · target: " + item.SuggestedTargets[0].Section
 		}
 		lines = append(lines, line)
 	}

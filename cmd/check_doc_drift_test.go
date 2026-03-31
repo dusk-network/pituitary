@@ -41,8 +41,11 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 					Code      string `json:"code"`
 					Rationale string `json:"rationale"`
 					Evidence  struct {
-						SpecSection string `json:"spec_section"`
-						DocSection  string `json:"doc_section"`
+						SpecSourceRef string `json:"spec_source_ref"`
+						SpecSection   string `json:"spec_section"`
+						DocSourceRef  string `json:"doc_source_ref"`
+						DocSection    string `json:"doc_section"`
+						LinkReason    string `json:"link_reason"`
 					} `json:"evidence"`
 					Confidence struct {
 						Level string `json:"level"`
@@ -53,8 +56,11 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 				DocRef   string `json:"doc_ref"`
 				Status   string `json:"status"`
 				Evidence struct {
-					SpecSection string `json:"spec_section"`
-					DocSection  string `json:"doc_section"`
+					SpecSourceRef string `json:"spec_source_ref"`
+					SpecSection   string `json:"spec_section"`
+					DocSourceRef  string `json:"doc_source_ref"`
+					DocSection    string `json:"doc_section"`
+					LinkReason    string `json:"link_reason"`
 				} `json:"evidence"`
 				Confidence struct {
 					Level string `json:"level"`
@@ -64,10 +70,18 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 				Items []struct {
 					DocRef      string `json:"doc_ref"`
 					Suggestions []struct {
-						SpecRef  string `json:"spec_ref"`
-						Code     string `json:"code"`
-						Evidence struct {
-							SpecSection string `json:"spec_section"`
+						SpecRef          string   `json:"spec_ref"`
+						Code             string   `json:"code"`
+						Classification   string   `json:"classification"`
+						LinkReason       string   `json:"link_reason"`
+						TargetSourceRef  string   `json:"target_source_ref"`
+						TargetSection    string   `json:"target_section"`
+						SuggestedBullets []string `json:"suggested_bullets"`
+						Evidence         struct {
+							SpecSourceRef string `json:"spec_source_ref"`
+							SpecSection   string `json:"spec_section"`
+							DocSourceRef  string `json:"doc_source_ref"`
+							LinkReason    string `json:"link_reason"`
 						} `json:"evidence"`
 						SuggestedEdit struct {
 							Action string `json:"action"`
@@ -89,10 +103,13 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 	}
 	if len(payload.Result.DriftItems[0].Findings) == 0 ||
 		payload.Result.DriftItems[0].Findings[0].Rationale == "" ||
+		payload.Result.DriftItems[0].Findings[0].Evidence.SpecSourceRef == "" ||
 		payload.Result.DriftItems[0].Findings[0].Evidence.SpecSection == "" ||
+		payload.Result.DriftItems[0].Findings[0].Evidence.DocSourceRef == "" ||
 		payload.Result.DriftItems[0].Findings[0].Evidence.DocSection == "" ||
+		payload.Result.DriftItems[0].Findings[0].Evidence.LinkReason == "" ||
 		payload.Result.DriftItems[0].Findings[0].Confidence.Level == "" {
-		t.Fatalf("top drift finding = %+v, want rationale, evidence, and confidence", payload.Result.DriftItems[0].Findings)
+		t.Fatalf("top drift finding = %+v, want rationale, linked evidence, and confidence", payload.Result.DriftItems[0].Findings)
 	}
 	var foundDrift, foundAligned bool
 	for _, assessment := range payload.Result.Assessments {
@@ -113,9 +130,17 @@ func TestRunCheckDocDriftScopeAllJSON(t *testing.T) {
 		t.Fatalf("remediation suggestions = %+v, want actionable suggestions", payload.Result.Remediation.Items[0])
 	}
 	if payload.Result.Remediation.Items[0].Suggestions[0].SpecRef == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].Classification == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].LinkReason == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].TargetSourceRef == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].TargetSection == "" ||
+		len(payload.Result.Remediation.Items[0].Suggestions[0].SuggestedBullets) == 0 ||
+		payload.Result.Remediation.Items[0].Suggestions[0].Evidence.SpecSourceRef == "" ||
 		payload.Result.Remediation.Items[0].Suggestions[0].Evidence.SpecSection == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].Evidence.DocSourceRef == "" ||
+		payload.Result.Remediation.Items[0].Suggestions[0].Evidence.LinkReason == "" ||
 		payload.Result.Remediation.Items[0].Suggestions[0].SuggestedEdit.Action == "" {
-		t.Fatalf("top remediation suggestion = %+v, want stable evidence and suggested edit", payload.Result.Remediation.Items[0].Suggestions[0])
+		t.Fatalf("top remediation suggestion = %+v, want stable evidence chain, target, bullets, and suggested edit", payload.Result.Remediation.Items[0].Suggestions[0])
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)

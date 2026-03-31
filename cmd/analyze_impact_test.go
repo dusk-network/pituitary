@@ -40,7 +40,17 @@ func TestRunAnalyzeImpactJSON(t *testing.T) {
 				Ref string `json:"ref"`
 			} `json:"affected_refs"`
 			AffectedDocs []struct {
-				Ref string `json:"ref"`
+				Ref            string `json:"ref"`
+				Classification string `json:"classification"`
+				Evidence       struct {
+					SpecSourceRef string `json:"spec_source_ref"`
+					DocSourceRef  string `json:"doc_source_ref"`
+					LinkReason    string `json:"link_reason"`
+				} `json:"evidence"`
+				SuggestedTargets []struct {
+					SourceRef string `json:"source_ref"`
+					Section   string `json:"section"`
+				} `json:"suggested_targets"`
 			} `json:"affected_docs"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
@@ -56,6 +66,19 @@ func TestRunAnalyzeImpactJSON(t *testing.T) {
 	}
 	if len(payload.Result.AffectedRefs) == 0 || len(payload.Result.AffectedDocs) == 0 {
 		t.Fatalf("impact result missing refs/docs: %+v", payload.Result)
+	}
+	foundStructuredDoc := false
+	for _, doc := range payload.Result.AffectedDocs {
+		if doc.Ref == "" {
+			continue
+		}
+		if doc.Classification != "" && doc.Evidence.SpecSourceRef != "" && doc.Evidence.DocSourceRef != "" && doc.Evidence.LinkReason != "" && len(doc.SuggestedTargets) > 0 && doc.SuggestedTargets[0].Section != "" {
+			foundStructuredDoc = true
+			break
+		}
+	}
+	if !foundStructuredDoc {
+		t.Fatalf("affected_docs = %+v, want structured evidence and suggested targets", payload.Result.AffectedDocs)
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
@@ -245,6 +268,8 @@ func TestRunAnalyzeImpactTextIncludesCrossRepoArtifacts(t *testing.T) {
 		"SPEC-200 | repo: shared | depends_on | Shared Repo Rollout",
 		"affected docs:",
 		"doc://shared/guides/api-rate-limits | repo: shared | source: docs/guides/api-rate-limits.md",
+		"evidence:",
+		"target:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("runAnalyzeImpact() output %q does not contain %q", out, want)

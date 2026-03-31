@@ -9,6 +9,11 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
+const (
+	impactDocClassificationSemanticNeighbor = "semantic_neighbor"
+	impactDocClassificationGovernedSurface  = "governed_surface_neighbor"
+)
+
 // AnalyzeImpactRequest is the normalized input for impact analysis.
 type AnalyzeImpactRequest struct {
 	SpecRef    string            `json:"spec_ref,omitempty"`
@@ -33,13 +38,41 @@ type ImpactedRef struct {
 	Kind string `json:"kind"`
 }
 
+// ImpactEvidence reports the concrete spec/doc sections that explain why one
+// document was shortlisted for follow-up during impact analysis.
+type ImpactEvidence struct {
+	SpecRef       string `json:"spec_ref"`
+	SpecTitle     string `json:"spec_title,omitempty"`
+	SpecSourceRef string `json:"spec_source_ref,omitempty"`
+	SpecSection   string `json:"spec_section,omitempty"`
+	SpecExcerpt   string `json:"spec_excerpt,omitempty"`
+	DocSourceRef  string `json:"doc_source_ref,omitempty"`
+	DocSection    string `json:"doc_section,omitempty"`
+	DocExcerpt    string `json:"doc_excerpt,omitempty"`
+	LinkReason    string `json:"link_reason,omitempty"`
+}
+
+// ImpactEditTarget reports the most likely doc section to inspect or revise
+// next when a spec change implies downstream edits.
+type ImpactEditTarget struct {
+	SourceRef        string   `json:"source_ref,omitempty"`
+	Section          string   `json:"section,omitempty"`
+	Excerpt          string   `json:"excerpt,omitempty"`
+	Reason           string   `json:"reason,omitempty"`
+	SuggestedBullets []string `json:"suggested_bullets,omitempty"`
+}
+
 // ImpactedDoc reports one semantically related document.
 type ImpactedDoc struct {
-	Ref       string  `json:"ref"`
-	Title     string  `json:"title"`
-	Repo      string  `json:"repo,omitempty"`
-	SourceRef string  `json:"source_ref"`
-	Score     float64 `json:"score"`
+	Ref              string             `json:"ref"`
+	Title            string             `json:"title"`
+	Repo             string             `json:"repo,omitempty"`
+	SourceRef        string             `json:"source_ref"`
+	Score            float64            `json:"score"`
+	Classification   string             `json:"classification,omitempty"`
+	Reasons          []string           `json:"reasons,omitempty"`
+	Evidence         *ImpactEvidence    `json:"evidence,omitempty"`
+	SuggestedTargets []ImpactEditTarget `json:"suggested_targets,omitempty"`
 }
 
 // AnalyzeImpactResult is the structured impact-analysis response.
@@ -208,12 +241,18 @@ func impactedDocs(candidate specDocument, docs map[string]docDocument) []Impacte
 		if score < 0.35 {
 			continue
 		}
+		classification, reasons := classifyImpactedDoc(candidate, doc)
+		evidence := impactDocEvidence(candidate, doc)
 		result = append(result, ImpactedDoc{
-			Ref:       doc.Record.Ref,
-			Title:     doc.Record.Title,
-			Repo:      artifactRepoID(doc.Record.Metadata),
-			SourceRef: doc.Record.SourceRef,
-			Score:     roundScore(score),
+			Ref:              doc.Record.Ref,
+			Title:            doc.Record.Title,
+			Repo:             artifactRepoID(doc.Record.Metadata),
+			SourceRef:        doc.Record.SourceRef,
+			Score:            roundScore(score),
+			Classification:   classification,
+			Reasons:          reasons,
+			Evidence:         evidence,
+			SuggestedTargets: impactEditTargets(doc, evidence, reasons),
 		})
 	}
 
@@ -230,6 +269,89 @@ func impactedDocs(candidate specDocument, docs map[string]docDocument) []Impacte
 
 func documentSimilarity(left, right []embeddedSection) float64 {
 	return bestSectionOverlap(left, right)
+}
+
+func classifyImpactedDoc(candidate specDocument, doc docDocument) (string, []string) {
+	if hasArtifactConstraintOverlap(artifactMentionSet(doc.Sections), candidate) {
+		return impactDocClassificationGovernedSurface, []string{
+			fmt.Sprintf("doc mentions a governed artifact or runtime surface constrained by %s", candidate.Record.Ref),
+		}
+	}
+	return impactDocClassificationSemanticNeighbor, []string{
+		fmt.Sprintf("doc contains the strongest semantic neighbor sections to %s and should be reviewed after this change", candidate.Record.Ref),
+	}
+}
+
+func impactDocEvidence(candidate specDocument, doc docDocument) *ImpactEvidence {
+	specSection, docSection, score := bestImpactSectionPair(candidate.Sections, doc.Sections)
+	if specSection == nil && docSection == nil {
+		return nil
+	}
+
+	evidence := &ImpactEvidence{
+		SpecRef:       candidate.Record.Ref,
+		SpecTitle:     candidate.Record.Title,
+		SpecSourceRef: candidate.Record.SourceRef,
+		DocSourceRef:  doc.Record.SourceRef,
+		LinkReason:    fmt.Sprintf("highest section-level semantic overlap between %s and %s (score %.3f)", candidate.Record.Ref, doc.Record.Ref, roundScore(score)),
+	}
+	if specSection != nil {
+		evidence.SpecSection = defaultString(stringsTrimSpace(specSection.Heading), "(body)")
+		evidence.SpecExcerpt = defaultString(sectionExcerpt(*specSection), stringsTrimSpace(candidate.Record.Title))
+	}
+	if docSection != nil {
+		evidence.DocSection = defaultString(stringsTrimSpace(docSection.Heading), "(body)")
+		evidence.DocExcerpt = sectionExcerpt(*docSection)
+	}
+	return evidence
+}
+
+func bestImpactSectionPair(left, right []embeddedSection) (*embeddedSection, *embeddedSection, float64) {
+	var (
+		bestLeft  *embeddedSection
+		bestRight *embeddedSection
+		bestScore float64
+	)
+	for i := range left {
+		for j := range right {
+			score := cosineSimilarity(left[i].Embedding, right[j].Embedding)
+			if score <= bestScore {
+				continue
+			}
+			leftCopy := left[i]
+			rightCopy := right[j]
+			bestLeft = &leftCopy
+			bestRight = &rightCopy
+			bestScore = score
+		}
+	}
+	return bestLeft, bestRight, bestScore
+}
+
+func impactEditTargets(doc docDocument, evidence *ImpactEvidence, reasons []string) []ImpactEditTarget {
+	if evidence == nil || stringsTrimSpace(evidence.DocSourceRef) == "" {
+		return nil
+	}
+
+	reason := ""
+	if len(reasons) > 0 {
+		reason = reasons[0]
+	}
+	bullets := []string{
+		fmt.Sprintf("Review %s in %s against %s / %s before editing downstream references.", defaultString(stringsTrimSpace(evidence.DocSection), "(body)"), doc.Record.Ref, evidence.SpecRef, defaultString(stringsTrimSpace(evidence.SpecSection), "(body)")),
+	}
+	if evidence.SpecExcerpt != "" {
+		bullets = append(bullets, "Carry forward the accepted spec excerpt rather than paraphrasing the change from memory.")
+	}
+	return []ImpactEditTarget{
+		{
+			SourceRef:        evidence.DocSourceRef,
+			Section:          evidence.DocSection,
+			Excerpt:          evidence.DocExcerpt,
+			Reason:           reason,
+			SuggestedBullets: bullets,
+		},
+	}
 }
 
 func isValidChangeType(changeType string) bool {
