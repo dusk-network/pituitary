@@ -102,7 +102,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 		if request.DiffText == "" && strings.TrimSpace(request.DiffFile) != "" {
 			request.DiffText, err = loadComplianceDiffFile(cfg.Workspace.RootPath, request.DiffFile)
 			if err != nil {
-				return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
+				return writeCLIError(stdout, stderr, format, "check-doc-drift", request, cliIssue{
 					Code:    "validation_error",
 					Message: err.Error(),
 				}, 2)

@@ -529,3 +529,39 @@ diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.
 		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
+
+func TestRunCheckDocDriftWithRequestFileDiffFileErrorJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	mustWriteJSONFileCmd(t, filepath.Join(repo, "doc-drift-request.json"), map[string]any{
+		"diff_file": "missing.patch",
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runCheckDocDrift([]string{"--request-file", "doc-drift-request.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckDocDrift() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckDocDrift() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			DiffFile string `json:"diff_file"`
+		} `json:"request"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal doc-drift request-file diff error payload: %v", err)
+	}
+	if got, want := payload.Request.DiffFile, "missing.patch"; got != want {
+		t.Fatalf("request.diff_file = %q, want %q", got, want)
+	}
+	if len(payload.Errors) != 1 || !strings.Contains(payload.Errors[0].Message, "missing.patch") {
+		t.Fatalf("errors = %+v, want diff-file validation error", payload.Errors)
+	}
+}
