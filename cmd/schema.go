@@ -214,6 +214,17 @@ func commandSchemaRegistry() map[string]schemaCommandSpec {
 			InputType:  analysis.DocDriftRequest{},
 			OutputType: analysis.DocDriftResult{},
 		},
+		"check-spec-freshness": {
+			Summary: schemaCommandSummary{
+				Name:                "check-spec-freshness",
+				Description:         commandDescription("check-spec-freshness"),
+				ConfigScoped:        true,
+				SupportsRequestFile: true,
+				SupportedFormats:    sortedCommandFormats("check-spec-freshness"),
+			},
+			InputType:  analysis.FreshnessRequest{},
+			OutputType: analysis.FreshnessResult{},
+		},
 		"check-overlap": {
 			Summary: schemaCommandSummary{
 				Name:                "check-overlap",

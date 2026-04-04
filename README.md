@@ -68,6 +68,7 @@ pituitary status                       # index health at a glance
 | Search specs semantically | `pituitary search-specs --query "rate limiting"` |
 | Trace impact of a spec change | `pituitary analyze-impact --path specs/X` |
 | Compare two specs | `pituitary compare-specs --path specs/A --path specs/B` |
+| Detect stale specs | `pituitary check-spec-freshness --scope all` |
 | Inspect command contracts | `pituitary schema review-spec --format json` |
 
 All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=json`, and redirected stdout defaults to JSON automatically. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.

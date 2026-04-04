@@ -29,6 +29,7 @@ const (
 	SourceRoleHistorical       = "historical"
 	SourceRoleGenerated        = "generated"
 	SourceRoleMirror           = "mirror"
+	SourceRoleDecisionLog      = "decision_log"
 	RuntimeProviderFixture     = "fixture"
 	RuntimeProviderOpenAI      = "openai_compatible"
 	RuntimeProviderDisabled    = "disabled"
@@ -808,7 +809,8 @@ func IsValidSourceRole(role string) bool {
 		SourceRolePlanning,
 		SourceRoleHistorical,
 		SourceRoleGenerated,
-		SourceRoleMirror:
+		SourceRoleMirror,
+		SourceRoleDecisionLog:
 		return true
 	default:
 		return false

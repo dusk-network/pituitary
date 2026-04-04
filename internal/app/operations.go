@@ -200,6 +200,15 @@ func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewR
 	})
 }
 
+// CheckSpecFreshness loads config, executes spec-freshness analysis, and classifies failures.
+func CheckSpecFreshness(ctx context.Context, configPath string, request analysis.FreshnessRequest) Response[analysis.FreshnessRequest, analysis.FreshnessResult] {
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*analysis.FreshnessResult, error) {
+		return analysis.CheckSpecFreshnessContext(ctx, cfg, request)
+	})
+}
+
 func loadConfig(configPath string) (*config.Config, *Issue) {
 	cfg, err := config.Load(configPath)
 	if err != nil {

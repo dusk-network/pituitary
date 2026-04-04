@@ -32,7 +32,7 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "init" || name == "new" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "fix" || name == "compile" || name == "review-spec" || name == "schema" {
+			if name == "canonicalize" || name == "discover" || name == "init" || name == "new" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "check-spec-freshness" || name == "fix" || name == "compile" || name == "review-spec" || name == "schema" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "discover" || name == "init" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
