@@ -43,6 +43,7 @@ func commandRegistry() map[string]commandSpec {
 		"check-terminology": {Description: "audit terminology consistency after conceptual changes", Formats: commandFormats(), Run: runCheckTerminologyContext},
 		"check-compliance":  {Description: "check code paths and diffs against accepted specs", Formats: commandFormats(), Run: runCheckComplianceContext},
 		"check-doc-drift":   {Description: "find docs that drift from specs", Formats: commandFormats(), Run: runCheckDocDriftContext},
+		"compile":           {Description: "apply terminology edits to align docs with governed terms", Formats: commandFormats(), Run: runCompileContext},
 		"fix":               {Description: "apply deterministic doc-drift remediations", Formats: commandFormats(), Run: runFixContext},
 		"review-spec":       {Description: "run the common spec-review workflow", Formats: commandFormats(commandFormatMarkdown, commandFormatHTML), Run: runReviewSpecContext},
 		"schema":            {Description: "describe machine-readable command contracts", Formats: commandFormats(), Run: runSchemaContext},

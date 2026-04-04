@@ -32,10 +32,13 @@ func TestRunKnownCommandsStayCallable(t *testing.T) {
 				return
 			}
 
-			if name == "canonicalize" || name == "discover" || name == "init" || name == "new" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "fix" || name == "review-spec" || name == "schema" {
+			if name == "canonicalize" || name == "discover" || name == "init" || name == "new" || name == "migrate-config" || name == "index" || name == "status" || name == "version" || name == "preview-sources" || name == "explain-file" || name == "search-specs" || name == "check-overlap" || name == "compare-specs" || name == "analyze-impact" || name == "check-terminology" || name == "check-compliance" || name == "check-doc-drift" || name == "fix" || name == "compile" || name == "review-spec" || name == "schema" {
 				repoRoot := writeSearchWorkspace(t)
 				if name == "discover" || name == "init" || name == "canonicalize" {
 					repoRoot = writeDiscoveryWorkspace(t)
+				}
+				if name == "compile" {
+					repoRoot = writeCompileWorkspaceCmd(t)
 				}
 				if name == "canonicalize" {
 					args = []string{name, "--path", "rfcs/service-sla.md"}
@@ -133,6 +136,8 @@ func buildLimiter() {}
 						args = []string{name, "--path", "src/api/middleware/ratelimiter.go"}
 					} else if name == "fix" {
 						args = []string{name, "--path", "docs/guides/api-rate-limits.md", "--dry-run"}
+					} else if name == "compile" {
+						args = []string{name, "--scope", "all", "--dry-run"}
 					} else if name == "review-spec" {
 						args = []string{name, "--spec-ref", "SPEC-042"}
 					} else {

@@ -60,6 +60,8 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 		renderDocDriftResult(w, typed)
 	case *app.FixResult:
 		renderFixResult(w, typed)
+	case *app.CompileResult:
+		renderCompileResult(w, typed)
 	case *analysis.ReviewResult:
 		renderReviewResult(w, typed)
 	case *schemaCatalogResult:
@@ -75,7 +77,7 @@ func renderCommandResult(w io.Writer, command string, result any) error {
 
 func usesSemanticTextRendering(command string) bool {
 	switch command {
-	case "check-doc-drift", "check-overlap", "review-spec", "check-compliance", "status", "init", "fix":
+	case "check-doc-drift", "check-overlap", "review-spec", "check-compliance", "status", "init", "fix", "compile":
 		return true
 	default:
 		return false
@@ -987,6 +989,55 @@ func renderFixResult(w io.Writer, result *app.FixResult) {
 			fmt.Fprintln(w)
 		}
 		renderFixPromptFile(w, result.Selector, file)
+		if file.Status == "applied" {
+			fmt.Fprintf(w, "    %s applied %d edit%s\n", p.check(), len(file.Edits), pluralSuffix(len(file.Edits)))
+		}
+		if file.Reason != "" {
+			fmt.Fprintf(w, "    %s %s\n", p.arrow(), file.Reason)
+		}
+		for _, warning := range file.Warnings {
+			fmt.Fprintf(w, "    %s %s\n", p.arrow(), warning)
+		}
+	}
+	if len(result.Guidance) > 0 {
+		fmt.Fprintln(w)
+		for _, guidance := range result.Guidance {
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+		}
+	}
+}
+
+func renderCompileResult(w io.Writer, result *app.CompileResult) {
+	p := presentationForWriter(w)
+	suffix := ""
+	if strings.TrimSpace(result.Scope) != "" {
+		suffix = " " + p.dim(result.Scope)
+	}
+	fmt.Fprintln(w, p.headerLine("compile", suffix))
+	fmt.Fprintln(w)
+
+	if len(result.Files) == 0 {
+		fmt.Fprintf(w, "  %s no actionable terminology edits found\n", p.info())
+		for _, guidance := range result.Guidance {
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+		}
+		return
+	}
+
+	for i, file := range result.Files {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "  %s\n\n", p.dim(file.Path))
+		if len(file.Edits) == 0 {
+			fmt.Fprintf(w, "    %s %s\n", p.info(), "no unambiguous terminology edits available")
+			continue
+		}
+		for _, edit := range file.Edits {
+			fmt.Fprintf(w, "    %s %s\n", p.red("-"), edit.Before)
+			fmt.Fprintf(w, "    %s %s\n", p.green("+"), edit.After)
+			fmt.Fprintln(w)
+		}
 		if file.Status == "applied" {
 			fmt.Fprintf(w, "    %s applied %d edit%s\n", p.check(), len(file.Edits), pluralSuffix(len(file.Edits)))
 		}
