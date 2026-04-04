@@ -356,6 +356,10 @@ func isPathContext(body string, start, end int) bool {
 		if prev == '_' {
 			return true
 		}
+		// Part of a scoped name: @openclaw (npm scopes, git refs)
+		if prev == '@' {
+			return true
+		}
 	}
 
 	// Check characters immediately after the match.
