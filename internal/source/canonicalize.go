@@ -14,9 +14,40 @@ import (
 // CanonicalizeOptions controls promotion of one inferred markdown contract into
 // an explicit spec bundle.
 type CanonicalizeOptions struct {
-	Path      string
-	BundleDir string
-	Write     bool
+	Path              string
+	BundleDir         string
+	Write             bool
+	MetadataInference *CanonicalizeInference
+}
+
+// CanonicalizeInference holds pre-computed model-inferred metadata to be
+// merged into the canonicalized spec record. This is populated by the caller
+// (cmd layer) to avoid import cycles between source and analysis.
+type CanonicalizeInference struct {
+	Domain     *InferredValue  `json:"domain,omitempty"`
+	Tags       *InferredValues `json:"tags,omitempty"`
+	AppliesTo  *InferredValues `json:"applies_to,omitempty"`
+	Status     *InferredValue  `json:"status,omitempty"`
+	DependsOn  []InferredRef   `json:"depends_on,omitempty"`
+	Supersedes []InferredRef   `json:"supersedes,omitempty"`
+}
+
+// InferredValue is a single model-inferred string with confidence.
+type InferredValue struct {
+	Value      string  `json:"value"`
+	Confidence float64 `json:"confidence"`
+}
+
+// InferredValues is a model-inferred string list with confidence.
+type InferredValues struct {
+	Values     []string `json:"values"`
+	Confidence float64  `json:"confidence"`
+}
+
+// InferredRef is a model-inferred spec relation with confidence.
+type InferredRef struct {
+	Ref        string  `json:"ref"`
+	Confidence float64 `json:"confidence"`
 }
 
 // CanonicalizeResult previews or writes one generated spec bundle.
@@ -74,6 +105,12 @@ func CanonicalizeMarkdownContract(options CanonicalizeOptions) (*CanonicalizeRes
 	}, sourcePath, body)
 	if err != nil {
 		return nil, err
+	}
+
+	// Semantic metadata enrichment: merge pre-computed model inference into
+	// the heuristic result when the caller provides it.
+	if options.MetadataInference != nil {
+		enrichCanonicalizeWithInference(&spec, options.MetadataInference)
 	}
 
 	bundleDir, err := canonicalizeBundleDir(workspaceRoot, sourcePath, options.BundleDir)
@@ -302,4 +339,129 @@ func collectRelationRefs(relations []model.Relation, relationType model.Relation
 		}
 	}
 	return refs
+}
+
+// enrichCanonicalizeWithInference merges pre-computed model inference into the
+// heuristic spec record, updating the confidence scoring system.
+func enrichCanonicalizeWithInference(spec *model.SpecRecord, inference *CanonicalizeInference) {
+	if inference == nil {
+		return
+	}
+
+	inferenceSource := "model"
+
+	// Domain: use model inference when heuristic left it empty.
+	if strings.TrimSpace(spec.Domain) == "" && inference.Domain != nil && inference.Domain.Value != "" {
+		spec.Domain = inference.Domain.Value
+		updateInferenceField(spec.Inference, "domain", inferenceSource, inference.Domain.Confidence)
+	}
+
+	// Tags: use model inference when heuristic produced none.
+	if len(spec.Tags) == 0 && inference.Tags != nil && len(inference.Tags.Values) > 0 {
+		spec.Tags = inference.Tags.Values
+		addInferenceField(spec.Inference, "tags", inferenceSource, inference.Tags.Confidence)
+	}
+
+	// AppliesTo: use model inference when heuristic produced none.
+	if len(spec.AppliesTo) == 0 && inference.AppliesTo != nil && len(inference.AppliesTo.Values) > 0 {
+		spec.AppliesTo = inference.AppliesTo.Values
+		addInferenceField(spec.Inference, "applies_to", inferenceSource, inference.AppliesTo.Confidence)
+	}
+
+	// Status: use model inference when heuristic defaulted to "draft".
+	if spec.Metadata != nil && spec.Metadata["status_source"] == "default" && inference.Status != nil {
+		spec.Status = inference.Status.Value
+		spec.Metadata["status_source"] = inferenceSource
+		updateInferenceField(spec.Inference, "status", inferenceSource, inference.Status.Confidence)
+	}
+
+	// DependsOn: add inferred relations with sufficient confidence, deduplicating
+	// against existing relations.
+	existingRelations := make(map[string]struct{}, len(spec.Relations))
+	for _, rel := range spec.Relations {
+		existingRelations[string(rel.Type)+"\x00"+rel.Ref] = struct{}{}
+	}
+
+	for _, dep := range inference.DependsOn {
+		ref := strings.TrimSpace(dep.Ref)
+		if ref == "" || dep.Confidence < 0.5 {
+			continue
+		}
+		key := string(model.RelationDependsOn) + "\x00" + ref
+		if _, exists := existingRelations[key]; exists {
+			continue
+		}
+		existingRelations[key] = struct{}{}
+		spec.Relations = append(spec.Relations, model.Relation{
+			Type: model.RelationDependsOn,
+			Ref:  ref,
+		})
+	}
+
+	// Supersedes: add inferred relations with sufficient confidence.
+	for _, sup := range inference.Supersedes {
+		ref := strings.TrimSpace(sup.Ref)
+		if ref == "" || sup.Confidence < 0.5 {
+			continue
+		}
+		key := string(model.RelationSupersedes) + "\x00" + ref
+		if _, exists := existingRelations[key]; exists {
+			continue
+		}
+		existingRelations[key] = struct{}{}
+		spec.Relations = append(spec.Relations, model.Relation{
+			Type: model.RelationSupersedes,
+			Ref:  ref,
+		})
+	}
+
+	// Recalculate overall confidence score.
+	if spec.Inference != nil && len(spec.Inference.Fields) > 0 {
+		total := 0.0
+		for _, f := range spec.Inference.Fields {
+			total += f.Score
+		}
+		spec.Inference.Score = total / float64(len(spec.Inference.Fields))
+		spec.Inference.Level = model.ConfidenceLevelFromScore(spec.Inference.Score)
+
+		hasModelField := false
+		for _, f := range spec.Inference.Fields {
+			if f.Source == inferenceSource {
+				hasModelField = true
+				break
+			}
+		}
+		if hasModelField {
+			spec.Inference.Reasons = append(spec.Inference.Reasons, "some fields inferred by analysis model")
+		}
+	}
+}
+
+// updateInferenceField updates an existing field in the inference confidence.
+func updateInferenceField(confidence *model.InferenceConfidence, name, source string, score float64) {
+	if confidence == nil {
+		return
+	}
+	for i := range confidence.Fields {
+		if confidence.Fields[i].Name == name {
+			confidence.Fields[i].Source = source
+			confidence.Fields[i].Score = score
+			confidence.Fields[i].Level = model.ConfidenceLevelFromScore(score)
+			return
+		}
+	}
+	addInferenceField(confidence, name, source, score)
+}
+
+// addInferenceField appends a new field to the inference confidence.
+func addInferenceField(confidence *model.InferenceConfidence, name, source string, score float64) {
+	if confidence == nil {
+		return
+	}
+	confidence.Fields = append(confidence.Fields, model.InferenceFieldConfidence{
+		Name:   name,
+		Source: source,
+		Score:  score,
+		Level:  model.ConfidenceLevelFromScore(score),
+	})
 }

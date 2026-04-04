@@ -101,17 +101,19 @@ type ComplianceRelevantSpec struct {
 
 // ComplianceFinding reports one compliant, conflicting, or unspecified item.
 type ComplianceFinding struct {
-	Path           string `json:"path"`
-	SpecRef        string `json:"spec_ref,omitempty"`
-	Title          string `json:"title,omitempty"`
-	SectionHeading string `json:"section_heading,omitempty"`
-	Code           string `json:"code"`
-	Message        string `json:"message"`
-	Traceability   string `json:"traceability,omitempty"`
-	LimitingFactor string `json:"limiting_factor,omitempty"`
-	Suggestion     string `json:"suggestion,omitempty"`
-	Expected       string `json:"expected,omitempty"`
-	Observed       string `json:"observed,omitempty"`
+	Path           string  `json:"path"`
+	SpecRef        string  `json:"spec_ref,omitempty"`
+	Title          string  `json:"title,omitempty"`
+	SectionHeading string  `json:"section_heading,omitempty"`
+	Code           string  `json:"code"`
+	Message        string  `json:"message"`
+	Traceability   string  `json:"traceability,omitempty"`
+	LimitingFactor string  `json:"limiting_factor,omitempty"`
+	Suggestion     string  `json:"suggestion,omitempty"`
+	Expected       string  `json:"expected,omitempty"`
+	Observed       string  `json:"observed,omitempty"`
+	Provenance     string  `json:"provenance,omitempty"`
+	Confidence     float64 `json:"confidence,omitempty"`
 }
 
 // ComplianceResult is the structured compliance output.
@@ -155,6 +157,11 @@ type parsedDiffTarget struct {
 	Removed []string
 }
 
+type complianceAdjudicationCandidate struct {
+	spec    specDocument
+	targets []complianceTarget
+}
+
 // CheckCompliance determines whether provided code or diffs align with accepted specs.
 func CheckCompliance(cfg *config.Config, request ComplianceRequest) (*ComplianceResult, error) {
 	return CheckComplianceContext(context.Background(), cfg, request)
@@ -195,6 +202,8 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	relevant := map[string]*complianceRelevantAccumulator{}
 
+	adjudicationCandidates := map[string]*complianceAdjudicationCandidate{}
+
 	for _, item := range evaluationTargets {
 		target := item.Target
 		if len(item.ExplicitRefs) == 0 {
@@ -223,6 +232,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 			}
 			addComplianceRelevantSpec(relevant, ref, target.Path, "applies_to")
 			assessment := assessComplianceSpec(spec, target)
+			assessment.Finding.Provenance = ProvenanceLiteral
 			switch assessment.Kind {
 			case "conflict":
 				result.Conflicts = append(result.Conflicts, assessment.Finding)
@@ -231,7 +241,31 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 			default:
 				result.Unspecified = append(result.Unspecified, assessment.Finding)
 			}
+
+			// Collect non-compliant targets for adjudication — targets already
+			// deterministically resolved as compliant are low-value for the
+			// model and would consume the per-request target budget.
+			if assessment.Kind != "compliant" {
+				if _, ok := adjudicationCandidates[ref]; !ok {
+					adjudicationCandidates[ref] = &complianceAdjudicationCandidate{spec: spec}
+				}
+				adjudicationCandidates[ref].targets = append(adjudicationCandidates[ref].targets, target)
+			}
 		}
+	}
+
+	// Semantic adjudication: if the analysis runtime is configured, use the
+	// model to find compliance violations that deterministic matching missed.
+	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	if err != nil {
+		return nil, err
+	}
+	if adjudicator, ok := analyzer.(complianceAdjudicator); ok && len(adjudicationCandidates) > 0 {
+		adjFindings, err := runComplianceAdjudication(ctx, adjudicator, repo, adjudicationCandidates, result)
+		if err != nil {
+			return nil, err
+		}
+		result.Conflicts = append(result.Conflicts, adjFindings...)
 	}
 
 	allSpecRefs := complianceRelevantSpecRefs(relevant)
@@ -247,6 +281,97 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	sortComplianceFindings(result.Conflicts)
 	sortComplianceFindings(result.Unspecified)
 	return result, nil
+}
+
+// runComplianceAdjudication sends narrowed targets to the analysis model for
+// semantic adjudication. Only findings that are genuinely new (not already
+// reported by deterministic evaluation) are returned.
+func runComplianceAdjudication(ctx context.Context, adjudicator complianceAdjudicator, repo *analysisRepository, candidates map[string]*complianceAdjudicationCandidate, existing *ComplianceResult) ([]ComplianceFinding, error) {
+	existingConflicts := make(map[string]struct{})
+	for _, finding := range existing.Conflicts {
+		existingConflicts[finding.Path+"\x00"+finding.SpecRef] = struct{}{}
+	}
+
+	var newFindings []ComplianceFinding
+	for ref, candidate := range candidates {
+		specPrompt := analysisSpecFromDocument(candidate.spec)
+
+		targets := make([]adjudicationTarget, 0, len(candidate.targets))
+		for _, target := range candidate.targets {
+			specSections := bestSpecSectionsForTarget(candidate.spec, target)
+			targets = append(targets, adjudicationTarget{
+				Path:     target.Path,
+				Content:  target.Content,
+				Sections: specSections,
+			})
+		}
+
+		response, err := adjudicator.AdjudicateCompliance(ctx, complianceAdjudicationRequest{
+			Spec:    specPrompt,
+			Targets: targets,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("adjudicate compliance for %s: %w", ref, err)
+		}
+
+		for _, adj := range response.Adjudications {
+			if adj.Classification != "conflict" {
+				continue
+			}
+			key := adj.Path + "\x00" + ref
+			if _, exists := existingConflicts[key]; exists {
+				continue
+			}
+			existingConflicts[key] = struct{}{}
+			newFindings = append(newFindings, ComplianceFinding{
+				Path:           adj.Path,
+				SpecRef:        ref,
+				Title:          candidate.spec.Record.Title,
+				SectionHeading: adj.ViolatedSection,
+				Code:           "semantic_conflict",
+				Message:        adj.Message,
+				Expected:       adj.Expected,
+				Observed:       adj.Observed,
+				Provenance:     ProvenanceModelAdjudication,
+				Confidence:     adj.Confidence,
+			})
+		}
+	}
+	return newFindings, nil
+}
+
+// bestSpecSectionsForTarget selects the spec sections most relevant to a
+// compliance target by embedding similarity, falling back to all sections.
+func bestSpecSectionsForTarget(spec specDocument, target complianceTarget) []analysisSectionPrompt {
+	if len(target.Embedding) == 0 || len(spec.Sections) == 0 {
+		return analysisSectionsFromEmbedded(spec.Sections)
+	}
+
+	type scored struct {
+		section embeddedSection
+		score   float64
+	}
+	candidates := make([]scored, 0, len(spec.Sections))
+	for _, section := range spec.Sections {
+		if len(section.Embedding) == 0 {
+			candidates = append(candidates, scored{section: section, score: 0})
+			continue
+		}
+		candidates = append(candidates, scored{
+			section: section,
+			score:   cosineSimilarity(target.Embedding, section.Embedding),
+		})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+
+	limit := minInt(len(candidates), analysisPromptSectionLimit)
+	sections := make([]embeddedSection, 0, limit)
+	for i := 0; i < limit; i++ {
+		sections = append(sections, candidates[i].section)
+	}
+	return analysisSectionsFromEmbedded(sections)
 }
 
 func normalizeComplianceRequest(request ComplianceRequest) (ComplianceRequest, error) {

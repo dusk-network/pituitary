@@ -191,6 +191,11 @@ func planCompileEdits(body string, finding analysis.TerminologyFinding) ([]plann
 			if strings.TrimSpace(match.Replacement) == "" {
 				continue
 			}
+			// Skip semantic near-miss matches — these are conceptual
+			// similarities where the literal term is intentionally absent.
+			if match.Provenance == analysis.ProvenanceEmbeddingSimilarity {
+				continue
+			}
 
 			indices := allMatchIndicesFold(body, match.Term)
 			if len(indices) == 0 {
