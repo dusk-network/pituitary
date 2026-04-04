@@ -113,6 +113,15 @@ func buildCompileFileResult(cfg *config.Config, finding analysis.TerminologyFind
 	// #nosec G304 -- path is resolved from a workspace source reference before reading.
 	bodyBytes, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return CompileFileResult{
+				Ref:       finding.Ref,
+				SourceRef: finding.SourceRef,
+				Path:      filepath.ToSlash(path),
+				Status:    "skipped",
+				Reason:    "source file no longer exists",
+			}, nil
+		}
 		return CompileFileResult{}, fmt.Errorf("read %s: %w", path, err)
 	}
 	body := string(bodyBytes)
