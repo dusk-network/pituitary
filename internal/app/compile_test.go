@@ -147,6 +147,131 @@ func TestCompileTerminologySkipsTolerated(t *testing.T) {
 	}
 }
 
+func TestCompileTerminologySkipsCodeBlocksAndPaths(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteCompileFile(t, filepath.Join(repo, "specs", "kernel-locality", "spec.toml"), `
+id = "SPEC-LOCALITY"
+title = "Kernel Locality Contract"
+status = "accepted"
+domain = "kernel"
+body = "body.md"
+`)
+	mustWriteCompileFile(t, filepath.Join(repo, "specs", "kernel-locality", "body.md"), `
+# Kernel Locality Contract
+
+## Core Model
+
+The kernel keeps continuity in clone-local state.
+`)
+	// Doc with term in prose, code block, inline code, and path context.
+	mustWriteCompileFile(t, filepath.Join(repo, "docs", "guides", "mixed-contexts.md"), strings.Join([]string{
+		"# Mixed Contexts",
+		"",
+		"The repo is the main workspace.",
+		"",
+		"```",
+		"cd ~/devel/repo/src",
+		"```",
+		"",
+		"See `repo.json` for config.",
+		"",
+		"Check /opt/repo/bin for binaries.",
+		"",
+		"Also see repo-server for details.",
+	}, "\n"))
+
+	configContent := strings.TrimSpace(`
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+docs_severity = "error"
+specs_severity = "warning"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md"]
+`) + "\n"
+
+	configPath := filepath.Join(repo, "pituitary.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild: %v", err)
+	}
+
+	operation := CompileTerminology(context.Background(), configPath, CompileRequest{
+		Scope: "all",
+		Apply: true,
+	})
+	if operation.Issue != nil {
+		t.Fatalf("CompileTerminology() issue = %+v", operation.Issue)
+	}
+
+	content, err := os.ReadFile(filepath.Join(repo, "docs", "guides", "mixed-contexts.md"))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	body := string(content)
+
+	// Prose "repo" should be replaced.
+	if strings.Contains(body, "The repo is") {
+		t.Error("prose 'repo' should have been replaced")
+	}
+	if !strings.Contains(body, "The locality is") {
+		t.Error("expected 'locality' in prose position")
+	}
+
+	// Code block content should be unchanged.
+	if !strings.Contains(body, "cd ~/devel/repo/src") {
+		t.Error("code block content should not be modified")
+	}
+
+	// Inline code should be unchanged.
+	if !strings.Contains(body, "`repo.json`") {
+		t.Error("inline code should not be modified")
+	}
+
+	// Path context should be unchanged.
+	if !strings.Contains(body, "/opt/repo/bin") {
+		t.Error("path context should not be modified")
+	}
+
+	// Hyphenated compound should be unchanged.
+	if !strings.Contains(body, "repo-server") {
+		t.Error("hyphenated compound should not be modified")
+	}
+}
+
 func TestPreserveCase(t *testing.T) {
 	t.Parallel()
 

@@ -177,6 +177,8 @@ func buildCompileFileResult(cfg *config.Config, finding analysis.TerminologyFind
 }
 
 func planCompileEdits(body string, finding analysis.TerminologyFinding) ([]plannedEdit, []string) {
+	codeRanges := buildCodeRanges(body)
+
 	// editByStart maps a start offset to the best (longest) edit at that position.
 	editByStart := make(map[int]plannedEdit)
 	warnings := make([]string, 0)
@@ -198,6 +200,17 @@ func planCompileEdits(body string, finding analysis.TerminologyFinding) ([]plann
 
 			for _, start := range indices {
 				end := start + len(match.Term)
+
+				// v2: skip matches inside code blocks or inline code spans.
+				if isInsideCodeRange(start, end, codeRanges) {
+					continue
+				}
+
+				// v2: skip matches that are part of a file path or compound identifier.
+				if isPathContext(body, start, end) {
+					continue
+				}
+
 				original := body[start:end]
 				replacement := preserveCase(original, match.Replacement)
 				line := 1 + strings.Count(body[:start], "\n")
@@ -251,6 +264,179 @@ func planCompileEdits(body string, finding analysis.TerminologyFinding) ([]plann
 	}
 
 	return resolved, warnings
+}
+
+// codeRange represents a byte range that is inside a code block or inline code span.
+type codeRange struct {
+	start, end int
+}
+
+// buildCodeRanges identifies all fenced code blocks (``` ... ```) and inline
+// code spans (` ... `) in the markdown body, returning their byte ranges.
+func buildCodeRanges(body string) []codeRange {
+	var ranges []codeRange
+
+	// Fenced code blocks: lines starting with ``` or ~~~
+	i := 0
+	for i < len(body) {
+		// Find start of fenced block.
+		lineStart := i
+		if i > 0 && body[i-1] != '\n' {
+			// Not at line start; advance to next line.
+			nl := strings.IndexByte(body[i:], '\n')
+			if nl < 0 {
+				break
+			}
+			i += nl + 1
+			continue
+		}
+
+		line := body[lineStart:]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+		}
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "```") && !strings.HasPrefix(trimmed, "~~~") {
+			nl := strings.IndexByte(body[i:], '\n')
+			if nl < 0 {
+				break
+			}
+			i += nl + 1
+			continue
+		}
+
+		fence := trimmed[:3]
+		fenceStart := lineStart
+
+		// Advance past opening fence line.
+		nl := strings.IndexByte(body[i:], '\n')
+		if nl < 0 {
+			ranges = append(ranges, codeRange{fenceStart, len(body)})
+			break
+		}
+		i += nl + 1
+
+		// Find closing fence.
+		closed := false
+		for i < len(body) {
+			closeLine := body[i:]
+			if nextNl := strings.IndexByte(closeLine, '\n'); nextNl >= 0 {
+				closeLine = closeLine[:nextNl]
+			}
+			closeEnd := i + len(closeLine)
+			if strings.IndexByte(closeLine, '\n') >= 0 {
+				closeEnd = i + strings.IndexByte(body[i:], '\n') + 1
+			} else {
+				closeEnd = len(body)
+			}
+
+			if strings.TrimSpace(closeLine) == fence {
+				ranges = append(ranges, codeRange{fenceStart, closeEnd})
+				nl2 := strings.IndexByte(body[i:], '\n')
+				if nl2 < 0 {
+					i = len(body)
+				} else {
+					i += nl2 + 1
+				}
+				closed = true
+				break
+			}
+
+			nl2 := strings.IndexByte(body[i:], '\n')
+			if nl2 < 0 {
+				i = len(body)
+				break
+			}
+			i += nl2 + 1
+		}
+		if !closed {
+			ranges = append(ranges, codeRange{fenceStart, len(body)})
+		}
+	}
+
+	// Inline code spans: `...` (not inside fenced blocks).
+	for idx := 0; idx < len(body); idx++ {
+		if body[idx] != '`' {
+			continue
+		}
+		// Skip if inside a fenced block.
+		if isInsideCodeRange(idx, idx+1, ranges) {
+			continue
+		}
+		// Find the closing backtick.
+		closeIdx := strings.IndexByte(body[idx+1:], '`')
+		if closeIdx < 0 {
+			break
+		}
+		closeIdx += idx + 1
+		// Only count single-backtick spans (not fenced).
+		if closeIdx > idx+1 {
+			ranges = append(ranges, codeRange{idx, closeIdx + 1})
+			idx = closeIdx
+		}
+	}
+
+	sort.Slice(ranges, func(i, j int) bool {
+		return ranges[i].start < ranges[j].start
+	})
+	return ranges
+}
+
+// isInsideCodeRange checks if a byte span [start, end) falls inside any code range.
+func isInsideCodeRange(start, end int, ranges []codeRange) bool {
+	for _, r := range ranges {
+		if start >= r.start && end <= r.end {
+			return true
+		}
+		if r.start > end {
+			break
+		}
+	}
+	return false
+}
+
+// isPathContext checks if a match at [start, end) in body appears to be part
+// of a file path, URL, or compound identifier that should not be rewritten.
+func isPathContext(body string, start, end int) bool {
+	// Check characters immediately before the match.
+	if start > 0 {
+		prev := body[start-1]
+		// Part of a path: /openclaw, ~/.openclaw, .openclaw
+		if prev == '/' || prev == '.' {
+			return true
+		}
+		// Part of a hyphenated compound: openclaw-server, openclaw-bridge
+		if prev == '-' {
+			return true
+		}
+	}
+
+	// Check characters immediately after the match.
+	if end < len(body) {
+		next := body[end]
+		// Part of a path: openclaw/foo
+		if next == '/' {
+			return true
+		}
+		// Part of a file extension: openclaw.json, openclaw.toml
+		// But NOT end-of-sentence punctuation: "...openclaw." or "...openclaw,"
+		if next == '.' && end+1 < len(body) {
+			afterDot := body[end+1]
+			if afterDot != ' ' && afterDot != '\n' && afterDot != '\r' && afterDot != ')' && afterDot != '"' && afterDot != '\'' {
+				return true
+			}
+		}
+		// Part of a hyphenated compound: openclaw-server
+		if next == '-' {
+			return true
+		}
+		// Part of a compound with underscore: openclaw_auth_token
+		if next == '_' {
+			return true
+		}
+	}
+
+	return false
 }
 
 // preserveCase adjusts the replacement to match the casing pattern of the original text.
