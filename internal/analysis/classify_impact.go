@@ -99,7 +99,7 @@ func normalizeImpactClassifications(classifications []impactSeverityClassificati
 		}
 		severity := strings.TrimSpace(c.Severity)
 		switch severity {
-		case ImpactSeverityBreaking, ImpactSeverityBehavioral, ImpactSeverityCosmetic:
+		case ImpactSeverityBreaking, ImpactSeverityBehavioral, ImpactSeverityCosmetic, ImpactSeverityUnknown:
 		default:
 			severity = ImpactSeverityUnknown
 		}

@@ -168,12 +168,14 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 
 	// Severity classification: if the analysis runtime is configured, use
 	// the model to classify impact severity for each affected item.
-	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
-	if err != nil {
-		return nil, err
-	}
+	// This is non-fatal enrichment — errors are swallowed so the
+	// deterministic result is always returned.
+	analyzer, _ := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if classifier, ok := analyzer.(impactSeverityClassifier); ok {
 		classifyImpactSeverities(ctx, classifier, candidate, result)
+		// Rebuild summary after severity is populated so severity-based
+		// priority overrides take effect.
+		result.RankedSummary = buildImpactSummary(result.AffectedSpecs, result.AffectedDocs, 5)
 	}
 
 	return result, nil
