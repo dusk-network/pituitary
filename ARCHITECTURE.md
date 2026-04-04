@@ -12,6 +12,7 @@ Pituitary is for managing 20-100+ specifications and the artifacts around them, 
 3. **Impact analysis** — understanding what changes when a spec is accepted, modified, or deprecated
 4. **Code compliance** — validating that code adheres to accepted specs, or flagging gaps
 5. **Documentation sync** — keeping non-spec docs aligned with accepted specs
+6. **Spec freshness** — detecting specs that may be stale or superseded by decisions recorded in decision-bearing artifacts
 
 The key constraint is that Pituitary should not be defined by one storage or workflow choice. Specifications may originate in local files, git repositories, PDFs, databases, or other systems. Pituitary's job is to normalize those inputs into a common analysis model, not to own source control, CI, or authoring.
 
@@ -172,6 +173,7 @@ When teams want more rigor, Pituitary may optionally generate an explicit spec b
 │  • analyze_impact                                            │
 │  • check_compliance                                          │
 │  • check_doc_drift                                           │
+│  • check_spec_freshness                                      │
 │  • search_specs                                              │
 │  • review_spec                                               │
 └──────────────────────────────┬───────────────────────────────┘

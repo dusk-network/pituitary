@@ -40,6 +40,8 @@ pituitary check-terminology --term repo \
   --canonical-term locality --spec-ref SPEC-042 # terminology migration audit
 pituitary fix --path docs/guides/api-rate-limits.md --dry-run  # preview deterministic drift fixes
 pituitary fix --scope all --yes                 # apply deterministic fixes without prompting
+pituitary check-spec-freshness --scope all      # detect specs that may be stale or superseded
+pituitary check-spec-freshness --spec-ref SPEC-042  # freshness check for one spec
 ```
 
 ## Compliance

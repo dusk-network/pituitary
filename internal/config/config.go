@@ -29,6 +29,7 @@ const (
 	SourceRoleHistorical       = "historical"
 	SourceRoleGenerated        = "generated"
 	SourceRoleMirror           = "mirror"
+	SourceRoleDecisionLog      = "decision_log"
 	RuntimeProviderFixture     = "fixture"
 	RuntimeProviderOpenAI      = "openai_compatible"
 	RuntimeProviderDisabled    = "disabled"
