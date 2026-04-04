@@ -276,3 +276,109 @@ func TestRunAnalyzeImpactTextIncludesCrossRepoArtifacts(t *testing.T) {
 		}
 	}
 }
+
+func TestRunAnalyzeImpactSummaryJSONIncludesRankedSummary(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runAnalyzeImpact([]string{"--spec-ref", "SPEC-100", "--summary", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef string `json:"spec_ref"`
+			Summary bool   `json:"summary"`
+		} `json:"request"`
+		Result struct {
+			SummaryOnly   bool `json:"summary_only"`
+			RankedSummary []struct {
+				Rank        int     `json:"rank"`
+				Kind        string  `json:"kind"`
+				Ref         string  `json:"ref"`
+				Repo        string  `json:"repo"`
+				Score       float64 `json:"score"`
+				Why         string  `json:"why"`
+				ReviewFirst string  `json:"review_first"`
+			} `json:"ranked_summary"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal impact payload: %v", err)
+	}
+	if !payload.Request.Summary || payload.Request.SpecRef != "SPEC-100" {
+		t.Fatalf("request = %+v, want summary=true for SPEC-100", payload.Request)
+	}
+	if !payload.Result.SummaryOnly {
+		t.Fatalf("result = %+v, want summary_only=true", payload.Result)
+	}
+	if len(payload.Result.RankedSummary) == 0 {
+		t.Fatal("ranked_summary is empty, want prioritized items")
+	}
+	first := payload.Result.RankedSummary[0]
+	if first.Rank != 1 || first.Kind != "spec" || first.Ref != "SPEC-200" || first.Repo != "shared" {
+		t.Fatalf("first ranked summary item = %+v, want shared dependent spec first", first)
+	}
+	foundDoc := false
+	for _, item := range payload.Result.RankedSummary {
+		if item.Kind == "doc" && item.Ref == "doc://shared/guides/api-rate-limits" && item.ReviewFirst != "" && item.Why != "" {
+			foundDoc = true
+			break
+		}
+	}
+	if !foundDoc {
+		t.Fatalf("ranked_summary = %+v, want shared doc follow-up entry", payload.Result.RankedSummary)
+	}
+}
+
+func TestRunAnalyzeImpactSummaryTextShowsOnlyRankedItems(t *testing.T) {
+	repo := writeMultiRepoSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runAnalyzeImpact([]string{"--spec-ref", "SPEC-100", "--summary"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runAnalyzeImpact() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runAnalyzeImpact() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"ranked summary:",
+		"1. spec SPEC-200 | repo: shared",
+		"review first:",
+		"doc://shared/guides/api-rate-limits",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runAnalyzeImpact(--summary) output %q does not contain %q", out, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"affected specs:",
+		"affected refs:",
+		"affected docs:",
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("runAnalyzeImpact(--summary) output %q unexpectedly contains %q", out, unwanted)
+		}
+	}
+}

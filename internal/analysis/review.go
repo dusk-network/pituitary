@@ -94,7 +94,7 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	if err != nil {
 		return nil, err
 	}
-	impact := buildAnalyzeImpactResult(candidate, "accepted", impactSpecs, impactDocs)
+	impact := buildAnalyzeImpactResult(candidate, "accepted", false, impactSpecs, impactDocs)
 
 	docDrift := &DocDriftResult{
 		Scope:      DocDriftScope{Mode: "doc_refs", DocRefs: []string{}},

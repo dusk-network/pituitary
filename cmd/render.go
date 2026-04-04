@@ -691,6 +691,34 @@ func renderCompareResult(w io.Writer, result *analysis.CompareResult) {
 
 func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult) {
 	fmt.Fprintf(w, "spec: %s | change_type: %s\n", result.SpecRef, result.ChangeType)
+	if len(result.RankedSummary) > 0 {
+		fmt.Fprintf(w, "ranked summary: %d\n", len(result.RankedSummary))
+		for _, item := range result.RankedSummary {
+			fmt.Fprintf(w, "%d. %s %s", item.Rank, item.Kind, item.Ref)
+			if item.Repo != "" {
+				fmt.Fprintf(w, " | repo: %s", item.Repo)
+			}
+			if item.SourceRef != "" {
+				fmt.Fprintf(w, " | source: %s", displaySourcePath(item.SourceRef))
+			}
+			if item.Score > 0 {
+				fmt.Fprintf(w, " | %.3f", item.Score)
+			}
+			if item.Title != "" {
+				fmt.Fprintf(w, " | %s", item.Title)
+			}
+			if item.Why != "" {
+				fmt.Fprintf(w, " | why: %s", item.Why)
+			}
+			if item.ReviewFirst != "" {
+				fmt.Fprintf(w, " | review first: %s", displayImpactSummaryTarget(item.ReviewFirst))
+			}
+			fmt.Fprintln(w)
+		}
+	}
+	if result.SummaryOnly {
+		return
+	}
 	fmt.Fprintf(w, "affected specs: %d\n", len(result.AffectedSpecs))
 	for _, item := range result.AffectedSpecs {
 		fmt.Fprintf(w, "- %s", item.Ref)
@@ -752,6 +780,14 @@ func renderAnalyzeImpactResult(w io.Writer, result *analysis.AnalyzeImpactResult
 			fmt.Fprintln(w)
 		}
 	}
+}
+
+func displayImpactSummaryTarget(value string) string {
+	head, tail, ok := strings.Cut(value, " / ")
+	if !ok {
+		return displaySourcePath(value)
+	}
+	return displaySourcePath(head) + " / " + tail
 }
 
 func renderComplianceResult(w io.Writer, result *analysis.ComplianceResult) {

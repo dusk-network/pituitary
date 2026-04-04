@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/runtimeprobe"
 )
@@ -133,6 +134,8 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 	if result == nil || result.Index == nil {
 		return nil
 	}
+	guidance := append([]string(nil), result.Guidance...)
+	guidance = append(guidance, statusResolutionGuidance(result.ConfigPath, resolution)...)
 	return &statusResult{
 		WorkspaceRoot:     result.WorkspaceRoot,
 		ConfigPath:        result.ConfigPath,
@@ -147,10 +150,10 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		DocCount:          result.Index.DocCount,
 		ChunkCount:        result.Index.ChunkCount,
 		Repos:             append([]index.RepoCoverage(nil), result.Index.Repos...),
-		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.Index.IndexPath),
+		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.ConfigPath, result.Index.IndexPath),
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,
-		Guidance:          append([]string(nil), result.Guidance...),
+		Guidance:          guidance,
 	}
 }
 
@@ -178,21 +181,28 @@ func newStatusRuntimeConfig(runtimeConfig *app.RuntimeConfigStatus) *statusRunti
 	}
 }
 
-func buildStatusArtifactLocations(workspaceRoot, indexPath string) *statusArtifactLocation {
+func buildStatusArtifactLocations(workspaceRoot, configPath, indexPath string) *statusArtifactLocation {
 	if strings.TrimSpace(workspaceRoot) == "" || strings.TrimSpace(indexPath) == "" {
 		return nil
 	}
 
 	indexDir := filepath.Dir(indexPath)
-	discoverConfigPath := filepath.Join(workspaceRoot, localConfigDirName, defaultConfigName)
-	canonicalizeBundleRoot := filepath.Join(workspaceRoot, localConfigDirName, "canonicalized")
+	artifactBaseDir := statusArtifactBaseDir(workspaceRoot, configPath)
+	discoverConfigPath := filepath.Join(artifactBaseDir, defaultConfigName)
+	canonicalizeBundleRoot := filepath.Join(artifactBaseDir, "canonicalized")
 
-	ignoreSet := map[string]struct{}{
-		filepath.ToSlash(localConfigDirName) + "/": {},
+	ignoreSet := map[string]struct{}{}
+	if cliPathWithinRoot(workspaceRoot, artifactBaseDir) {
+		artifactPattern := relativeStatusPath(workspaceRoot, artifactBaseDir)
+		if artifactPattern != "" && artifactPattern != "." {
+			ignoreSet[strings.TrimSuffix(filepath.ToSlash(artifactPattern), "/")+"/"] = struct{}{}
+		}
 	}
-	indexPattern := relativeStatusPath(workspaceRoot, indexPath)
-	if indexPattern != "" && indexPattern != "." && !strings.HasPrefix(indexPattern, filepath.ToSlash(localConfigDirName)+"/") {
-		ignoreSet[indexPattern] = struct{}{}
+	if cliPathWithinRoot(workspaceRoot, indexPath) {
+		indexPattern := relativeStatusPath(workspaceRoot, indexPath)
+		if indexPattern != "" && indexPattern != "." {
+			ignoreSet[indexPattern] = struct{}{}
+		}
 	}
 	ignorePatterns := make([]string, 0, len(ignoreSet))
 	for pattern := range ignoreSet {
@@ -211,6 +221,48 @@ func buildStatusArtifactLocations(workspaceRoot, indexPath string) *statusArtifa
 			"use `pituitary canonicalize --bundle-dir PATH` to place generated bundles elsewhere",
 		},
 	}
+}
+
+func statusArtifactBaseDir(workspaceRoot, configPath string) string {
+	defaultBase := filepath.Join(workspaceRoot, localConfigDirName)
+	if strings.TrimSpace(configPath) == "" {
+		return defaultBase
+	}
+	configDir := filepath.Dir(configPath)
+	if filepath.Base(configPath) == defaultConfigName && filepath.Base(configDir) == localConfigDirName {
+		return configDir
+	}
+	return defaultBase
+}
+
+func statusResolutionGuidance(selectedConfigPath string, resolution *configResolution) []string {
+	if resolution == nil || resolution.SelectedBy != configSourceDiscovery || strings.TrimSpace(selectedConfigPath) == "" {
+		return nil
+	}
+
+	selectedSearchDir := discoverySearchDir(selectedConfigPath)
+	for _, candidate := range resolution.Candidates {
+		if candidate.Source != configSourceDiscovery || candidate.Status != "shadowed" || strings.TrimSpace(candidate.Path) == "" {
+			continue
+		}
+		if discoverySearchDir(candidate.Path) == selectedSearchDir {
+			continue
+		}
+
+		cfg, err := config.Load(candidate.Path)
+		if err != nil || len(cfg.Workspace.Repos) == 0 {
+			continue
+		}
+		return []string{
+			fmt.Sprintf(
+				"selected config %s shadows parent multirepo config %s; use `pituitary --config %s ...` when you intend to operate on the shared workspace",
+				filepath.ToSlash(selectedConfigPath),
+				filepath.ToSlash(candidate.Path),
+				filepath.ToSlash(candidate.Path),
+			),
+		}
+	}
+	return nil
 }
 
 func relativeStatusPath(root, path string) string {
