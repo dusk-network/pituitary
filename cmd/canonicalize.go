@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
@@ -101,12 +102,12 @@ func runCanonicalizeContext(ctx context.Context, args []string, stdout, stderr i
 func runCanonicalizeInference(ctx context.Context, cfg *config.Config, path string) *source.CanonicalizeInference {
 	// Read the file to get body text and title.
 	absPath := path
-	if !strings.HasPrefix(absPath, "/") {
+	if !filepath.IsAbs(absPath) {
 		wd, err := os.Getwd()
 		if err != nil {
 			return nil
 		}
-		absPath = wd + "/" + absPath
+		absPath = filepath.Join(wd, absPath)
 	}
 	// #nosec G304 -- path is user-provided CLI argument for a local file.
 	body, err := os.ReadFile(absPath)

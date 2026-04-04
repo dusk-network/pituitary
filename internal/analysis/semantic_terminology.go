@@ -49,16 +49,24 @@ func semanticTerminologyNearMisses(ctx context.Context, cfg *config.Config, repo
 	}
 
 	// Build embedding queries from governed terms: "term: <preferred> (replaces: <displaced>)"
+	// Sort keys for deterministic selection when truncating at the max limit.
 	type queryEntry struct {
 		term      string
 		preferred string
 	}
+	sortedKeys := make([]string, 0, len(governed))
+	for key := range governed {
+		sortedKeys = append(sortedKeys, key)
+	}
+	sort.Strings(sortedKeys)
+
 	entries := make([]queryEntry, 0, len(governed))
 	texts := make([]string, 0, len(governed))
-	for _, rule := range governed {
+	for _, key := range sortedKeys {
 		if len(entries) >= semanticTerminologyMaxTerms {
 			break
 		}
+		rule := governed[key]
 		queryText := fmt.Sprintf("terminology: %s (replaces: %s)", rule.PreferredTerm, rule.Term)
 		entries = append(entries, queryEntry{term: rule.Term, preferred: rule.PreferredTerm})
 		texts = append(texts, queryText)

@@ -242,11 +242,15 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 				result.Unspecified = append(result.Unspecified, assessment.Finding)
 			}
 
-			// Collect targets for adjudication regardless of deterministic outcome.
-			if _, ok := adjudicationCandidates[ref]; !ok {
-				adjudicationCandidates[ref] = &complianceAdjudicationCandidate{spec: spec}
+			// Collect non-compliant targets for adjudication — targets already
+			// deterministically resolved as compliant are low-value for the
+			// model and would consume the per-request target budget.
+			if assessment.Kind != "compliant" {
+				if _, ok := adjudicationCandidates[ref]; !ok {
+					adjudicationCandidates[ref] = &complianceAdjudicationCandidate{spec: spec}
+				}
+				adjudicationCandidates[ref].targets = append(adjudicationCandidates[ref].targets, target)
 			}
-			adjudicationCandidates[ref].targets = append(adjudicationCandidates[ref].targets, target)
 		}
 	}
 
@@ -318,6 +322,7 @@ func runComplianceAdjudication(ctx context.Context, adjudicator complianceAdjudi
 			if _, exists := existingConflicts[key]; exists {
 				continue
 			}
+			existingConflicts[key] = struct{}{}
 			newFindings = append(newFindings, ComplianceFinding{
 				Path:           adj.Path,
 				SpecRef:        ref,

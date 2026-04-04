@@ -829,6 +829,8 @@ func classifyTerminologyTermMatch(term string, artifact terminologyArtifact, tex
 			Context:        context,
 			Severity:       severity,
 			Tolerated:      tolerated,
+			Provenance:     ProvenanceLiteral,
+			Confidence:     1.0,
 		}
 		if replacement := terminologyReplacementTerm(term, rule.PreferredTerm, tolerated); replacement != "" {
 			match.Replacement = replacement
@@ -850,6 +852,8 @@ func classifyTerminologyTermMatch(term string, artifact terminologyArtifact, tex
 		Severity:       severity,
 		Replacement:    replacement,
 		Tolerated:      tolerated,
+		Provenance:     ProvenanceLiteral,
+		Confidence:     1.0,
 	}
 	if replacement == "" {
 		match.PreferredTerm = ""

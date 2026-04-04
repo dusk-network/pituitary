@@ -375,24 +375,44 @@ func enrichCanonicalizeWithInference(spec *model.SpecRecord, inference *Canonica
 		updateInferenceField(spec.Inference, "status", inferenceSource, inference.Status.Confidence)
 	}
 
-	// DependsOn: add inferred relations with sufficient confidence.
+	// DependsOn: add inferred relations with sufficient confidence, deduplicating
+	// against existing relations.
+	existingRelations := make(map[string]struct{}, len(spec.Relations))
+	for _, rel := range spec.Relations {
+		existingRelations[string(rel.Type)+"\x00"+rel.Ref] = struct{}{}
+	}
+
 	for _, dep := range inference.DependsOn {
-		if dep.Confidence >= 0.5 {
-			spec.Relations = append(spec.Relations, model.Relation{
-				Type: model.RelationDependsOn,
-				Ref:  dep.Ref,
-			})
+		ref := strings.TrimSpace(dep.Ref)
+		if ref == "" || dep.Confidence < 0.5 {
+			continue
 		}
+		key := string(model.RelationDependsOn) + "\x00" + ref
+		if _, exists := existingRelations[key]; exists {
+			continue
+		}
+		existingRelations[key] = struct{}{}
+		spec.Relations = append(spec.Relations, model.Relation{
+			Type: model.RelationDependsOn,
+			Ref:  ref,
+		})
 	}
 
 	// Supersedes: add inferred relations with sufficient confidence.
 	for _, sup := range inference.Supersedes {
-		if sup.Confidence >= 0.5 {
-			spec.Relations = append(spec.Relations, model.Relation{
-				Type: model.RelationSupersedes,
-				Ref:  sup.Ref,
-			})
+		ref := strings.TrimSpace(sup.Ref)
+		if ref == "" || sup.Confidence < 0.5 {
+			continue
 		}
+		key := string(model.RelationSupersedes) + "\x00" + ref
+		if _, exists := existingRelations[key]; exists {
+			continue
+		}
+		existingRelations[key] = struct{}{}
+		spec.Relations = append(spec.Relations, model.Relation{
+			Type: model.RelationSupersedes,
+			Ref:  ref,
+		})
 	}
 
 	// Recalculate overall confidence score.
