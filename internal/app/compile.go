@@ -275,109 +275,52 @@ type codeRange struct {
 // code spans (` ... `) in the markdown body, returning their byte ranges.
 func buildCodeRanges(body string) []codeRange {
 	var ranges []codeRange
+	lines := strings.SplitAfter(body, "\n")
 
-	// Fenced code blocks: lines starting with ``` or ~~~
-	i := 0
-	for i < len(body) {
-		// Find start of fenced block.
-		lineStart := i
-		if i > 0 && body[i-1] != '\n' {
-			// Not at line start; advance to next line.
-			nl := strings.IndexByte(body[i:], '\n')
-			if nl < 0 {
-				break
+	// Pass 1: fenced code blocks.
+	offset := 0
+	inFence := false
+	fenceStart := 0
+	fenceMarker := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimRight(line, "\n\r"))
+		if !inFence {
+			if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+				inFence = true
+				fenceMarker = trimmed[:3]
+				fenceStart = offset
 			}
-			i += nl + 1
-			continue
+		} else if trimmed == fenceMarker {
+			ranges = append(ranges, codeRange{fenceStart, offset + len(line)})
+			inFence = false
 		}
-
-		line := body[lineStart:]
-		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
-			line = line[:nl]
-		}
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "```") && !strings.HasPrefix(trimmed, "~~~") {
-			nl := strings.IndexByte(body[i:], '\n')
-			if nl < 0 {
-				break
-			}
-			i += nl + 1
-			continue
-		}
-
-		fence := trimmed[:3]
-		fenceStart := lineStart
-
-		// Advance past opening fence line.
-		nl := strings.IndexByte(body[i:], '\n')
-		if nl < 0 {
-			ranges = append(ranges, codeRange{fenceStart, len(body)})
-			break
-		}
-		i += nl + 1
-
-		// Find closing fence.
-		closed := false
-		for i < len(body) {
-			closeLine := body[i:]
-			if nextNl := strings.IndexByte(closeLine, '\n'); nextNl >= 0 {
-				closeLine = closeLine[:nextNl]
-			}
-			closeEnd := i + len(closeLine)
-			if strings.IndexByte(closeLine, '\n') >= 0 {
-				closeEnd = i + strings.IndexByte(body[i:], '\n') + 1
-			} else {
-				closeEnd = len(body)
-			}
-
-			if strings.TrimSpace(closeLine) == fence {
-				ranges = append(ranges, codeRange{fenceStart, closeEnd})
-				nl2 := strings.IndexByte(body[i:], '\n')
-				if nl2 < 0 {
-					i = len(body)
-				} else {
-					i += nl2 + 1
-				}
-				closed = true
-				break
-			}
-
-			nl2 := strings.IndexByte(body[i:], '\n')
-			if nl2 < 0 {
-				i = len(body)
-				break
-			}
-			i += nl2 + 1
-		}
-		if !closed {
-			ranges = append(ranges, codeRange{fenceStart, len(body)})
-		}
+		offset += len(line)
+	}
+	if inFence {
+		ranges = append(ranges, codeRange{fenceStart, len(body)})
 	}
 
-	// Inline code spans: `...` (not inside fenced blocks).
+	// Pass 2: inline code spans (not inside fenced blocks).
 	for idx := 0; idx < len(body); idx++ {
 		if body[idx] != '`' {
 			continue
 		}
-		// Skip if inside a fenced block.
 		if isInsideCodeRange(idx, idx+1, ranges) {
 			continue
 		}
-		// Find the closing backtick.
 		closeIdx := strings.IndexByte(body[idx+1:], '`')
 		if closeIdx < 0 {
 			break
 		}
 		closeIdx += idx + 1
-		// Only count single-backtick spans (not fenced).
 		if closeIdx > idx+1 {
 			ranges = append(ranges, codeRange{idx, closeIdx + 1})
 			idx = closeIdx
 		}
 	}
 
-	sort.Slice(ranges, func(i, j int) bool {
-		return ranges[i].start < ranges[j].start
+	sort.Slice(ranges, func(a, b int) bool {
+		return ranges[a].start < ranges[b].start
 	})
 	return ranges
 }
@@ -405,8 +348,12 @@ func isPathContext(body string, start, end int) bool {
 		if prev == '/' || prev == '.' {
 			return true
 		}
-		// Part of a hyphenated compound: openclaw-server, openclaw-bridge
+		// Part of a hyphenated compound: openclaw-server, my-openclaw
 		if prev == '-' {
+			return true
+		}
+		// Part of an underscored compound: openclaw_auth, env_openclaw
+		if prev == '_' {
 			return true
 		}
 	}

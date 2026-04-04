@@ -166,6 +166,7 @@ body = "body.md"
 The kernel keeps continuity in clone-local state.
 `)
 	// Doc with term in prose, code block, inline code, and path context.
+	// Crucially: prose AFTER a code block must still be replaced.
 	mustWriteCompileFile(t, filepath.Join(repo, "docs", "guides", "mixed-contexts.md"), strings.Join([]string{
 		"# Mixed Contexts",
 		"",
@@ -180,6 +181,8 @@ The kernel keeps continuity in clone-local state.
 		"Check /opt/repo/bin for binaries.",
 		"",
 		"Also see repo-server for details.",
+		"",
+		"The repo after the code block should also change.",
 	}, "\n"))
 
 	configContent := strings.TrimSpace(`
@@ -269,6 +272,14 @@ include = ["guides/*.md"]
 	// Hyphenated compound should be unchanged.
 	if !strings.Contains(body, "repo-server") {
 		t.Error("hyphenated compound should not be modified")
+	}
+
+	// Prose AFTER a code block should be replaced (regression for fence-close bug).
+	if strings.Contains(body, "The repo after the code block") {
+		t.Error("prose after code block should be modified")
+	}
+	if !strings.Contains(body, "The locality after the code block") {
+		t.Error("expected 'locality' in prose after code block")
 	}
 }
 

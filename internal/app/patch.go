@@ -71,7 +71,7 @@ func applyEdits(path, expectedContent, expectedChecksum string, edits []plannedE
 	}
 	current := string(currentBytes)
 	if contentChecksum(current) != expectedChecksum || current != expectedContent {
-		return fmt.Errorf("%s changed since fix planning; rerun `pituitary fix` against a fresh index", filepath.ToSlash(path))
+		return fmt.Errorf("%s changed since edit planning; rerun the command against a fresh index", filepath.ToSlash(path))
 	}
 
 	updated := current
