@@ -69,13 +69,15 @@ type TerminologySectionFinding struct {
 
 // TerminologyTermMatch reports the policy treatment for one matched term in a section.
 type TerminologyTermMatch struct {
-	Term           string `json:"term"`
-	PreferredTerm  string `json:"preferred_term,omitempty"`
-	Classification string `json:"classification,omitempty"`
-	Context        string `json:"context,omitempty"`
-	Severity       string `json:"severity,omitempty"`
-	Replacement    string `json:"replacement,omitempty"`
-	Tolerated      bool   `json:"tolerated,omitempty"`
+	Term           string  `json:"term"`
+	PreferredTerm  string  `json:"preferred_term,omitempty"`
+	Classification string  `json:"classification,omitempty"`
+	Context        string  `json:"context,omitempty"`
+	Severity       string  `json:"severity,omitempty"`
+	Replacement    string  `json:"replacement,omitempty"`
+	Tolerated      bool    `json:"tolerated,omitempty"`
+	Provenance     string  `json:"provenance,omitempty"`
+	Confidence     float64 `json:"confidence,omitempty"`
 }
 
 // TerminologyFinding reports one offending doc or spec.
@@ -188,6 +190,37 @@ func CheckTerminologyContext(ctx context.Context, cfg *config.Config, request Te
 
 	matchers := compileTerminologyMatchers(normalized.Terms)
 	findings, tolerated := auditTerminologyArtifacts(artifacts, matchers, normalized.GovernedTerms, normalized.CanonicalTerms, evidenceSections)
+
+	// Semantic near-miss detection: if a real embedder is configured, search
+	// for chunks that are conceptually similar to governed terms but don't
+	// contain the literal term string.
+	semanticMatches, err := semanticTerminologyNearMisses(ctx, cfg, repo, normalized.GovernedTerms, normalized.TerminologyAuditRequest)
+	if err != nil {
+		warnings = append(warnings, Warning{
+			Code:    "semantic_terminology_unavailable",
+			Message: fmt.Sprintf("semantic near-miss search failed: %v", err),
+		})
+	} else if len(semanticMatches) > 0 {
+		// Filter out semantic matches for artifacts already in findings to
+		// avoid duplicating work.
+		existingRefs := make(map[string]struct{}, len(findings)+len(tolerated))
+		for _, f := range findings {
+			existingRefs[f.Ref] = struct{}{}
+		}
+		for _, f := range tolerated {
+			existingRefs[f.Ref] = struct{}{}
+		}
+		var newMatches []semanticTerminologyMatch
+		for _, m := range semanticMatches {
+			if _, exists := existingRefs[m.ArtifactRef]; !exists {
+				newMatches = append(newMatches, m)
+			}
+		}
+		if len(newMatches) > 0 {
+			semanticFindings := convertSemanticMatchesToFindings(newMatches, normalized.GovernedTerms)
+			findings = append(findings, semanticFindings...)
+		}
+	}
 
 	warningSpecs := make([]specDocument, 0, len(anchors))
 	warningSpecs = append(warningSpecs, anchors...)
