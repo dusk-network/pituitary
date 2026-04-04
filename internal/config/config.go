@@ -809,7 +809,8 @@ func IsValidSourceRole(role string) bool {
 		SourceRolePlanning,
 		SourceRoleHistorical,
 		SourceRoleGenerated,
-		SourceRoleMirror:
+		SourceRoleMirror,
+		SourceRoleDecisionLog:
 		return true
 	default:
 		return false

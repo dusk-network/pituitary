@@ -108,6 +108,11 @@ func CheckSpecFreshnessContext(ctx context.Context, cfg *config.Config, request 
 	if err != nil {
 		return nil, err
 	}
+	for _, ref := range specRefs {
+		if _, ok := specs[ref]; !ok {
+			return nil, newSpecRefNotFoundError(ref)
+		}
+	}
 
 	allDocs, err := repo.loadAllDocs()
 	if err != nil {
@@ -117,6 +122,15 @@ func CheckSpecFreshnessContext(ctx context.Context, cfg *config.Config, request 
 	allSpecs, err := repo.loadAllSpecs()
 	if err != nil {
 		return nil, err
+	}
+
+	// Precompute doc classification once outside the per-spec loop.
+	decisionDocs := filterDecisionBearingDocs(allDocs)
+	nonDecisionDocs := make(map[string]docDocument, len(allDocs)-len(decisionDocs))
+	for ref, doc := range allDocs {
+		if !isDecisionBearingDoc(doc) {
+			nonDecisionDocs[ref] = doc
+		}
 	}
 
 	items := make([]FreshnessItem, 0, len(specs))
@@ -140,7 +154,6 @@ func CheckSpecFreshnessContext(ctx context.Context, cfg *config.Config, request 
 		var signals []FreshnessSignal
 
 		// Signal 1: decision-trail — search decision-bearing docs for contradictions.
-		decisionDocs := filterDecisionBearingDocs(allDocs)
 		if len(decisionDocs) > 0 {
 			trailSignals := decisionTrailSignals(spec, decisionDocs)
 			signals = append(signals, trailSignals...)
@@ -151,7 +164,7 @@ func CheckSpecFreshnessContext(ctx context.Context, cfg *config.Config, request 
 		signals = append(signals, foundationSignals...)
 
 		// Signal 3: contradictory — reverse of doc-drift; docs disagree with spec.
-		contradictorySignals := contradictoryDocSignals(spec, allDocs)
+		contradictorySignals := contradictoryDocSignals(spec, nonDecisionDocs)
 		signals = append(signals, contradictorySignals...)
 
 		item.Signals = signals
@@ -204,7 +217,7 @@ func normalizeFreshnessScope(request FreshnessRequest, repo *analysisRepository)
 // isDecisionBearingDoc identifies docs that serve as decision-trail artifacts
 // based on their source role metadata or file path conventions.
 func isDecisionBearingDoc(doc docDocument) bool {
-	role := doc.Record.Metadata[sourceRoleMetadataKey]
+	role := config.NormalizeSourceRole(doc.Record.Metadata[sourceRoleMetadataKey])
 	switch role {
 	case config.SourceRoleDecisionLog, config.SourceRoleCurrentState:
 		return true
@@ -498,13 +511,18 @@ func scoreToConfidence(score float64) string {
 }
 
 func truncateExcerpt(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return "..."
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
 	// Find last space before limit to avoid mid-word truncation.
+	prefix := string(runes[:maxLen])
 	cut := maxLen
-	if idx := strings.LastIndex(s[:maxLen], " "); idx > maxLen/2 {
+	if idx := strings.LastIndex(prefix, " "); idx > maxLen/2 {
 		cut = idx
 	}
-	return s[:cut] + "..."
+	return string(runes[:cut]) + "..."
 }
