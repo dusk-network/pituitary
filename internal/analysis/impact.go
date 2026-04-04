@@ -25,13 +25,16 @@ type AnalyzeImpactRequest struct {
 
 // ImpactedSpec reports one affected spec.
 type ImpactedSpec struct {
-	Ref          string                     `json:"ref"`
-	Title        string                     `json:"title"`
-	Repo         string                     `json:"repo,omitempty"`
-	Status       string                     `json:"status,omitempty"`
-	Relationship string                     `json:"relationship"`
-	Historical   bool                       `json:"historical"`
-	Inference    *model.InferenceConfidence `json:"inference,omitempty"`
+	Ref                string                     `json:"ref"`
+	Title              string                     `json:"title"`
+	Repo               string                     `json:"repo,omitempty"`
+	Status             string                     `json:"status,omitempty"`
+	Relationship       string                     `json:"relationship"`
+	Historical         bool                       `json:"historical"`
+	Inference          *model.InferenceConfidence `json:"inference,omitempty"`
+	Severity           string                     `json:"severity,omitempty"`
+	SeverityConfidence float64                    `json:"severity_confidence,omitempty"`
+	SeverityReason     string                     `json:"severity_reason,omitempty"`
 }
 
 // ImpactedRef reports one affected code or config reference.
@@ -66,15 +69,18 @@ type ImpactEditTarget struct {
 
 // ImpactedDoc reports one semantically related document.
 type ImpactedDoc struct {
-	Ref              string             `json:"ref"`
-	Title            string             `json:"title"`
-	Repo             string             `json:"repo,omitempty"`
-	SourceRef        string             `json:"source_ref"`
-	Score            float64            `json:"score"`
-	Classification   string             `json:"classification,omitempty"`
-	Reasons          []string           `json:"reasons,omitempty"`
-	Evidence         *ImpactEvidence    `json:"evidence,omitempty"`
-	SuggestedTargets []ImpactEditTarget `json:"suggested_targets,omitempty"`
+	Ref                string             `json:"ref"`
+	Title              string             `json:"title"`
+	Repo               string             `json:"repo,omitempty"`
+	SourceRef          string             `json:"source_ref"`
+	Score              float64            `json:"score"`
+	Classification     string             `json:"classification,omitempty"`
+	Reasons            []string           `json:"reasons,omitempty"`
+	Evidence           *ImpactEvidence    `json:"evidence,omitempty"`
+	SuggestedTargets   []ImpactEditTarget `json:"suggested_targets,omitempty"`
+	Severity           string             `json:"severity,omitempty"`
+	SeverityConfidence float64            `json:"severity_confidence,omitempty"`
+	SeverityReason     string             `json:"severity_reason,omitempty"`
 }
 
 // ImpactSummaryItem captures one high-priority follow-up target.
@@ -88,6 +94,7 @@ type ImpactSummaryItem struct {
 	Score       float64 `json:"score,omitempty"`
 	Why         string  `json:"why,omitempty"`
 	ReviewFirst string  `json:"review_first,omitempty"`
+	Severity    string  `json:"severity,omitempty"`
 }
 
 // AnalyzeImpactResult is the structured impact-analysis response.
@@ -157,7 +164,19 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 		return nil, err
 	}
 
-	return buildAnalyzeImpactResult(candidate, request.ChangeType, request.Summary, specs, docs), nil
+	result := buildAnalyzeImpactResult(candidate, request.ChangeType, request.Summary, specs, docs)
+
+	// Severity classification: if the analysis runtime is configured, use
+	// the model to classify impact severity for each affected item.
+	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	if err != nil {
+		return nil, err
+	}
+	if classifier, ok := analyzer.(impactSeverityClassifier); ok {
+		classifyImpactSeverities(ctx, classifier, candidate, result)
+	}
+
+	return result, nil
 }
 
 func buildAnalyzeImpactResult(candidate *specDocument, changeType string, summaryOnly bool, specs map[string]specDocument, docs map[string]docDocument) *AnalyzeImpactResult {
@@ -296,6 +315,7 @@ func buildImpactSummary(specs []ImpactedSpec, docs []ImpactedDoc, limit int) []I
 	type scoredSummary struct {
 		item     ImpactSummaryItem
 		priority int
+		severity string
 		score    float64
 	}
 
@@ -315,8 +335,10 @@ func buildImpactSummary(specs []ImpactedSpec, docs []ImpactedDoc, limit int) []I
 				Repo:        item.Repo,
 				Why:         why,
 				ReviewFirst: impactSummarySpecTarget(item),
+				Severity:    item.Severity,
 			},
 			priority: priority,
+			severity: item.Severity,
 		})
 	}
 	for _, item := range docs {
@@ -334,10 +356,26 @@ func buildImpactSummary(specs []ImpactedSpec, docs []ImpactedDoc, limit int) []I
 				Score:       item.Score,
 				Why:         impactSummaryDocReason(item),
 				ReviewFirst: impactSummaryDocTarget(item),
+				Severity:    item.Severity,
 			},
 			priority: priority,
+			severity: item.Severity,
 			score:    item.Score,
 		})
+	}
+
+	// Severity-based priority override: when the model has classified
+	// severity, use it to promote or demote items regardless of the
+	// default heuristic priority.
+	for i := range scored {
+		switch scored[i].severity {
+		case ImpactSeverityBreaking:
+			scored[i].priority = 0
+		case ImpactSeverityBehavioral:
+			scored[i].priority = 1
+		case ImpactSeverityCosmetic:
+			scored[i].priority = 3
+		}
 	}
 
 	sort.Slice(scored, func(i, j int) bool {

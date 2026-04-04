@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -26,6 +27,7 @@ type newCommandDefaults struct {
 	ConfigPath    string
 	SourceName    string
 	SourceHasFile bool
+	Config        *config.Config
 	Warnings      []source.NewSpecBundleWarning
 }
 
@@ -110,6 +112,11 @@ func runNewContext(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if defaults.ConfigPath != "" {
 		result.ConfigPath = filepath.ToSlash(defaults.ConfigPath)
 	}
+	// Run semantic overlap pre-check if index is available.
+	if defaults.Config != nil {
+		overlapWarnings := checkNewSpecOverlap(ctx, defaults.Config, request.Title)
+		result.Warnings = append(result.Warnings, overlapWarnings...)
+	}
 	result.Warnings = append(result.Warnings, defaults.Warnings...)
 	appendNewConfigWarnings(result, defaults)
 
@@ -151,6 +158,7 @@ func resolveNewCommandDefaults(ctx context.Context) (newCommandDefaults, error) 
 	}
 
 	defaults.WorkspaceRoot = cfg.Workspace.RootPath
+	defaults.Config = cfg
 	defaults.ConfigPath = resolvedConfigPath
 	selectedSource := firstFilesystemSpecSource(cfg)
 	if selectedSource == nil {
@@ -224,4 +232,28 @@ func pathWithinRootNew(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func checkNewSpecOverlap(ctx context.Context, cfg *config.Config, title string) []source.NewSpecBundleWarning {
+	searchResult, err := index.SearchSpecsContext(ctx, cfg, index.SearchSpecQuery{
+		Query:    title,
+		Kind:     "spec",
+		Statuses: []string{"draft", "review", "accepted"},
+		Limit:    3,
+	})
+	if err != nil || searchResult == nil {
+		return nil
+	}
+
+	const overlapThreshold = 0.50
+	var warnings []source.NewSpecBundleWarning
+	for _, match := range searchResult.Matches {
+		if match.Score >= overlapThreshold {
+			warnings = append(warnings, source.NewSpecBundleWarning{
+				Code:    "similar_spec_exists",
+				Message: fmt.Sprintf("existing spec %s %q has %.0f%% similarity to the proposed title; review before proceeding", match.Ref, match.Title, match.Score*100),
+			})
+		}
+	}
+	return warnings
 }
