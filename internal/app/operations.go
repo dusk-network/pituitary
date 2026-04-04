@@ -166,6 +166,15 @@ func CheckTerminology(ctx context.Context, configPath string, request analysis.T
 	})
 }
 
+// CompileTerminology loads config, runs terminology analysis, plans deterministic edits, and optionally applies them.
+func CompileTerminology(ctx context.Context, configPath string, request CompileRequest) Response[CompileRequest, CompileResult] {
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: analysis.IsNotFound,
+	}, func(cfg *config.Config) (*CompileResult, error) {
+		return runCompileTerminology(ctx, cfg, request)
+	})
+}
+
 // CheckDocDrift loads config, executes doc drift analysis, and classifies failures.
 func CheckDocDrift(ctx context.Context, configPath string, request analysis.DocDriftRequest) Response[analysis.DocDriftRequest, analysis.DocDriftResult] {
 	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
