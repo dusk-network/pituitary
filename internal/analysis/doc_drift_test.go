@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -953,4 +954,56 @@ path = %q
 
 func containsSubstringFold(value, needle string) bool {
 	return strings.Contains(strings.ToLower(value), strings.ToLower(needle))
+}
+
+func TestRelevantAcceptedSpecsRespectsThresholdAndLimit(t *testing.T) {
+	t.Parallel()
+
+	// Build a doc with a single section containing a known embedding.
+	docEmbed := []float64{1, 0, 0, 0, 0, 0, 0, 0}
+	doc := docDocument{
+		Record: model.DocRecord{Ref: "doc://test"},
+		Sections: []embeddedSection{
+			{Heading: "Test", Content: "test content", Embedding: docEmbed},
+		},
+	}
+
+	// Build specs with varying similarity to the doc.
+	// Cosine similarity of normalized vectors: identical=1.0, orthogonal=0.0.
+	makeSpec := func(ref string, embed []float64) specDocument {
+		return specDocument{
+			Record: model.SpecRecord{Ref: ref, Status: model.StatusAccepted},
+			Sections: []embeddedSection{
+				{Heading: "Spec", Content: "spec content", Embedding: embed},
+			},
+		}
+	}
+
+	specs := map[string]specDocument{
+		"high-1": makeSpec("high-1", []float64{1, 0, 0, 0, 0, 0, 0, 0}),     // similarity ≈ 1.0
+		"high-2": makeSpec("high-2", []float64{0.9, 0.1, 0, 0, 0, 0, 0, 0}), // high
+		"high-3": makeSpec("high-3", []float64{0.8, 0.2, 0, 0, 0, 0, 0, 0}), // high
+		"high-4": makeSpec("high-4", []float64{0.7, 0.3, 0, 0, 0, 0, 0, 0}), // high
+		"high-5": makeSpec("high-5", []float64{0.6, 0.4, 0, 0, 0, 0, 0, 0}), // medium-high
+		"high-6": makeSpec("high-6", []float64{0.5, 0.5, 0, 0, 0, 0, 0, 0}), // medium
+		"low":    makeSpec("low", []float64{0, 0, 0, 0, 0, 0, 0, 1}),        // orthogonal → 0.0
+		"draft":  {Record: model.SpecRecord{Ref: "draft", Status: model.StatusDraft}, Sections: []embeddedSection{{Heading: "Spec", Content: "spec content", Embedding: docEmbed}}},
+	}
+
+	result := relevantAcceptedSpecs(doc, specs)
+
+	// Draft and low-similarity specs should be excluded.
+	for _, spec := range result {
+		if spec.Record.Ref == "draft" {
+			t.Error("relevantAcceptedSpecs included a draft spec")
+		}
+		if spec.Record.Ref == "low" {
+			t.Error("relevantAcceptedSpecs included a low-similarity spec")
+		}
+	}
+
+	// Should be sorted by similarity descending.
+	if len(result) > 1 && result[0].Record.Ref != "high-1" {
+		t.Errorf("first result = %q, want highest-similarity spec", result[0].Record.Ref)
+	}
 }

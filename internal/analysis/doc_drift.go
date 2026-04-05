@@ -26,6 +26,8 @@ const (
 	driftClassificationSemantic = "semantic_contradiction"
 	driftClassificationRole     = "role_mismatch"
 	sourceRoleMetadataKey       = "source_role"
+	docDriftRelevantSpecLimit   = 5
+	docDriftSimilarityThreshold = 0.45
 )
 
 type docDocument struct {
@@ -378,8 +380,12 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 
 		for i, p := range pending {
 			g.Go(func() error {
-				relevantByRef := make(map[string]specDocument, len(p.relevant))
-				for _, spec := range p.relevant {
+				shortlist := p.relevant
+				if len(shortlist) > docDriftRelevantSpecLimit {
+					shortlist = shortlist[:docDriftRelevantSpecLimit]
+				}
+				relevantByRef := make(map[string]specDocument, len(shortlist))
+				for _, spec := range shortlist {
 					relevantByRef[spec.Record.Ref] = spec
 				}
 				rItem, rRemediation, err := analyzer.RefineDocDrift(gctx, p.doc, relevantByRef, *p.item, p.remediation)
@@ -839,7 +845,7 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		if hasArtifactConstraintOverlap(docArtifacts, spec) {
 			score += 0.4
 		}
-		if score < 0.35 {
+		if score < docDriftSimilarityThreshold {
 			continue
 		}
 		entry := scoredSpec{spec: spec, score: score}

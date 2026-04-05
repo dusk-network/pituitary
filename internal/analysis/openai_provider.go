@@ -75,7 +75,7 @@ const (
 	openAICompatibleCompareSystemPrompt  = "You are Pituitary's compare-specs adjudicator. Use only the provided spec evidence. Return only one JSON object with keys shared_scope, differences, tradeoffs, compatibility, and recommendation. Preserve spec refs exactly. Keep every difference items array concise and limited to concrete design choices from the provided specs."
 	openAICompatibleDocDriftSystemPrompt = "You are Pituitary's doc-drift adjudicator. Use only the provided deterministic findings and cited spec/doc evidence. Return only one JSON object with keys findings and suggestions. Do not invent new finding codes or spec refs. Findings must correspond to the provided deterministic findings, and suggestions must stay actionable and bounded to the same contradictions."
 	analysisPromptSectionLimit           = 6
-	analysisPromptSectionContentLimit    = 700
+	analysisPromptSectionContentLimit    = 500
 	openAICompatibleAnalysisRuntime      = "runtime.analysis"
 )
 
