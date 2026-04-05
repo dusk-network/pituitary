@@ -83,7 +83,7 @@ pituitary migrate-config --path pituitary.toml --write  # upgrade legacy config
 pituitary serve --config .pituitary/pituitary.toml  # start MCP server over stdio
 ```
 
-Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`.
+Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, `explain_file`.
 
 ## Output Formats
 

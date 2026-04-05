@@ -388,6 +388,265 @@ func TestReviewSpecToolReturnsStructuredResult(t *testing.T) {
 	}
 }
 
+func TestCheckComplianceToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "check_compliance",
+			Arguments: map[string]any{
+				"diff_text": "--- a/main.go\n+++ b/main.go\n@@ -1,3 +1,3 @@\n-old line\n+new line\n context\n",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(check_compliance) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(check_compliance) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Paths []string `json:"paths"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if len(payload.Paths) == 0 {
+		t.Fatal("check_compliance returned no paths")
+	}
+}
+
+func TestGovernedByToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "governed_by",
+			Arguments: map[string]any{
+				"path": "src/api/middleware/ratelimiter.go",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(governed_by) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(governed_by) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Path  string `json:"path"`
+		Specs []struct {
+			Ref string `json:"ref"`
+		} `json:"specs"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if payload.Path == "" {
+		t.Fatal("governed_by returned empty path")
+	}
+}
+
+func TestStatusToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "status",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(status) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(status) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		IndexExists bool `json:"index_exists"`
+		SpecCount   int  `json:"spec_count"`
+		DocCount    int  `json:"doc_count"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if !payload.IndexExists {
+		t.Fatal("status reports index does not exist")
+	}
+	if payload.SpecCount == 0 {
+		t.Fatal("status reports 0 specs")
+	}
+}
+
+func TestCheckTerminologyToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "check_terminology",
+			Arguments: map[string]any{
+				"terms": []any{"rate limit"},
+				"scope": "all",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(check_terminology) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(check_terminology) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Scope struct {
+			Mode string `json:"mode"`
+		} `json:"scope"`
+		Terms []string `json:"terms"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if len(payload.Terms) == 0 {
+		t.Fatal("check_terminology returned no terms")
+	}
+}
+
+func TestCompilePreviewToolReturnsToolResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	// The test workspace has no terminology policies, so compile_preview returns
+	// a tool error. Verify the tool responds without a transport error.
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "compile_preview",
+			Arguments: map[string]any{
+				"scope": "all",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(compile_preview) error = %v", err)
+	}
+	// Tool error is expected (no terminology policies) — verify it's not a crash.
+	if !result.IsError {
+		var payload struct {
+			Applied bool `json:"applied"`
+		}
+		decodeStructuredContent(t, result.StructuredContent, &payload)
+		if payload.Applied {
+			t.Fatal("compile_preview should not apply edits")
+		}
+	}
+}
+
+func TestFixPreviewToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "fix_preview",
+			Arguments: map[string]any{
+				"scope": "all",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(fix_preview) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(fix_preview) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Selector string `json:"selector"`
+		Applied  bool   `json:"applied"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if payload.Applied {
+		t.Fatal("fix_preview should not apply edits")
+	}
+}
+
+func TestExplainFileToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+	workspaceRoot := filepath.Dir(configPath)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "explain_file",
+			Arguments: map[string]any{
+				"path": filepath.Join(workspaceRoot, "specs", "rate-limit-v2", "spec.toml"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(explain_file) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(explain_file) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Summary struct {
+			Status string `json:"status"`
+		} `json:"summary"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if payload.Summary.Status == "" {
+		t.Fatal("explain_file returned empty summary status")
+	}
+}
+
 func TestSearchSpecsToolHonorsCanceledContext(t *testing.T) {
 	t.Parallel()
 
@@ -636,11 +895,18 @@ func toolResultText(result *mcpgo.CallToolResult) string {
 func shippedToolNames() []string {
 	return []string{
 		"analyze_impact",
+		"check_compliance",
 		"check_doc_drift",
 		"check_overlap",
+		"check_terminology",
 		"compare_specs",
+		"compile_preview",
+		"explain_file",
+		"fix_preview",
+		"governed_by",
 		"review_spec",
 		"search_specs",
+		"status",
 	}
 }
 
