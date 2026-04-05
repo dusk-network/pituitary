@@ -102,9 +102,11 @@ sudo install pituitary /usr/local/bin/
 
 **Build from source** (contributors): see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 
-## Use It From Your Editor
+## Stop Your Agent From Building on Stale Decisions
 
-Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add it to Claude Code, Cursor, Windsurf, or any MCP-compatible client:
+Pituitary integrates with every major AI coding assistant. Pick your tool:
+
+### MCP Server (Claude Code, Cursor, Windsurf, or any MCP client)
 
 ```json
 {
@@ -117,9 +119,29 @@ Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add
 }
 ```
 
-Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, verifying terminology governance mid-edit, previewing deterministic fixes, or looking up which specs govern a file before writing code.
+Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`.
 
-If your editor prefers shared skills or repo policy files instead of MCP, use the package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md). The CCD-style install path is to copy `skills/pituitary-cli/` into a host skill directory such as `~/.claude/skills/pituitary-cli/`, `~/.codex/skills/pituitary-cli/`, or `~/.gemini/skills/pituitary-cli/`. For AGENTS-aware tools, use the repo's canonical [AGENTS.md](AGENTS.md); generated mirrors like [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility outputs, not separate policy sources.
+### Shared Skills (Claude Code, Cowork, Codex CLI, Gemini CLI)
+
+```sh
+cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli   # Claude Code
+cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli    # Codex CLI
+cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli   # Gemini CLI
+```
+
+### Editor Rules (Cursor, Windsurf, Cline)
+
+```sh
+cp skills/pituitary-cli/platforms/cursor/.cursorrules .cursorrules        # Cursor
+cp skills/pituitary-cli/platforms/windsurf/.windsurfrules .windsurfrules  # Windsurf
+cp skills/pituitary-cli/platforms/cline/.clinerules .clinerules           # Cline
+```
+
+### AGENTS-Aware Tools (Codex CLI, Gemini CLI, and others)
+
+The repo's [AGENTS.md](AGENTS.md) is the canonical project policy. Tools that read `AGENTS.md` get Pituitary awareness automatically. Generated mirrors ([CLAUDE.md](CLAUDE.md), [GEMINI.md](GEMINI.md)) are compatibility outputs, not separate policy sources.
+
+See [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md) for the full install guide, request templates, and security notes.
 
 ## Use It in CI
 
