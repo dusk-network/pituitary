@@ -203,6 +203,7 @@ func statusTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"status",
 		mcpgo.WithDescription("Check index freshness and workspace health."),
+		mcpgo.WithInputSchema[struct{}](),
 		mcpgo.WithOutputSchema[mcpStatusResult](),
 	)
 	return mcpserver.ServerTool{
@@ -337,9 +338,10 @@ func compilePreviewHandler(options Options) mcpgo.TypedToolHandlerFunc[compilePr
 func fixPreviewHandler(options Options) mcpgo.TypedToolHandlerFunc[fixPreviewArgs] {
 	return func(ctx context.Context, request mcpgo.CallToolRequest, args fixPreviewArgs) (*mcpgo.CallToolResult, error) {
 		operation := app.FixDocDrift(ctx, options.normalized().ConfigPath, app.FixRequest{
-			Path:  args.Path,
-			Scope: args.Scope,
-			Apply: false,
+			Path:    args.Path,
+			Scope:   args.Scope,
+			DocRefs: args.DocRefs,
+			Apply:   false,
 		})
 		if operation.Issue != nil {
 			return mcpgo.NewToolResultError(operation.Issue.Message), nil

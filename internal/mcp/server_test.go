@@ -537,6 +537,78 @@ func TestCheckTerminologyToolReturnsStructuredResult(t *testing.T) {
 	}
 }
 
+func TestCompilePreviewToolReturnsToolResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	// The test workspace has no terminology policies, so compile_preview returns
+	// a tool error. Verify the tool responds without a transport error.
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "compile_preview",
+			Arguments: map[string]any{
+				"scope": "all",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(compile_preview) error = %v", err)
+	}
+	// Tool error is expected (no terminology policies) — verify it's not a crash.
+	if !result.IsError {
+		var payload struct {
+			Applied bool `json:"applied"`
+		}
+		decodeStructuredContent(t, result.StructuredContent, &payload)
+		if payload.Applied {
+			t.Fatal("compile_preview should not apply edits")
+		}
+	}
+}
+
+func TestFixPreviewToolReturnsStructuredResult(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeMCPWorkspace(t)
+
+	srv, err := mcptest.NewServer(t, Tools(Options{ConfigPath: configPath})...)
+	if err != nil {
+		t.Fatalf("mcptest.NewServer() error = %v", err)
+	}
+	t.Cleanup(srv.Close)
+
+	result, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "fix_preview",
+			Arguments: map[string]any{
+				"scope": "all",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(fix_preview) error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("CallTool(fix_preview) returned tool error: %+v", result)
+	}
+
+	var payload struct {
+		Selector string `json:"selector"`
+		Applied  bool   `json:"applied"`
+	}
+	decodeStructuredContent(t, result.StructuredContent, &payload)
+	if payload.Applied {
+		t.Fatal("fix_preview should not apply edits")
+	}
+}
+
 func TestExplainFileToolReturnsStructuredResult(t *testing.T) {
 	t.Parallel()
 

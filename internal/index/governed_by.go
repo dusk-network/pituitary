@@ -24,6 +24,9 @@ type GoverningSpecsResult struct {
 // match any of the candidate refs derived from the given workspace-relative path.
 func GovernedByContext(ctx context.Context, dbPath string, path string) (*GoverningSpecsResult, error) {
 	normalized := normalizePath(path)
+	if normalized == "" || normalized == "." {
+		return nil, fmt.Errorf("governed_by requires a non-empty file path")
+	}
 	refs := governedRefsForPath(normalized)
 
 	db, err := OpenReadOnlyContext(ctx, dbPath)
