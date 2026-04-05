@@ -26,6 +26,8 @@ const (
 	driftClassificationSemantic = "semantic_contradiction"
 	driftClassificationRole     = "role_mismatch"
 	sourceRoleMetadataKey       = "source_role"
+	docDriftRelevantSpecLimit   = 5
+	docDriftSimilarityThreshold = 0.45
 )
 
 type docDocument struct {
@@ -839,7 +841,7 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 		if hasArtifactConstraintOverlap(docArtifacts, spec) {
 			score += 0.4
 		}
-		if score < 0.35 {
+		if score < docDriftSimilarityThreshold {
 			continue
 		}
 		entry := scoredSpec{spec: spec, score: score}
@@ -859,6 +861,10 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 			return scored[i].spec.Record.Ref < scored[j].spec.Record.Ref
 		}
 	})
+
+	if len(scored) > docDriftRelevantSpecLimit {
+		scored = scored[:docDriftRelevantSpecLimit]
+	}
 
 	result := make([]specDocument, 0, len(scored))
 	for _, item := range scored {
