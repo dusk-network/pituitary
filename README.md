@@ -125,13 +125,13 @@ Pituitary integrates with every major AI coding assistant. Pick your tool:
 
 Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`.
 
-### Shared Skills (Claude Code, Cowork, Codex CLI, Gemini CLI)
+### Shared Skills (Claude Code, Cowork)
 
 ```sh
-cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli   # Claude Code
-cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli    # Codex CLI
-cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli   # Gemini CLI
+cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli
 ```
+
+Codex CLI and Gemini CLI get project policy from `AGENTS.md` / `GEMINI.md` automatically. For the full Pituitary analysis workflow, also install the skill package: `cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli` or `~/.gemini/skills/`.
 
 ### Editor Rules (Cursor, Windsurf, Cline)
 

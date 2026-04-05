@@ -16,8 +16,8 @@ That same split applies here.
 |---|---|---|---|
 | Claude Code | `SKILL.md` in skill directory | Copy `skills/pituitary-cli/` to `~/.claude/skills/` | Ready |
 | Cowork | `SKILL.md` in skill directory | Copy `skills/pituitary-cli/` to host skill directory | Ready |
-| Codex CLI | `AGENTS.md` in repo root | Already shipped — use the repo's `AGENTS.md` | Ready |
-| Gemini CLI | `GEMINI.md` in repo root | Already shipped — generated from `AGENTS.md` | Ready |
+| Codex CLI | `AGENTS.md` (policy) or skill directory (workflow) | Policy: use repo's `AGENTS.md`. Workflow: copy to `~/.codex/skills/` | Ready |
+| Gemini CLI | `GEMINI.md` (policy) or skill directory (workflow) | Policy: use repo's `GEMINI.md`. Workflow: copy to `~/.gemini/skills/` | Ready |
 | Cursor | `.cursorrules` in workspace root | Copy from `platforms/cursor/.cursorrules` | Ready |
 | Windsurf | `.windsurfrules` in workspace root | Copy from `platforms/windsurf/.windsurfrules` | Ready |
 | Cline | `.clinerules` in workspace root | Copy from `platforms/cline/.clinerules` | Ready |
@@ -27,24 +27,25 @@ That same split applies here.
 
 Copy the entire `skills/pituitary-cli/` directory so `SKILL.md`, `references/`, `examples/`, and `agents/openai.yaml` stay together.
 
-### Skill-aware hosts (Claude Code, Cowork, Codex CLI, Gemini CLI)
+### Skill-aware hosts (Claude Code, Cowork)
 
 ```sh
-# Global install — pick the hosts you use
+# Global install
 cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli
-cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli
-cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli
 ```
 
 ```sh
 # Repo-local install
-mkdir -p .claude/skills .codex/skills .gemini/skills
+mkdir -p .claude/skills
 cp -R skills/pituitary-cli .claude/skills/pituitary-cli
-cp -R skills/pituitary-cli .codex/skills/pituitary-cli
-cp -R skills/pituitary-cli .gemini/skills/pituitary-cli
 ```
 
-Use the host locations that your tooling actually reads; you do not need all of them.
+Codex CLI and Gemini CLI support both repo-root policy files (`AGENTS.md` / `GEMINI.md`) and shared skill directories. If you only need project policy, the repo-root files are already shipped. If you also want the Pituitary analysis workflow (decision matrix, execution protocol, request templates), install the skill package:
+
+```sh
+cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli    # Codex CLI
+cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli   # Gemini CLI
+```
 
 ### Cursor
 
