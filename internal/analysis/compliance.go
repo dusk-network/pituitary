@@ -9,12 +9,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 	complianceWeakSuggestionThreshold     = 0.25
 	complianceFactorSpecMetadataGap       = "spec_metadata_gap"
 	complianceFactorCodeEvidenceGap       = "code_evidence_gap"
+	adjudicationConcurrency               = 4
 )
 
 var complianceRequestsPerMinutePattern = regexp.MustCompile(`(?i)\b(\d+)\s+requests?\s+per\s+minute\b`)
@@ -292,41 +295,68 @@ func runComplianceAdjudication(ctx context.Context, adjudicator complianceAdjudi
 		existingConflicts[finding.Path+"\x00"+finding.SpecRef] = struct{}{}
 	}
 
-	var newFindings []ComplianceFinding
+	type adjudicationResult struct {
+		ref       string
+		candidate *complianceAdjudicationCandidate
+		response  *complianceAdjudicationResponse
+	}
+
+	var (
+		mu      sync.Mutex
+		results []adjudicationResult
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(adjudicationConcurrency)
+
 	for ref, candidate := range candidates {
-		specPrompt := analysisSpecFromDocument(candidate.spec)
+		g.Go(func() error {
+			specPrompt := analysisSpecFromDocument(candidate.spec)
 
-		targets := make([]adjudicationTarget, 0, len(candidate.targets))
-		for _, target := range candidate.targets {
-			specSections := bestSpecSectionsForTarget(candidate.spec, target)
-			targets = append(targets, adjudicationTarget{
-				Path:     target.Path,
-				Content:  target.Content,
-				Sections: specSections,
+			targets := make([]adjudicationTarget, 0, len(candidate.targets))
+			for _, target := range candidate.targets {
+				specSections := bestSpecSectionsForTarget(candidate.spec, target)
+				targets = append(targets, adjudicationTarget{
+					Path:     target.Path,
+					Content:  target.Content,
+					Sections: specSections,
+				})
+			}
+
+			response, err := adjudicator.AdjudicateCompliance(gctx, complianceAdjudicationRequest{
+				Spec:    specPrompt,
+				Targets: targets,
 			})
-		}
+			if err != nil {
+				return fmt.Errorf("adjudicate compliance for %s: %w", ref, err)
+			}
 
-		response, err := adjudicator.AdjudicateCompliance(ctx, complianceAdjudicationRequest{
-			Spec:    specPrompt,
-			Targets: targets,
+			mu.Lock()
+			results = append(results, adjudicationResult{ref: ref, candidate: candidate, response: response})
+			mu.Unlock()
+			return nil
 		})
-		if err != nil {
-			return nil, fmt.Errorf("adjudicate compliance for %s: %w", ref, err)
-		}
+	}
 
-		for _, adj := range response.Adjudications {
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	var newFindings []ComplianceFinding
+	for _, r := range results {
+		for _, adj := range r.response.Adjudications {
 			if adj.Classification != "conflict" {
 				continue
 			}
-			key := adj.Path + "\x00" + ref
+			key := adj.Path + "\x00" + r.ref
 			if _, exists := existingConflicts[key]; exists {
 				continue
 			}
 			existingConflicts[key] = struct{}{}
 			newFindings = append(newFindings, ComplianceFinding{
 				Path:           adj.Path,
-				SpecRef:        ref,
-				Title:          candidate.spec.Record.Title,
+				SpecRef:        r.ref,
+				Title:          r.candidate.spec.Record.Title,
 				SectionHeading: adj.ViolatedSection,
 				Code:           "semantic_conflict",
 				Message:        adj.Message,
