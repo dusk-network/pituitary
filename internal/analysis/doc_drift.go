@@ -9,12 +9,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"golang.org/x/sync/errgroup"
 )
 
 var requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
@@ -289,6 +291,16 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		inferenceSpecs = loaded
 		return allSpecs, nil
 	}
+	// Phase 1: deterministic evaluation — collect items that need LLM refinement.
+	type pendingRefinement struct {
+		ref         string
+		doc         docDocument
+		relevant    []specDocument
+		item        *DriftItem
+		remediation *DocRemediationItem
+	}
+	var pending []pendingRefinement
+
 	for _, ref := range sortedDocRefs(selectedDocs) {
 		doc := selectedDocs[ref]
 		relevant := relevantAcceptedSpecs(doc, specs)
@@ -306,21 +318,13 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		}
 		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
 		if item != nil && analyzer != nil {
-			relevantByRef := make(map[string]specDocument, len(relevant))
-			for _, spec := range relevant {
-				relevantByRef[spec.Record.Ref] = spec
-			}
-			refinedItem, refinedRemediation, err := analyzer.RefineDocDrift(ctx, doc, relevantByRef, *item, remediation)
-			if err != nil {
-				return nil, err
-			}
-			if refinedItem != nil {
-				item = refinedItem
-			}
-			if refinedRemediation != nil {
-				remediation = refinedRemediation
-			}
+			pending = append(pending, pendingRefinement{
+				ref: ref, doc: doc, relevant: relevant,
+				item: item, remediation: remediation,
+			})
+			continue
 		}
+		// No LLM refinement needed — process deterministically.
 		if assessment := assessDocDrift(doc, relevant, item); assessment != nil {
 			assessments = append(assessments, *assessment)
 			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
@@ -341,6 +345,75 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 					if spec, ok := allSpecs[specRef]; ok {
 						warningSpecs = append(warningSpecs, spec)
 					}
+				}
+			}
+		}
+		if item == nil {
+			continue
+		}
+		driftItems = append(driftItems, *item)
+		if remediation != nil {
+			remediationItems = append(remediationItems, *remediation)
+		}
+		for _, specRef := range item.SpecRefs {
+			if spec, ok := specs[specRef]; ok {
+				relevantSpecRefs = append(relevantSpecRefs, specRef)
+				warningSpecs = append(warningSpecs, spec)
+			}
+		}
+	}
+
+	// Phase 2: parallel LLM refinement for docs that need it.
+	type refinedResult struct {
+		idx         int
+		item        *DriftItem
+		remediation *DocRemediationItem
+	}
+	refined := make([]refinedResult, len(pending))
+
+	if len(pending) > 0 {
+		var mu sync.Mutex
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(adjudicationConcurrency)
+
+		for i, p := range pending {
+			g.Go(func() error {
+				relevantByRef := make(map[string]specDocument, len(p.relevant))
+				for _, spec := range p.relevant {
+					relevantByRef[spec.Record.Ref] = spec
+				}
+				rItem, rRemediation, err := analyzer.RefineDocDrift(gctx, p.doc, relevantByRef, *p.item, p.remediation)
+				if err != nil {
+					return err
+				}
+				mu.Lock()
+				refined[i] = refinedResult{idx: i, item: rItem, remediation: rRemediation}
+				mu.Unlock()
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Phase 3: merge refined results back.
+	for i, p := range pending {
+		item := p.item
+		remediation := p.remediation
+		if refined[i].item != nil {
+			item = refined[i].item
+		}
+		if refined[i].remediation != nil {
+			remediation = refined[i].remediation
+		}
+		if assessment := assessDocDrift(p.doc, p.relevant, item); assessment != nil {
+			assessments = append(assessments, *assessment)
+			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
+			for _, specRef := range assessment.SpecRefs {
+				if spec, ok := specs[specRef]; ok {
+					warningSpecs = append(warningSpecs, spec)
 				}
 			}
 		}
