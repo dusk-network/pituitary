@@ -7,5 +7,20 @@
     "source": "github"
   },
   "version": "1.0.0-beta.6",
-  "packages": []
+  "packages": [],
+  "tools": [
+    {"name": "search_specs", "description": "Semantic search across indexed spec sections. Filter by domain and status."},
+    {"name": "check_overlap", "description": "Detect specs that cover overlapping ground. Returns similarity scores and relationship classification."},
+    {"name": "compare_specs", "description": "Side-by-side tradeoff analysis of two specs."},
+    {"name": "analyze_impact", "description": "Trace which specs, code refs, and docs are affected when a spec changes."},
+    {"name": "check_doc_drift", "description": "Find docs that have gone stale relative to accepted specs, with cited evidence."},
+    {"name": "review_spec", "description": "Full composite review: overlap + comparison + impact + drift + remediation."},
+    {"name": "check_compliance", "description": "Check a PR diff against accepted specs for contradictions."},
+    {"name": "check_terminology", "description": "Audit terminology against declared policies. Separates actionable violations from tolerated historical uses."},
+    {"name": "governed_by", "description": "Look up which specs govern a given file or path."},
+    {"name": "compile_preview", "description": "Preview context-aware terminology patches before applying."},
+    {"name": "fix_preview", "description": "Preview deterministic auto-fix edits before applying."},
+    {"name": "status", "description": "Index health at a glance: artifact counts, runtime profile, staleness."},
+    {"name": "explain_file", "description": "Explain a file's role in the spec/doc corpus and its governance relationships."}
+  ]
 }
