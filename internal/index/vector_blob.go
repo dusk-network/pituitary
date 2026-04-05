@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 func encodeVectorBlob(vector []float64) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	for _, value := range vector {
-		if err := binary.Write(buf, binary.LittleEndian, float32(value)); err != nil {
-			return nil, fmt.Errorf("serialize vector: %w", err)
-		}
+	buf := make([]byte, len(vector)*4)
+	for i, v := range vector {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(v)))
 	}
-	return buf.Bytes(), nil
+	return buf, nil
 }
 
 // EncodeVectorBlob encodes float64 embeddings into the sqlite-vec blob format.

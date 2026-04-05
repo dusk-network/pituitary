@@ -1,7 +1,7 @@
 # Runtime Dockerfile for Smithery MCP server distribution
 # Builds the pituitary binary and serves it over stdio.
 
-FROM golang:1.26-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./

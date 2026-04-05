@@ -2,7 +2,6 @@ SHELL := /bin/sh
 
 GO ?= go
 CACHE_DIR ?= $(CURDIR)/.cache
-UNAME_S := $(shell uname -s)
 export GOCACHE := $(CACHE_DIR)/go-build
 
 .PHONY: fmt fmt-check docs-check smoke-sqlite-vec test test-race vet analyze bench ci clean
