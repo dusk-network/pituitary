@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#use-it-from-your-editor">Editor</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
+  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#stop-your-agent-from-building-on-stale-decisions">Agent</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
 </p>
 
 ---
