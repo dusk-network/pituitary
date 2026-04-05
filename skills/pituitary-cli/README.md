@@ -10,31 +10,74 @@ CCD's multi-model pattern is:
 
 That same split applies here.
 
+## Platform Support
+
+| Platform | Instruction format | Install method | Status |
+|---|---|---|---|
+| Claude Code | `SKILL.md` in skill directory | Copy `skills/pituitary-cli/` to `~/.claude/skills/` | Ready |
+| Cowork | `SKILL.md` in skill directory | Copy `skills/pituitary-cli/` to host skill directory | Ready |
+| Codex CLI | `AGENTS.md` (policy) or skill directory (workflow) | Policy: use repo's `AGENTS.md`. Workflow: copy to `~/.codex/skills/` | Ready |
+| Gemini CLI | `GEMINI.md` (policy) or skill directory (workflow) | Policy: use repo's `GEMINI.md`. Workflow: copy to `~/.gemini/skills/` | Ready |
+| Cursor | `.cursorrules` in workspace root | Copy from `platforms/cursor/.cursorrules` | Ready |
+| Windsurf | `.windsurfrules` in workspace root | Copy from `platforms/windsurf/.windsurfrules` | Ready |
+| Cline | `.clinerules` in workspace root | Copy from `platforms/cline/.clinerules` | Ready |
+| OpenAI Agents | `agents/openai.yaml` | Marketplace metadata | Ready |
+
 ## Install As A Shared Skill
 
 Copy the entire `skills/pituitary-cli/` directory so `SKILL.md`, `references/`, `examples/`, and `agents/openai.yaml` stay together.
 
-### Global host install
+### Skill-aware hosts (Claude Code, Cowork)
 
 ```sh
+# Global install
 cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli
-cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli
-cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli
 ```
-
-### Repo-local host install
 
 ```sh
-mkdir -p .agents/skills .claude/skills .codex/skills .gemini/skills
-cp -R skills/pituitary-cli .agents/skills/pituitary-cli
+# Repo-local install
+mkdir -p .claude/skills
 cp -R skills/pituitary-cli .claude/skills/pituitary-cli
-cp -R skills/pituitary-cli .codex/skills/pituitary-cli
-cp -R skills/pituitary-cli .gemini/skills/pituitary-cli
 ```
 
-Use the host locations that your tooling actually reads; you do not need all three.
+Codex CLI and Gemini CLI support both repo-root policy files (`AGENTS.md` / `GEMINI.md`) and shared skill directories. If you only need project policy, the repo-root files are already shipped. If you also want the Pituitary analysis workflow (decision matrix, execution protocol, request templates), install the skill package:
 
-## AGENTS-Compatible Tools
+```sh
+cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli    # Codex CLI
+cp -R skills/pituitary-cli ~/.gemini/skills/pituitary-cli   # Gemini CLI
+```
+
+### Cursor
+
+Copy the rules file into the workspace root of your target project:
+
+```sh
+cp skills/pituitary-cli/platforms/cursor/.cursorrules /path/to/your/project/.cursorrules
+```
+
+Cursor reads `.cursorrules` automatically when it opens the workspace.
+
+### Windsurf (Cascade)
+
+Copy the rules file into the workspace root of your target project:
+
+```sh
+cp skills/pituitary-cli/platforms/windsurf/.windsurfrules /path/to/your/project/.windsurfrules
+```
+
+Windsurf reads `.windsurfrules` automatically when it opens the workspace.
+
+### Cline
+
+Copy the rules file into the workspace root of your target project:
+
+```sh
+cp skills/pituitary-cli/platforms/cline/.clinerules /path/to/your/project/.clinerules
+```
+
+Cline reads `.clinerules` automatically when it opens the workspace.
+
+### AGENTS-Compatible Tools
 
 For tools that read repo policy from `AGENTS.md`, use the repo's canonical `AGENTS.md` rather than generating a second instruction source from this package.
 
@@ -80,6 +123,7 @@ Review the package contents before installing from any marketplace or third-part
 - `SKILL.md` is the canonical instruction source.
 - `references/` and `examples/` are supporting materials that influence agent behavior.
 - `agents/openai.yaml` is marketplace metadata, not executable logic, but it should still be reviewed as package content.
+- Platform-specific files (`.cursorrules`, `.windsurfrules`, `.clinerules`) are concise adaptations of the canonical `SKILL.md`.
 
 Treat external skill packages the same way you would treat shell scripts or CI config from the internet: inspect them before copying them into a trusted host directory.
 

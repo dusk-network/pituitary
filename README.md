@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#use-it-from-your-editor">Editor</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
+  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#stop-your-agent-from-building-on-stale-decisions">Agent</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
 </p>
 
 ---
@@ -32,7 +32,11 @@ Single binary. No Docker. No API keys required. One SQLite file.
 
 ## What It Catches
 
-**Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
+You already know your docs drift. You run LLM cleanup passes, it says "all clean," and you move on. But the cleanup only covered what fit in the context window. The rest keeps rotting. Next PR introduces three new contradictions on top of the ones that were never actually fixed. It's a treadmill that feels productive but never converges. Pituitary replaces that treadmill with a structural guarantee: it indexes the entire corpus and checks all of it, every time.
+
+On a [real repo](docs/use-cases/ccd-terminology-and-drift-audit.md) with 11 specs and 29 docs, Pituitary found 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions — drift the team had been fighting with routine cleanups and losing.
+
+**Overlapping decisions.** A new spec covers ground an existing one already handles.
 
 **Stale docs.** A spec changed, or a code diff implies docs likely went stale, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
 
@@ -102,9 +106,11 @@ sudo install pituitary /usr/local/bin/
 
 **Build from source** (contributors): see [docs/development/prerequisites.md](docs/development/prerequisites.md).
 
-## Use It From Your Editor
+## Stop Your Agent From Building on Stale Decisions
 
-Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add it to Claude Code, Cursor, Windsurf, or any MCP-compatible client:
+Pituitary integrates with every major AI coding assistant. Pick your tool:
+
+### MCP Server (Claude Code, Cursor, Windsurf, or any MCP client)
 
 ```json
 {
@@ -117,9 +123,29 @@ Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add
 }
 ```
 
-Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, verifying terminology governance mid-edit, previewing deterministic fixes, or looking up which specs govern a file before writing code.
+Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`.
 
-If your editor prefers shared skills or repo policy files instead of MCP, use the package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md). The CCD-style install path is to copy `skills/pituitary-cli/` into a host skill directory such as `~/.claude/skills/pituitary-cli/`, `~/.codex/skills/pituitary-cli/`, or `~/.gemini/skills/pituitary-cli/`. For AGENTS-aware tools, use the repo's canonical [AGENTS.md](AGENTS.md); generated mirrors like [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility outputs, not separate policy sources.
+### Shared Skills (Claude Code, Cowork)
+
+```sh
+cp -R skills/pituitary-cli ~/.claude/skills/pituitary-cli
+```
+
+Codex CLI and Gemini CLI get project policy from `AGENTS.md` / `GEMINI.md` automatically. For the full Pituitary analysis workflow, also install the skill package: `cp -R skills/pituitary-cli ~/.codex/skills/pituitary-cli` or `~/.gemini/skills/`.
+
+### Editor Rules (Cursor, Windsurf, Cline)
+
+```sh
+cp skills/pituitary-cli/platforms/cursor/.cursorrules .cursorrules        # Cursor
+cp skills/pituitary-cli/platforms/windsurf/.windsurfrules .windsurfrules  # Windsurf
+cp skills/pituitary-cli/platforms/cline/.clinerules .clinerules           # Cline
+```
+
+### AGENTS-Aware Tools (Codex CLI, Gemini CLI, and others)
+
+The repo's [AGENTS.md](AGENTS.md) is the canonical project policy. Tools that read `AGENTS.md` get Pituitary awareness automatically. Generated mirrors ([CLAUDE.md](CLAUDE.md), [GEMINI.md](GEMINI.md)) are compatibility outputs, not separate policy sources.
+
+See [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md) for the full install guide, request templates, and security notes.
 
 ## Use It in CI
 
@@ -219,7 +245,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 ## Project Status
 
-Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records. Code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, compile, spec-freshness, and review workflows all ship today. Pituitary is intent governance, not code linting — it keeps your project building against what you actually decided, not against stale echoes of decisions that routine LLM cleanups missed. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
 
