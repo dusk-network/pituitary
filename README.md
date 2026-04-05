@@ -32,7 +32,11 @@ Single binary. No Docker. No API keys required. One SQLite file.
 
 ## What It Catches
 
-**Overlapping decisions.** A new spec covers ground an existing one already handles. Nobody noticed until both were accepted.
+You already know your docs drift. You run LLM cleanup passes, it says "all clean," and you move on. But the cleanup only covered what fit in the context window. The rest keeps rotting. Next PR introduces three new contradictions on top of the ones that were never actually fixed. It's a treadmill that feels productive but never converges. Pituitary replaces that treadmill with a structural guarantee: it indexes the entire corpus and checks all of it, every time.
+
+On a [real repo](docs/use-cases/ccd-terminology-and-drift-audit.md) with 11 specs and 29 docs, Pituitary found 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions — drift the team had been fighting with routine cleanups and losing.
+
+**Overlapping decisions.** A new spec covers ground an existing one already handles.
 
 **Stale docs.** A spec changed, or a code diff implies docs likely went stale, but the CLAUDE.md, AGENTS.md, runbooks, and guides that reference it weren't updated.
 
@@ -241,7 +245,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 ## Project Status
 
-Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, and review workflows all ship today. Pituitary watches your specs, docs, and decision records. Code compliance is a supporting bridge, not the product center. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, compile, spec-freshness, and review workflows all ship today. Pituitary is intent governance, not code linting — it keeps your project building against what you actually decided, not against stale echoes of decisions that routine LLM cleanups missed. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
 
