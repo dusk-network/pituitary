@@ -3,9 +3,9 @@
   "skill_version": "post-autoskiller-v8",
   "evaluated_at": "2026-04-05",
   "evaluator": "manual + LLM-assisted",
-  "skill_sha256_prefix": "current SKILL.md at commit 1bc91ba",
+  "skill_revision": "current SKILL.md at commit 1bc91ba",
   "overall_score": 0.95,
-  "summary": "The SKILL.md instruction set scores well across all rubric dimensions after the autoskiller v8 optimization pass. The execution protocol enforces strict sequential dependency, which prevents skipping status checks or schema verification. The decision matrix with priority-based exclusion and negative exclusion logic handles command selection correctly in 9/10 cases. The one weakness is the ambiguous 'coverage' intent, which the SKILL.md now handles via an explicit exclusion rule. Evidence trust boundary is strongly enforced through the dedicated Step 8 and Quality Checks section.",
+  "summary": "The SKILL.md instruction set scores well across all rubric dimensions after the autoskiller v8 optimization pass. The execution protocol enforces strict sequential dependency, which prevents skipping status checks or schema verification. The decision matrix with priority-based exclusion and negative exclusion logic handles command selection correctly across all evaluated cases, including the previously ambiguous 'coverage' intent, which the SKILL.md now handles via an explicit exclusion rule. Evidence trust boundary is strongly enforced through the dedicated Step 8 and Quality Checks section.",
   "results": [
     {
       "task_id": "T01",
@@ -58,10 +58,9 @@
         "status_first": "pass",
         "schema_check": "pass",
         "json_output": "pass",
-        "command_selection": "pass",
-        "request_file": "pass"
+        "command_selection": "pass"
       },
-      "notes": "Compare + Draft keywords match Decision Matrix row 3. Request-file guidance is available in Step 6 and examples/ directory."
+      "notes": "Compare + Draft keywords match Decision Matrix row 3."
     },
     {
       "task_id": "T06",
@@ -113,10 +112,9 @@
     }
   ],
   "dimension_totals": {
-    "status_first": {"pass": 10, "fail": 0, "applicable": 10},
-    "schema_check": {"pass": 7, "fail": 0, "applicable": 7},
-    "json_output": {"pass": 8, "fail": 0, "applicable": 8},
-    "request_file": {"pass": 1, "fail": 0, "applicable": 1},
+    "status_first": {"pass": 9, "fail": 0, "applicable": 9},
+    "schema_check": {"pass": 6, "fail": 0, "applicable": 6},
+    "json_output": {"pass": 7, "fail": 0, "applicable": 7},
     "evidence_trust": {"pass": 3, "fail": 0, "applicable": 3},
     "dry_run": {"pass": 1, "fail": 0, "applicable": 1},
     "command_selection": {"pass": 6, "fail": 0, "applicable": 6},

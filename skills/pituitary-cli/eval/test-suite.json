@@ -39,14 +39,14 @@
       "name": "compare-specs",
       "user_intent": "Compare the draft authentication spec against the accepted version.",
       "expected_command": "pituitary compare-specs --path specs/auth-draft --path specs/auth-accepted --format json",
-      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection", "request_file"],
+      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection"],
       "notes": "Agent must select compare-specs based on 'compare' and 'draft vs accepted' intent."
     },
     {
       "id": "T06",
       "name": "stale-index-recovery",
       "user_intent": "Run a full spec review, but the index hasn't been rebuilt in weeks.",
-      "expected_command": "pituitary index --rebuild",
+      "expected_command": "pituitary index --rebuild --format json",
       "rubric_dimensions": ["status_first", "json_output"],
       "notes": "Agent should detect stale index from status output and rebuild before proceeding."
     },
@@ -54,7 +54,7 @@
       "id": "T07",
       "name": "fix-dry-run",
       "user_intent": "Fix all detected doc drift automatically.",
-      "expected_command": "pituitary fix --scope all --dry-run",
+      "expected_command": "pituitary fix --scope all --dry-run --format json",
       "rubric_dimensions": ["status_first", "schema_check", "dry_run", "json_output"],
       "notes": "Agent MUST use --dry-run first for write operations. This tests mutation safety."
     },

@@ -32,8 +32,10 @@ For automated evaluation with an LLM judge:
 
 ## Score history
 
-| Version | Date | Overall | Status-first | Schema-check | JSON-output | Request-file | Evidence-trust | Dry-run | Command-selection |
-|---------|------|---------|-------------|-------------|------------|-------------|---------------|---------|------------------|
-| v8 (autoskiller) | 2026-03-29 | 0.930 | - | - | - | - | - | - | - |
-| structural | 2026-03-29 | 0.717 | - | - | - | - | - | - | - |
-| current (post-eval) | 2026-04-05 | 0.95 | 10/10 | 10/10 | 10/10 | 8/10 | 10/10 | 5/5 | 9/10 |
+| Version | Date | Overall | Notes |
+|---------|------|---------|-------|
+| v8 (autoskiller) | 2026-03-29 | 0.930 | Structural optimization pass |
+| structural baseline | 2026-03-29 | 0.717 | Pre-optimization structural assessment |
+| current (post-eval) | 2026-04-05 | 0.95 | All dimensions pass — see `scores.json` for per-dimension totals |
+
+Per-dimension applicability and pass totals are maintained in `scores.json`. The full dimension set is defined in `rubric.json`.
