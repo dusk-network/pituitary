@@ -2,18 +2,9 @@ SHELL := /bin/sh
 
 GO ?= go
 CACHE_DIR ?= $(CURDIR)/.cache
-UNAME_S := $(shell uname -s)
 export GOCACHE := $(CACHE_DIR)/go-build
 
 .PHONY: fmt fmt-check docs-check smoke-sqlite-vec test test-race vet analyze bench ci clean
-
-CGO_ENABLED ?= 1
-export CGO_ENABLED
-
-ifeq ($(UNAME_S),Darwin)
-CGO_CFLAGS += -Wno-deprecated-declarations
-export CGO_CFLAGS
-endif
 
 fmt:
 	$(GO) fmt ./...

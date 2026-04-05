@@ -10,11 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/asg017/sqlite-vec-go-bindings/ncruces"
+	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
-var sqliteDriverOnce sync.Once
 var sqliteReadyMu sync.Mutex
 var sqliteReady bool
 var sqliteReadinessProbe = probeSQLiteReadyContext
@@ -98,10 +97,6 @@ func hasWindowsDrivePrefix(path string) bool {
 	return (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z')
 }
 
-func ensureSQLiteDriver() {
-	sqliteDriverOnce.Do(sqlitevec.Auto)
-}
-
 // CheckSQLiteReady validates that the SQLite driver and sqlite-vec extension are usable.
 func CheckSQLiteReady() error {
 	return CheckSQLiteReadyContext(context.Background())
@@ -134,8 +129,6 @@ func configureDB(ctx context.Context, db *sql.DB) error {
 }
 
 func probeSQLiteReadyContext(ctx context.Context) error {
-	ensureSQLiteDriver()
-
 	db, err := sql.Open("sqlite3", sqliteReadinessDSN)
 	if err != nil {
 		return fmt.Errorf("open sqlite readiness probe: %w", err)
