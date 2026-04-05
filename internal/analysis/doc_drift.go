@@ -380,8 +380,12 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 
 		for i, p := range pending {
 			g.Go(func() error {
-				relevantByRef := make(map[string]specDocument, len(p.relevant))
-				for _, spec := range p.relevant {
+				shortlist := p.relevant
+				if len(shortlist) > docDriftRelevantSpecLimit {
+					shortlist = shortlist[:docDriftRelevantSpecLimit]
+				}
+				relevantByRef := make(map[string]specDocument, len(shortlist))
+				for _, spec := range shortlist {
 					relevantByRef[spec.Record.Ref] = spec
 				}
 				rItem, rRemediation, err := analyzer.RefineDocDrift(gctx, p.doc, relevantByRef, *p.item, p.remediation)
@@ -861,10 +865,6 @@ func relevantAcceptedSpecs(doc docDocument, specs map[string]specDocument) []spe
 			return scored[i].spec.Record.Ref < scored[j].spec.Record.Ref
 		}
 	})
-
-	if len(scored) > docDriftRelevantSpecLimit {
-		scored = scored[:docDriftRelevantSpecLimit]
-	}
 
 	result := make([]specDocument, 0, len(scored))
 	for _, item := range scored {
