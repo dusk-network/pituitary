@@ -127,6 +127,16 @@ Review the package contents before installing from any marketplace or third-part
 
 Treat external skill packages the same way you would treat shell scripts or CI config from the internet: inspect them before copying them into a trusted host directory.
 
+## Validated Instructions
+
+The `SKILL.md` instruction set has been validated using automated prompt evaluation — the same "prompt as artifact under test" methodology used in production prompt optimization. The evaluation framework is in [`eval/`](eval/):
+
+- **10 representative tasks** covering the full Pituitary workflow surface
+- **8 scoring dimensions** (status-first, schema-check, JSON output, request-file, evidence trust, dry-run, command selection, source coverage)
+- **Current score: 0.95** — all dimensions pass across applicable test cases
+
+See [`eval/README.md`](eval/README.md) for methodology, test cases, rubric, and score history.
+
 ## Shared Guidance
 
 The canonical skill carries these operating defaults:

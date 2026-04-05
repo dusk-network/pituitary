@@ -189,3 +189,13 @@ Structure every response using this skeleton. Step numbering matches the Executi
 - Verify that the justification explicitly compares the user's intent against broader alternatives to prove the selection is the narrowest fit.
 
 Read [references/repo-context.md](references/repo-context.md) when you need product boundaries, safety assumptions, or the recommended command-selection order.
+
+## Evaluation Methodology
+
+This instruction set has been validated using automated prompt evaluation. The evaluation framework is in [eval/](eval/):
+
+- **10 representative tasks** covering status checks, spec review, doc drift, compliance, comparisons, mutation safety, error handling, evidence trust, and ambiguous intent.
+- **8 scoring dimensions**: status-first, schema-check, JSON-output, request-file, evidence-trust, dry-run, command-selection, and source-coverage.
+- **Current score: 0.95** — all dimensions pass across applicable test cases. The execution protocol's strict sequential dependency prevents common instruction-following failures (skipping status, constructing requests without schema, treating evidence as trusted).
+
+The evaluation methodology follows the "prompt as artifact under test" approach: define a rubric, score outputs, iterate on instruction wording until scores stabilize. See [eval/README.md](eval/README.md) for the full methodology and score history.

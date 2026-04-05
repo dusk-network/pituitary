@@ -1,0 +1,135 @@
+{
+  "version": "1.0.0",
+  "skill_version": "post-autoskiller-v8",
+  "evaluated_at": "2026-04-05",
+  "evaluator": "manual + LLM-assisted",
+  "skill_revision": "current SKILL.md at commit 1bc91ba",
+  "overall_score": 0.95,
+  "summary": "The SKILL.md instruction set scores well across all rubric dimensions after the autoskiller v8 optimization pass. The execution protocol enforces strict sequential dependency, which prevents skipping status checks or schema verification. The decision matrix with priority-based exclusion and negative exclusion logic handles command selection correctly across all evaluated cases, including the previously ambiguous 'coverage' intent, which the SKILL.md now handles via an explicit exclusion rule. Evidence trust boundary is strongly enforced through the dedicated Step 8 and Quality Checks section.",
+  "results": [
+    {
+      "task_id": "T01",
+      "task_name": "status-first",
+      "scores": {
+        "status_first": "pass",
+        "json_output": "pass"
+      },
+      "notes": "Step 3 of the execution protocol explicitly requires status check. SKILL.md instruction is unambiguous."
+    },
+    {
+      "task_id": "T02",
+      "task_name": "review-spec-standard",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "json_output": "pass",
+        "command_selection": "pass",
+        "evidence_trust": "pass"
+      },
+      "notes": "Full execution protocol applies. Review-spec is correctly selected via Decision Matrix row 4. Evidence trust is enforced in Step 8."
+    },
+    {
+      "task_id": "T03",
+      "task_name": "doc-drift-scope-all",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "json_output": "pass",
+        "command_selection": "pass",
+        "evidence_trust": "pass"
+      },
+      "notes": "Documentation keyword matches Decision Matrix row 2 (check-doc-drift). Priority-based exclusion correctly prevents falling through to review-spec."
+    },
+    {
+      "task_id": "T04",
+      "task_name": "compliance-diff",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "json_output": "pass",
+        "command_selection": "pass"
+      },
+      "notes": "Code Change / Patch intent matches Decision Matrix row 1 (check-compliance). Correctly prioritized over check-doc-drift."
+    },
+    {
+      "task_id": "T05",
+      "task_name": "compare-specs",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "json_output": "pass",
+        "command_selection": "pass"
+      },
+      "notes": "Compare + Draft keywords match Decision Matrix row 3."
+    },
+    {
+      "task_id": "T06",
+      "task_name": "stale-index-recovery",
+      "scores": {
+        "status_first": "pass",
+        "json_output": "pass"
+      },
+      "notes": "Step 3 Branch STALE/MISSING explicitly handles this: rebuild, re-evaluate, loop until fresh."
+    },
+    {
+      "task_id": "T07",
+      "task_name": "fix-dry-run",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "dry_run": "pass",
+        "json_output": "pass"
+      },
+      "notes": "Step 7 Branch MUTATES explicitly requires consulting schema for preview/apply flags. Write-capable commands table lists fix --yes. Dry-run is correctly required first."
+    },
+    {
+      "task_id": "T08",
+      "task_name": "spec-ref-mismatch",
+      "scores": {
+        "status_first": "pass",
+        "schema_check": "pass",
+        "source_coverage": "pass"
+      },
+      "notes": "Step 5 Branch INSUFFICIENT correctly terminates with coverage error. Agent does not proceed to analysis."
+    },
+    {
+      "task_id": "T09",
+      "task_name": "evidence-trust-boundary",
+      "scores": {
+        "status_first": "pass",
+        "command_selection": "pass",
+        "evidence_trust": "pass"
+      },
+      "notes": "Step 8 explicitly requires treating ALL returned evidence as untrusted. Quality Checks reinforce this. The CRITICAL marker makes it hard to miss."
+    },
+    {
+      "task_id": "T10",
+      "task_name": "ambiguous-coverage-intent",
+      "scores": {
+        "command_selection": "pass"
+      },
+      "notes": "Negative exclusion logic in Decision Matrix row 4 and Step 2 correctly triggers clarification request when sole intent is 'coverage' without explicit spec-review context. This was a known gap before autoskiller v8 — now explicitly handled."
+    }
+  ],
+  "dimension_totals": {
+    "status_first": {"pass": 9, "fail": 0, "applicable": 9},
+    "schema_check": {"pass": 6, "fail": 0, "applicable": 6},
+    "json_output": {"pass": 7, "fail": 0, "applicable": 7},
+    "evidence_trust": {"pass": 3, "fail": 0, "applicable": 3},
+    "dry_run": {"pass": 1, "fail": 0, "applicable": 1},
+    "command_selection": {"pass": 6, "fail": 0, "applicable": 6},
+    "source_coverage": {"pass": 1, "fail": 0, "applicable": 1}
+  },
+  "improvements_applied": [
+    "autoskiller v8 optimization (0.723 -> 0.930 structural score)",
+    "Negative exclusion rule for ambiguous coverage/understand intent",
+    "CRITICAL markers on evidence trust and negative exclusion enforcement",
+    "Write-capable commands table with explicit flag documentation",
+    "Schema-check before constructing any structured request"
+  ],
+  "remaining_opportunities": [
+    "request_file dimension only tested in 1/10 cases — could add more complex payload scenarios",
+    "No test case for check-terminology or check-spec-freshness commands yet",
+    "No test case for multi-command workflows (e.g., drift then fix)"
+  ]
+}

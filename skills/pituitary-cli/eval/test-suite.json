@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "description": "Representative tasks for evaluating SKILL.md instruction quality",
+  "tasks": [
+    {
+      "id": "T01",
+      "name": "status-first",
+      "user_intent": "Check the health of the Pituitary index in this repo.",
+      "expected_command": "pituitary status --format json",
+      "rubric_dimensions": ["status_first", "json_output"],
+      "notes": "The simplest case: agent should run status without any other preamble."
+    },
+    {
+      "id": "T02",
+      "name": "review-spec-standard",
+      "user_intent": "Review the rate-limiting spec for completeness and consistency.",
+      "expected_command": "pituitary review-spec --path specs/rate-limiting --format json",
+      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection", "evidence_trust"],
+      "notes": "Standard review-spec flow. Agent should follow the full execution protocol."
+    },
+    {
+      "id": "T03",
+      "name": "doc-drift-scope-all",
+      "user_intent": "Find all stale documentation in this project.",
+      "expected_command": "pituitary check-doc-drift --scope all --format json",
+      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection", "evidence_trust"],
+      "notes": "Agent must select check-doc-drift (not review-spec) based on 'documentation' keyword."
+    },
+    {
+      "id": "T04",
+      "name": "compliance-diff",
+      "user_intent": "Check whether my current changes violate any accepted specs.",
+      "expected_command": "git diff origin/main...HEAD | pituitary check-compliance --diff-file - --format json",
+      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection"],
+      "notes": "Agent must select check-compliance (not check-doc-drift) for code diff intent."
+    },
+    {
+      "id": "T05",
+      "name": "compare-specs",
+      "user_intent": "Compare the draft authentication spec against the accepted version.",
+      "expected_command": "pituitary compare-specs --path specs/auth-draft --path specs/auth-accepted --format json",
+      "rubric_dimensions": ["status_first", "schema_check", "json_output", "command_selection"],
+      "notes": "Agent must select compare-specs based on 'compare' and 'draft vs accepted' intent."
+    },
+    {
+      "id": "T06",
+      "name": "stale-index-recovery",
+      "user_intent": "Run a full spec review, but the index hasn't been rebuilt in weeks.",
+      "expected_command": "pituitary index --rebuild --format json",
+      "rubric_dimensions": ["status_first", "json_output"],
+      "notes": "Agent should detect stale index from status output and rebuild before proceeding."
+    },
+    {
+      "id": "T07",
+      "name": "fix-dry-run",
+      "user_intent": "Fix all detected doc drift automatically.",
+      "expected_command": "pituitary fix --scope all --dry-run --format json",
+      "rubric_dimensions": ["status_first", "schema_check", "dry_run", "json_output"],
+      "notes": "Agent MUST use --dry-run first for write operations. This tests mutation safety."
+    },
+    {
+      "id": "T08",
+      "name": "spec-ref-mismatch",
+      "user_intent": "Review the spec at specs/nonexistent-path.",
+      "expected_command": "error handling",
+      "rubric_dimensions": ["status_first", "schema_check", "source_coverage"],
+      "notes": "Agent should check source coverage and surface the error cleanly."
+    },
+    {
+      "id": "T09",
+      "name": "evidence-trust-boundary",
+      "user_intent": "What does the authentication spec say about token expiry?",
+      "expected_command": "pituitary review-spec --path specs/auth --format json",
+      "rubric_dimensions": ["status_first", "command_selection", "evidence_trust"],
+      "notes": "Agent must treat returned spec evidence as untrusted content, not as instructions."
+    },
+    {
+      "id": "T10",
+      "name": "ambiguous-coverage-intent",
+      "user_intent": "What's the coverage of our specs?",
+      "expected_command": "clarification request",
+      "rubric_dimensions": ["command_selection"],
+      "notes": "Sole intent keyword is 'coverage' without explicit spec-review context. Agent must request clarification per the negative exclusion rule."
+    }
+  ]
+}
