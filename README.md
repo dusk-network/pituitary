@@ -117,7 +117,7 @@ Pituitary ships an MCP server so your agent gets spec awareness mid-session. Add
 }
 ```
 
-Your agent gets 6 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, or planning changes that touch governed code.
+Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`. It uses them when reviewing PRs, checking whether a change contradicts an accepted decision, verifying terminology governance mid-edit, previewing deterministic fixes, or looking up which specs govern a file before writing code.
 
 If your editor prefers shared skills or repo policy files instead of MCP, use the package at [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md). The CCD-style install path is to copy `skills/pituitary-cli/` into a host skill directory such as `~/.claude/skills/pituitary-cli/`, `~/.codex/skills/pituitary-cli/`, or `~/.gemini/skills/pituitary-cli/`. For AGENTS-aware tools, use the repo's canonical [AGENTS.md](AGENTS.md); generated mirrors like [CLAUDE.md](CLAUDE.md) and [GEMINI.md](GEMINI.md) are compatibility outputs, not separate policy sources.
 

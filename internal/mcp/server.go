@@ -43,6 +43,13 @@ func Tools(options Options) []mcpserver.ServerTool {
 		analyzeImpactTool(options),
 		checkDocDriftTool(options),
 		reviewSpecTool(options),
+		checkComplianceTool(options),
+		checkTerminologyTool(options),
+		governedByTool(options),
+		compilePreviewTool(options),
+		fixPreviewTool(options),
+		statusTool(options),
+		explainFileTool(options),
 	}
 }
 
