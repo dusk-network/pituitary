@@ -9,8 +9,6 @@ on:
 jobs:
   go:
     runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -47,8 +45,6 @@ jobs:
 
   analyzers:
     runs-on: ubuntu-latest
-    env:
-      CGO_ENABLED: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -74,8 +70,6 @@ jobs:
 
   macos:
     runs-on: macos-latest
-    env:
-      CGO_ENABLED: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v5

@@ -4,20 +4,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-
-	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 )
 
 func encodeVectorBlob(vector []float64) ([]byte, error) {
-	serialized := make([]float32, len(vector))
-	for i, value := range vector {
-		serialized[i] = float32(value)
+	buf := new(bytes.Buffer)
+	for _, value := range vector {
+		if err := binary.Write(buf, binary.LittleEndian, float32(value)); err != nil {
+			return nil, fmt.Errorf("serialize vector: %w", err)
+		}
 	}
-	blob, err := sqlitevec.SerializeFloat32(serialized)
-	if err != nil {
-		return nil, fmt.Errorf("serialize vector: %w", err)
-	}
-	return blob, nil
+	return buf.Bytes(), nil
 }
 
 // EncodeVectorBlob encodes float64 embeddings into the sqlite-vec blob format.
