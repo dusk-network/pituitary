@@ -75,6 +75,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertSchemaObject(t, db, "index", "idx_artifacts_kind_status_domain")
 	assertSchemaObject(t, db, "index", "idx_edges_from_ref_type")
 	assertAllAdapters(t, db, config.AdapterFilesystem)
+	assertSourceAdapterMetadata(t, db, config.AdapterFilesystem, 5)
 	assertSchemaSQLContains(t, db, "chunks_vec", "CREATE VIRTUAL TABLE chunks_vec USING vec0")
 	assertSchemaSQLContains(t, db, "chunks_vec", "embedding float[8] distance_metric=cosine")
 	assertColumnType(t, db, `SELECT typeof(embedding) FROM chunks_vec LIMIT 1`, "blob")
@@ -499,6 +500,17 @@ func mustWriteFile(tb testing.TB, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		tb.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func assertSourceAdapterMetadata(t *testing.T, db *sql.DB, want string, wantCount int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts WHERE json_extract(metadata_json, '$.source_adapter') = ?`, want).Scan(&got); err != nil {
+		t.Fatalf("query source_adapter metadata: %v", err)
+	}
+	if got != wantCount {
+		t.Fatalf("source_adapter metadata count = %d, want %d with value %q", got, wantCount, want)
 	}
 }
 
