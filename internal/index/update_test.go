@@ -143,7 +143,9 @@ include = ["guides/*.md"]
 	}
 
 	// Remove one doc.
-	os.Remove(filepath.Join(repoDir, "docs", "guides", "remove.md"))
+	if err := os.Remove(filepath.Join(repoDir, "docs", "guides", "remove.md")); err != nil {
+		t.Fatalf("remove fixture: %v", err)
+	}
 
 	records, err := source.LoadFromConfig(cfg)
 	if err != nil {

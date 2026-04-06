@@ -75,22 +75,19 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	if err := copyFile(indexPath, backupPath); err != nil {
 		return nil, fmt.Errorf("create index backup: %w", err)
 	}
-	backupExists := true
-	defer func() {
-		if backupExists {
-			_ = os.Remove(backupPath)
-		}
-	}()
 
 	result, err := applyUpdateContext(ctx, indexPath, cfg, dimension, embedder, records, reporter)
 	if err != nil {
-		// Restore from backup on any failure.
-		if restoreErr := os.Rename(backupPath, indexPath); restoreErr != nil {
+		// Restore from backup on any failure. Keep the backup in place
+		// if restoration itself fails so the user has a recovery path.
+		if restoreErr := restoreFromBackup(backupPath, indexPath); restoreErr != nil {
 			return nil, fmt.Errorf("update failed: %w; additionally, backup restore failed: %v", err, restoreErr)
 		}
-		backupExists = false
 		return nil, err
 	}
+
+	// Success — clean up backup.
+	_ = os.Remove(backupPath)
 	return result, nil
 }
 
@@ -561,6 +558,23 @@ func runTransactionIntegrityChecks(ctx context.Context, tx *sql.Tx) error {
 		return fmt.Errorf("foreign_key_check failed for table %s row %d parent %s fk %d", table, rowID, parent, fkid)
 	}
 
+	return nil
+}
+
+// restoreFromBackup restores the index from a backup file, removing the
+// potentially corrupted index first. If the rename fails (e.g., cross-device),
+// it falls back to a copy.
+func restoreFromBackup(backupPath, indexPath string) error {
+	if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove index before restore: %w", err)
+	}
+	if err := os.Rename(backupPath, indexPath); err != nil {
+		// Rename can fail cross-device; fall back to copy.
+		if copyErr := copyFile(backupPath, indexPath); copyErr != nil {
+			return fmt.Errorf("rename: %w; copy fallback: %v", err, copyErr)
+		}
+		_ = os.Remove(backupPath)
+	}
 	return nil
 }
 
