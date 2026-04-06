@@ -74,6 +74,16 @@ func (r *analysisRepository) impactedSpecRefs(candidate model.SpecRecord) ([]str
 		return nil, err
 	}
 	refs = append(refs, dependentRefs...)
+
+	// Traverse relates_to edges in both directions: outgoing from the
+	// candidate and incoming from other specs.
+	refs = append(refs, relationRefs(candidate.Relations, model.RelationRelatesTo)...)
+	incomingRelatesTo, err := r.specRefsWithIncomingEdge(model.RelationRelatesTo, candidate.Ref, nil)
+	if err != nil {
+		return nil, err
+	}
+	refs = append(refs, incomingRelatesTo...)
+
 	return uniqueStrings(refs), nil
 }
 

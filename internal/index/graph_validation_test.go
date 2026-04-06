@@ -75,6 +75,57 @@ func TestValidateRelationGraphReturnsStructuredError(t *testing.T) {
 	}
 }
 
+func TestInspectRelationGraphAllowsMutualRelatesToWithoutCycle(t *testing.T) {
+	t.Parallel()
+
+	status := InspectRelationGraph([]model.SpecRecord{
+		specWithRelations("SPEC-400",
+			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-401"},
+		),
+		specWithRelations("SPEC-401",
+			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-400"},
+		),
+	})
+
+	if got, want := status.State, "valid"; got != want {
+		t.Fatalf("state = %q, want %q; mutual relates_to should not trigger cycle detection", got, want)
+	}
+}
+
+func TestInspectRelationGraphAllowsRelatesToAlongsideDependsOn(t *testing.T) {
+	t.Parallel()
+
+	status := InspectRelationGraph([]model.SpecRecord{
+		specWithRelations("SPEC-500",
+			model.Relation{Type: model.RelationDependsOn, Ref: "SPEC-501"},
+			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-502"},
+		),
+		specWithRelations("SPEC-501"),
+		specWithRelations("SPEC-502"),
+	})
+
+	if got, want := status.State, "valid"; got != want {
+		t.Fatalf("state = %q, want %q; relates_to should not conflict with depends_on", got, want)
+	}
+}
+
+func TestInspectRelationGraphDetectsRelatesToSelfReference(t *testing.T) {
+	t.Parallel()
+
+	status := InspectRelationGraph([]model.SpecRecord{
+		specWithRelations("SPEC-600",
+			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-600"},
+		),
+	})
+
+	if got, want := status.State, "invalid"; got != want {
+		t.Fatalf("state = %q, want %q; self-referencing relates_to should be invalid", got, want)
+	}
+	if len(status.Findings) != 1 || status.Findings[0].Code != "self_reference" {
+		t.Fatalf("findings = %+v, want one self_reference finding", status.Findings)
+	}
+}
+
 func specWithRelations(ref string, relations ...model.Relation) model.SpecRecord {
 	return model.SpecRecord{
 		Ref:       ref,

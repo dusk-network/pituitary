@@ -20,6 +20,7 @@ type RelationType = sdk.RelationType
 const (
 	RelationDependsOn  = sdk.RelationDependsOn
 	RelationSupersedes = sdk.RelationSupersedes
+	RelationRelatesTo  = sdk.RelationRelatesTo
 )
 
 type Relation = sdk.Relation

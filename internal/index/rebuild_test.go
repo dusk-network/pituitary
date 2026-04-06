@@ -33,8 +33,8 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	if result.ChunkCount != 17 {
 		t.Fatalf("chunk count = %d, want 17", result.ChunkCount)
 	}
-	if result.EdgeCount != 8 {
-		t.Fatalf("edge count = %d, want 8", result.EdgeCount)
+	if result.EdgeCount != 9 {
+		t.Fatalf("edge count = %d, want 9", result.EdgeCount)
 	}
 	if result.EmbedderDimension != 8 {
 		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)
@@ -51,7 +51,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 5)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
-	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 8)
+	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 5)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
@@ -139,8 +139,8 @@ func TestPrepareRebuildSummarizesFixturesWithoutWritingDatabase(t *testing.T) {
 	if result.ChunkCount != 17 {
 		t.Fatalf("chunk count = %d, want 17", result.ChunkCount)
 	}
-	if result.EdgeCount != 8 {
-		t.Fatalf("edge count = %d, want 8", result.EdgeCount)
+	if result.EdgeCount != 9 {
+		t.Fatalf("edge count = %d, want 9", result.EdgeCount)
 	}
 	if result.EmbedderDimension != 8 {
 		t.Fatalf("embedder dimension = %d, want 8", result.EmbedderDimension)

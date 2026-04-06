@@ -237,6 +237,7 @@ type rawSpecBundle struct {
 	Body       string
 	DependsOn  []string
 	Supersedes []string
+	RelatesTo  []string
 	AppliesTo  []string
 }
 
@@ -282,7 +283,7 @@ func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string
 		Domain:      raw.Domain,
 		Authors:     append([]string(nil), raw.Authors...),
 		Tags:        append([]string(nil), raw.Tags...),
-		Relations:   buildRelations(raw.DependsOn, raw.Supersedes),
+		Relations:   buildRelations(raw.DependsOn, raw.Supersedes, raw.RelatesTo),
 		AppliesTo:   append([]string(nil), raw.AppliesTo...),
 		SourceRef:   fileSourceRef(workspaceRoot, specPath),
 		BodyFormat:  model.BodyFormatMarkdown,
@@ -321,13 +322,16 @@ func validateRawSpec(workspaceRoot, sourceName, bundleDir string, raw rawSpecBun
 	return nil
 }
 
-func buildRelations(dependsOn, supersedes []string) []model.Relation {
-	relations := make([]model.Relation, 0, len(dependsOn)+len(supersedes))
+func buildRelations(dependsOn, supersedes, relatesTo []string) []model.Relation {
+	relations := make([]model.Relation, 0, len(dependsOn)+len(supersedes)+len(relatesTo))
 	for _, ref := range dependsOn {
 		relations = append(relations, model.Relation{Type: model.RelationDependsOn, Ref: ref})
 	}
 	for _, ref := range supersedes {
 		relations = append(relations, model.Relation{Type: model.RelationSupersedes, Ref: ref})
+	}
+	for _, ref := range relatesTo {
+		relations = append(relations, model.Relation{Type: model.RelationRelatesTo, Ref: ref})
 	}
 	return relations
 }
@@ -479,6 +483,7 @@ type markdownContractFields struct {
 	Domain     string
 	DependsOn  []string
 	Supersedes []string
+	RelatesTo  []string
 	AppliesTo  []string
 }
 
@@ -525,7 +530,7 @@ func inferMarkdownContract(workspaceRoot string, source config.Source, path stri
 		Title:       title,
 		Status:      status,
 		Domain:      domain,
-		Relations:   buildRelations(fields.DependsOn, fields.Supersedes),
+		Relations:   buildRelations(fields.DependsOn, fields.Supersedes, fields.RelatesTo),
 		AppliesTo:   uniqueStringValues(fields.AppliesTo),
 		SourceRef:   fileSourceRef(workspaceRoot, path),
 		BodyFormat:  model.BodyFormatMarkdown,
@@ -739,6 +744,8 @@ func assignMarkdownContractListField(fields *markdownContractFields, key string,
 		fields.DependsOn = append(fields.DependsOn, values...)
 	case "supersedes":
 		fields.Supersedes = append(fields.Supersedes, values...)
+	case "relates_to":
+		fields.RelatesTo = append(fields.RelatesTo, values...)
 	case "applies_to":
 		fields.AppliesTo = append(fields.AppliesTo, values...)
 	}
@@ -930,7 +937,7 @@ func assignSpecScalarField(spec *rawSpecBundle, key, value string) error {
 
 func isSpecArrayField(key string) bool {
 	switch key {
-	case "authors", "tags", "depends_on", "supersedes", "applies_to":
+	case "authors", "tags", "depends_on", "supersedes", "relates_to", "applies_to":
 		return true
 	default:
 		return false
@@ -947,6 +954,8 @@ func assignSpecArrayField(spec *rawSpecBundle, key string, values []string) erro
 		spec.DependsOn = append(spec.DependsOn, values...)
 	case "supersedes":
 		spec.Supersedes = append(spec.Supersedes, values...)
+	case "relates_to":
+		spec.RelatesTo = append(spec.RelatesTo, values...)
 	case "applies_to":
 		spec.AppliesTo = append(spec.AppliesTo, values...)
 	default:

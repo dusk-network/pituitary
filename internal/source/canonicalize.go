@@ -231,6 +231,7 @@ func renderCanonicalizedSpecToml(workspaceRoot, sourcePath string, spec model.Sp
 	writeSpecBundleArray(&builder, "tags", spec.Tags)
 	writeSpecBundleArray(&builder, "depends_on", collectRelationRefs(spec.Relations, model.RelationDependsOn))
 	writeSpecBundleArray(&builder, "supersedes", collectRelationRefs(spec.Relations, model.RelationSupersedes))
+	writeSpecBundleArray(&builder, "relates_to", collectRelationRefs(spec.Relations, model.RelationRelatesTo))
 	writeSpecBundleArray(&builder, "applies_to", spec.AppliesTo)
 	return builder.String(), nil
 }
