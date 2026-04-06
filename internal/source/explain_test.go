@@ -164,6 +164,72 @@ func TestExplainFileReportsBundleMemberNotIndexedDirectly(t *testing.T) {
 	}
 }
 
+func TestExplainFileReportsRepoContextForSecondaryRepo(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustWriteFile(t, filepath.Join(root, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+repo_id = "primary"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(shared)+`"
+
+[[sources]]
+name = "primary-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+include = ["*.md"]
+`)
+	mustWriteFile(t, filepath.Join(primary, "docs", "guide.md"), "# Primary Guide\n")
+	mustWriteFile(t, filepath.Join(shared, "docs", "api.md"), "# Shared API\n")
+
+	cfg, err := config.Load(filepath.Join(root, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	t.Run("primary repo file has primary repo_id", func(t *testing.T) {
+		result, err := ExplainFile(cfg, filepath.Join(primary, "docs", "guide.md"))
+		if err != nil {
+			t.Fatalf("ExplainFile() error = %v", err)
+		}
+		if got, want := result.RepoID, "primary"; got != want {
+			t.Fatalf("RepoID = %q, want %q", got, want)
+		}
+		if got, want := result.WorkspacePath, "docs/guide.md"; got != want {
+			t.Fatalf("WorkspacePath = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("secondary repo file has secondary repo_id and scoped workspace_path", func(t *testing.T) {
+		result, err := ExplainFile(cfg, filepath.Join(shared, "docs", "api.md"))
+		if err != nil {
+			t.Fatalf("ExplainFile() error = %v", err)
+		}
+		if got, want := result.RepoID, "shared"; got != want {
+			t.Fatalf("RepoID = %q, want %q", got, want)
+		}
+		if got, want := result.WorkspacePath, "shared:docs/api.md"; got != want {
+			t.Fatalf("WorkspacePath = %q, want %q", got, want)
+		}
+	})
+}
+
 func findSourceExplanation(sources []SourceFileExplanation, match func(SourceFileExplanation) bool) (SourceFileExplanation, bool) {
 	for _, source := range sources {
 		if match(source) {
