@@ -157,6 +157,12 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		result, err = runIndexRebuild(ctx, cfg, records, full, format, stderr)
 	}
 	if err != nil {
+		if index.IsMissingIndex(err) {
+			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+				Code:    "missing_index",
+				Message: err.Error(),
+			}, 2)
+		}
 		if index.IsUpdatePrecondition(err) {
 			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 				Code:    "precondition_error",

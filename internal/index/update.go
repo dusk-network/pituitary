@@ -126,6 +126,16 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 		partialReuse = &reuseState{artifacts: map[string]storedArtifact{}}
 	}
 
+	// Build ref lookup maps for O(1) record access.
+	specsByRef := make(map[string]model.SpecRecord, len(records.Specs))
+	for _, spec := range records.Specs {
+		specsByRef[spec.Ref] = spec
+	}
+	docsByRef := make(map[string]model.DocRecord, len(records.Docs))
+	for _, doc := range records.Docs {
+		docsByRef[doc.Ref] = doc
+	}
+
 	// Step 10: Begin transaction and apply changes.
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -198,7 +208,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 			return nil, err
 		}
 		currentWork++
-		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, records, ref, partialReuse, RebuildProgressEvent{
+		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, specsByRef, docsByRef, ref, partialReuse, RebuildProgressEvent{
 			Current: currentWork,
 			Total:   totalWork,
 		}, reporter)
@@ -216,7 +226,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 			return nil, err
 		}
 		currentWork++
-		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, records, ref, partialReuse, RebuildProgressEvent{
+		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, specsByRef, docsByRef, ref, partialReuse, RebuildProgressEvent{
 			Current: currentWork,
 			Total:   totalWork,
 		}, reporter)
@@ -228,14 +238,12 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 		result.EmbeddedChunkCount += embeddedCount
 	}
 
-	// Count chunks from unchanged artifacts.
-	for _, ref := range diff.unchanged {
-		count, err := countChunksForRefContext(ctx, db, ref)
-		if err != nil {
-			return nil, err
-		}
-		result.ChunkCount += count
+	// Count chunks from unchanged artifacts in a single query.
+	unchangedChunkCount, err := countChunksForRefsContext(ctx, db, diff.unchanged)
+	if err != nil {
+		return nil, err
 	}
+	result.ChunkCount += unchangedChunkCount
 
 	// Step 10e: Full edge rebuild.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM edges`); err != nil {
@@ -474,12 +482,8 @@ func deleteArtifactDataContext(ctx context.Context, tx *sql.Tx, ref string) erro
 
 // insertRecordContext inserts a single artifact (spec or doc) with its chunks,
 // embeddings, and edges into the transaction.
-func insertRecordContext(ctx context.Context, tx *sql.Tx, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, records *source.LoadResult, ref string, state *reuseState, baseEvent RebuildProgressEvent, reporter RebuildProgressReporter) (chunkCount, reusedCount, embeddedCount int, err error) {
-	// Try specs first, then docs.
-	for _, spec := range records.Specs {
-		if spec.Ref != ref {
-			continue
-		}
+func insertRecordContext(ctx context.Context, tx *sql.Tx, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, specsByRef map[string]model.SpecRecord, docsByRef map[string]model.DocRecord, ref string, state *reuseState, baseEvent RebuildProgressEvent, reporter RebuildProgressReporter) (chunkCount, reusedCount, embeddedCount int, err error) {
+	if spec, ok := specsByRef[ref]; ok {
 		if err := insertSpecArtifactContext(ctx, tx, spec); err != nil {
 			return 0, 0, 0, err
 		}
@@ -489,10 +493,7 @@ func insertRecordContext(ctx context.Context, tx *sql.Tx, chunkStmt, vectorStmt 
 		baseEvent.ArtifactRef = ref
 		return insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, ref, spec.Title, plan, baseEvent, reporter)
 	}
-	for _, doc := range records.Docs {
-		if doc.Ref != ref {
-			continue
-		}
+	if doc, ok := docsByRef[ref]; ok {
 		if err := insertDocArtifactContext(ctx, tx, doc); err != nil {
 			return 0, 0, 0, err
 		}
@@ -505,12 +506,20 @@ func insertRecordContext(ctx context.Context, tx *sql.Tx, chunkStmt, vectorStmt 
 	return 0, 0, 0, fmt.Errorf("record %s not found in loaded sources", ref)
 }
 
-// countChunksForRefContext returns the number of chunks for an artifact ref.
-func countChunksForRefContext(ctx context.Context, db *sql.DB, ref string) (int, error) {
+// countChunksForRefsContext returns the total chunk count for a set of artifact refs
+// in a single query.
+func countChunksForRefsContext(ctx context.Context, db *sql.DB, refs []string) (int, error) {
+	if len(refs) == 0 {
+		return 0, nil
+	}
+	query := `SELECT COUNT(*) FROM chunks WHERE artifact_ref IN (` + placeholders(len(refs)) + `)`
+	args := make([]any, 0, len(refs))
+	for _, ref := range refs {
+		args = append(args, ref)
+	}
 	var count int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks WHERE artifact_ref = ?`, ref).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("count chunks for %s: %w", ref, err)
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count chunks for unchanged artifacts: %w", err)
 	}
 	return count, nil
 }
@@ -527,6 +536,15 @@ func upsertMetadataContext(ctx context.Context, tx *sql.Tx, key, value string) e
 // current transaction. These must run before commit so that failures trigger
 // a rollback rather than leaving a corrupted live database.
 func runTransactionIntegrityChecks(ctx context.Context, tx *sql.Tx) error {
+	row := tx.QueryRowContext(ctx, `PRAGMA integrity_check`)
+	var result string
+	if err := row.Scan(&result); err != nil {
+		return fmt.Errorf("run integrity_check: %w", err)
+	}
+	if strings.ToLower(result) != "ok" {
+		return fmt.Errorf("integrity_check failed: %s", result)
+	}
+
 	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
 	if err != nil {
 		return fmt.Errorf("run foreign_key_check: %w", err)
@@ -541,15 +559,6 @@ func runTransactionIntegrityChecks(ctx context.Context, tx *sql.Tx) error {
 			return fmt.Errorf("scan foreign_key_check result: %w", err)
 		}
 		return fmt.Errorf("foreign_key_check failed for table %s row %d parent %s fk %d", table, rowID, parent, fkid)
-	}
-
-	row := tx.QueryRowContext(ctx, `PRAGMA integrity_check`)
-	var result string
-	if err := row.Scan(&result); err != nil {
-		return fmt.Errorf("run integrity_check: %w", err)
-	}
-	if strings.ToLower(result) != "ok" {
-		return fmt.Errorf("integrity_check failed: %s", result)
 	}
 
 	return nil

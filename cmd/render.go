@@ -142,9 +142,9 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	if result.Update {
 		fmt.Fprintf(w, "updated %d artifact(s): %d added, %d updated, %d removed, %d unchanged\n",
 			result.ArtifactCount, result.AddedCount, result.UpdatedCount, result.RemovedCount, result.UnchangedCount)
+		fmt.Fprintf(w, "chunks: %d total, %d reused, %d embedded\n", result.ChunkCount, result.ReusedChunkCount, result.EmbeddedChunkCount)
+		fmt.Fprintf(w, "edges: %d\n", result.EdgeCount)
 		fmt.Fprintf(w, "database: %s\n", result.IndexPath)
-		fmt.Fprintf(w, "reused chunks: %d\n", result.ReusedChunkCount)
-		fmt.Fprintf(w, "embedded chunks: %d\n", result.EmbeddedChunkCount)
 		renderIndexRepoCoverage(w, result.Repos)
 		renderIndexSourceSummaries(w, result.Sources)
 		return
