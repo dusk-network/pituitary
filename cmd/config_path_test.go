@@ -324,3 +324,56 @@ func TestResolveCommandConfigPathExplainsDiscoveredShadowedConfig(t *testing.T) 
 		t.Fatalf("reason = %q, want selected and shadowed discovered paths", resolution.Reason)
 	}
 }
+
+func TestConfigResolutionDetectsShadowedMultirepoConfig(t *testing.T) {
+	root := t.TempDir()
+	childRepo := filepath.Join(root, "child")
+
+	// Parent multirepo config.
+	mustWriteFileCmd(t, filepath.Join(root, ".pituitary", "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(childRepo)+`"
+repo_id = "child"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(filepath.Join(root, "shared"))+`"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+`)
+
+	// Child repo-local config (no repos).
+	mustWriteFileCmd(t, filepath.Join(childRepo, ".pituitary", "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+`)
+
+	mustWriteFileCmd(t, filepath.Join(childRepo, "docs", "readme.md"), "# Hello\n")
+	mustWriteFileCmd(t, filepath.Join(root, "shared", "docs", "api.md"), "# API\n")
+
+	_, resolution, err := resolveCLIConfigPathFromWorkingDir(childRepo)
+	if err != nil {
+		t.Fatalf("resolveCLIConfigPathFromWorkingDir() error = %v", err)
+	}
+	if resolution.ShadowedMultirepoConfig == "" {
+		t.Fatal("ShadowedMultirepoConfig is empty, want path to parent multirepo config")
+	}
+	want := filepath.Join(root, ".pituitary", "pituitary.toml")
+	if got := resolution.ShadowedMultirepoConfig; got != want {
+		t.Fatalf("ShadowedMultirepoConfig = %q, want %q", got, want)
+	}
+}

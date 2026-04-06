@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/diag"
 )
 
@@ -41,10 +42,11 @@ type configPathOption struct {
 }
 
 type configResolution struct {
-	WorkingDir string                      `json:"working_dir"`
-	SelectedBy string                      `json:"selected_by,omitempty"`
-	Reason     string                      `json:"reason,omitempty"`
-	Candidates []configResolutionCandidate `json:"candidates"`
+	WorkingDir              string                      `json:"working_dir"`
+	SelectedBy              string                      `json:"selected_by,omitempty"`
+	Reason                  string                      `json:"reason,omitempty"`
+	Candidates              []configResolutionCandidate `json:"candidates"`
+	ShadowedMultirepoConfig string                      `json:"shadowed_multirepo_config,omitempty"`
 }
 
 type configResolutionCandidate struct {
@@ -226,6 +228,26 @@ func resolveCLIConfigPathFromWorkingDir(cwd string, explicitOptions ...configPat
 			if candidate.Detail == "" {
 				candidate.Detail = fmt.Sprintf("ignored because %s won first", configSourceLabel(selected.Source))
 			}
+		}
+	}
+
+	// Detect when the selected config shadows a parent multirepo config.
+	if selected.Source == configSourceDiscovery {
+		selectedSearchDir := discoverySearchDir(selected.Path)
+		for i := range resolution.Candidates {
+			candidate := &resolution.Candidates[i]
+			if candidate.Source != configSourceDiscovery || candidate.Status != "shadowed" || strings.TrimSpace(candidate.Path) == "" {
+				continue
+			}
+			if discoverySearchDir(candidate.Path) == selectedSearchDir {
+				continue
+			}
+			cfg, loadErr := config.Load(candidate.Path)
+			if loadErr != nil || len(cfg.Workspace.Repos) == 0 {
+				continue
+			}
+			resolution.ShadowedMultirepoConfig = candidate.Path
+			break
 		}
 	}
 
