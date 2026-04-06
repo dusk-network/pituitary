@@ -222,7 +222,7 @@ func TestRenderInitResultSummarizesOnboarding(t *testing.T) {
 		Index: &index.RebuildResult{
 			ArtifactCount: 5,
 			ChunkCount:    17,
-			EdgeCount:     8,
+			EdgeCount:     9,
 		},
 		Status: &statusResult{
 			EmbedderProvider: "fixture",

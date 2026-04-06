@@ -363,7 +363,7 @@ func TestRunIndexVerboseTextReportsSourceCountsAndProgress(t *testing.T) {
 		t.Fatalf("runIndex(--verbose) exit code = %d, want 0", exitCode)
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "indexed 5 artifact(s), 17 chunk(s), and 8 edge(s)") {
+	if !strings.Contains(out, "indexed 5 artifact(s), 17 chunk(s), and 9 edge(s)") {
 		t.Fatalf("runIndex(--verbose) output %q does not contain rebuild summary", out)
 	}
 	if !strings.Contains(out, "source: specs | spec_bundle | root: specs | items: 3 | specs: 3") {
@@ -463,7 +463,7 @@ func TestRunIndexDryRunTextDoesNotCreateDatabase(t *testing.T) {
 		t.Fatalf("runIndex(--dry-run) wrote unexpected stderr: %q", stderr.String())
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "dry run validated 5 artifact(s), 17 chunk(s), and 8 edge(s)") {
+	if !strings.Contains(out, "dry run validated 5 artifact(s), 17 chunk(s), and 9 edge(s)") {
 		t.Fatalf("runIndex(--dry-run) output %q does not contain dry-run summary", out)
 	}
 	if !strings.Contains(out, "database write: skipped") {
@@ -519,8 +519,8 @@ func TestRunIndexDryRunJSONDoesNotCreateDatabase(t *testing.T) {
 	if payload.Result.ArtifactCount != 5 || payload.Result.SpecCount != 3 || payload.Result.DocCount != 2 {
 		t.Fatalf("result = %+v, want 5 artifacts / 3 specs / 2 docs", payload.Result)
 	}
-	if payload.Result.ChunkCount != 17 || payload.Result.EdgeCount != 8 {
-		t.Fatalf("result = %+v, want 17 chunks / 8 edges", payload.Result)
+	if payload.Result.ChunkCount != 17 || payload.Result.EdgeCount != 9 {
+		t.Fatalf("result = %+v, want 17 chunks / 9 edges", payload.Result)
 	}
 	if payload.Result.IndexPath == "" {
 		t.Fatalf("result = %+v, want non-empty index path", payload.Result)

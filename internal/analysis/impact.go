@@ -230,6 +230,17 @@ func impactedSpecs(candidate model.SpecRecord, specs map[string]specDocument) []
 				Historical:   true,
 				Inference:    spec.Record.Inference,
 			})
+		case relationExists(candidate.Relations, model.RelationRelatesTo, spec.Record.Ref) ||
+			relationExists(spec.Record.Relations, model.RelationRelatesTo, candidate.Ref):
+			result = append(result, ImpactedSpec{
+				Ref:          spec.Record.Ref,
+				Title:        spec.Record.Title,
+				Repo:         artifactRepoID(spec.Record.Metadata),
+				Status:       spec.Record.Status,
+				Relationship: string(model.RelationRelatesTo),
+				Historical:   false,
+				Inference:    spec.Record.Inference,
+			})
 		}
 	}
 
@@ -325,7 +336,10 @@ func buildImpactSummary(specs []ImpactedSpec, docs []ImpactedDoc, limit int) []I
 	for _, item := range specs {
 		why := "depends on this spec"
 		priority := 0
-		if item.Historical {
+		if item.Relationship == string(model.RelationRelatesTo) {
+			why = "related spec (soft reference)"
+			priority = 2
+		} else if item.Historical {
 			why = "historical spec superseded by this spec"
 			priority = 3
 		}

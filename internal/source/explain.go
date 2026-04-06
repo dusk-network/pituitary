@@ -68,6 +68,7 @@ type ExplainedInferredSpec struct {
 	Domain     string                     `json:"domain,omitempty"`
 	DependsOn  []string                   `json:"depends_on,omitempty"`
 	Supersedes []string                   `json:"supersedes,omitempty"`
+	RelatesTo  []string                   `json:"relates_to,omitempty"`
 	AppliesTo  []string                   `json:"applies_to,omitempty"`
 	Inference  *model.InferenceConfidence `json:"inference,omitempty"`
 }
@@ -240,6 +241,7 @@ func explainMarkdownContractSource(workspaceRoot string, explanation SourceFileE
 		Domain:     record.Domain,
 		DependsOn:  relationRefs(record.Relations, model.RelationDependsOn),
 		Supersedes: relationRefs(record.Relations, model.RelationSupersedes),
+		RelatesTo:  relationRefs(record.Relations, model.RelationRelatesTo),
 		AppliesTo:  append([]string(nil), record.AppliesTo...),
 		Inference:  record.Inference,
 	}

@@ -26,6 +26,7 @@ type RelationType string
 const (
 	RelationDependsOn  RelationType = "depends_on"
 	RelationSupersedes RelationType = "supersedes"
+	RelationRelatesTo  RelationType = "relates_to"
 )
 
 // Relation represents one explicit edge emitted by a normalized spec record.
