@@ -230,6 +230,60 @@ include = ["*.md"]
 	})
 }
 
+func TestExplainFileSecondaryRepoBundlePathIsRepoRelative(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustWriteFile(t, filepath.Join(root, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+repo_id = "primary"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(shared)+`"
+
+[[sources]]
+name = "shared-specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+repo = "shared"
+path = "specs"
+`)
+	mustWriteFile(t, filepath.Join(primary, ".gitkeep"), "")
+	mustWriteFile(t, filepath.Join(shared, "specs", "rollout", "spec.toml"), `
+id = "SPEC-200"
+title = "Shared Rollout"
+status = "accepted"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(shared, "specs", "rollout", "body.md"), "# Shared Rollout\n")
+
+	cfg, err := config.Load(filepath.Join(root, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := ExplainFile(cfg, filepath.Join(shared, "specs", "rollout", "body.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile() error = %v", err)
+	}
+
+	specSource, ok := findSourceExplanation(result.Sources, func(src SourceFileExplanation) bool {
+		return src.Name == "shared-specs"
+	})
+	if !ok {
+		t.Fatal("did not find shared-specs source")
+	}
+	// BundlePath should be relative to the secondary repo root, not the primary workspace root.
+	if got, want := specSource.BundlePath, "specs/rollout/spec.toml"; got != want {
+		t.Fatalf("BundlePath = %q, want %q (repo-relative, not workspace-relative)", got, want)
+	}
+}
+
 func findSourceExplanation(sources []SourceFileExplanation, match func(SourceFileExplanation) bool) (SourceFileExplanation, bool) {
 	for _, source := range sources {
 		if match(source) {

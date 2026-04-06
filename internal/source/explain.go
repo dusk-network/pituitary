@@ -119,7 +119,7 @@ func ExplainFile(cfg *config.Config, path string) (*ExplainFileResult, error) {
 	hasSourceCoverage := false
 
 	for _, source := range cfg.Sources {
-		explanation, err := explainFileInSource(cfg.Workspace.RootPath, source, absolutePath)
+		explanation, err := explainFileInSource(source.RepoRootPath, source, absolutePath)
 		if err != nil {
 			return nil, err
 		}
