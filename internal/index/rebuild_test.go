@@ -500,3 +500,42 @@ func mustWriteFile(tb testing.TB, path, content string) {
 		tb.Fatalf("write %s: %v", path, err)
 	}
 }
+
+func TestAdapterFromMetadata(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		want     string
+	}{
+		{
+			name:     "nil metadata falls back to filesystem",
+			metadata: nil,
+			want:     config.AdapterFilesystem,
+		},
+		{
+			name:     "empty metadata falls back to filesystem",
+			metadata: map[string]string{},
+			want:     config.AdapterFilesystem,
+		},
+		{
+			name:     "source_adapter present",
+			metadata: map[string]string{"source_adapter": "github"},
+			want:     "github",
+		},
+		{
+			name:     "source_adapter empty string falls back",
+			metadata: map[string]string{"source_adapter": ""},
+			want:     config.AdapterFilesystem,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := adapterFromMetadata(tt.metadata)
+			if got != tt.want {
+				t.Errorf("adapterFromMetadata() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
