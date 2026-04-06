@@ -151,8 +151,61 @@ func TestRunExplainFileRejectsMissingPath(t *testing.T) {
 	}
 }
 
-func TestResolveExplainPathResolvesRelativePathFromWorkspaceRoot(t *testing.T) {
-	root := t.TempDir()
+func TestResolveExplainPathResolvesRelativePathFromCWD(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks() error = %v", err)
+	}
+	primary := filepath.Join(root, "primary")
+	shared := filepath.Join(root, "shared")
+	mustWriteFileCmd(t, filepath.Join(root, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+repo_id = "primary"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(shared)+`"
+
+[[sources]]
+name = "shared-docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+repo = "shared"
+path = "docs"
+include = ["*.md"]
+`)
+	mustWriteFileCmd(t, filepath.Join(primary, ".keep"), "")
+	mustWriteFileCmd(t, filepath.Join(shared, "docs", "api.md"), "# API\n")
+
+	cfg, err := config.Load(filepath.Join(root, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	// Run from the shared repo's docs directory — relative path should resolve from CWD.
+	exitCode := withWorkingDir(t, filepath.Join(shared, "docs"), func() int {
+		got, err := resolveExplainPath(cfg, "api.md")
+		if err != nil {
+			t.Fatalf("resolveExplainPath() error = %v", err)
+		}
+		want, _ := filepath.Abs(filepath.Join(shared, "docs", "api.md"))
+		if got != want {
+			t.Fatalf("resolveExplainPath() = %q, want %q", got, want)
+		}
+		return 0
+	})
+	if exitCode != 0 {
+		t.Fatalf("withWorkingDir() exit code = %d, want 0", exitCode)
+	}
+}
+
+func TestResolveExplainPathResolvesRelativePathFromCWD_PrimaryRepo(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks() error = %v", err)
+	}
 	exitCode := withWorkingDir(t, root, func() int {
 		mustWriteFileCmd(t, filepath.Join(root, "docs", "guide.md"), "# guide\n")
 		cfg := &config.Config{Workspace: config.Workspace{RootPath: root}}
