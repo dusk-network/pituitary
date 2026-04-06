@@ -74,6 +74,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertSchemaObject(t, db, "table", "edges")
 	assertSchemaObject(t, db, "index", "idx_artifacts_kind_status_domain")
 	assertSchemaObject(t, db, "index", "idx_edges_from_ref_type")
+	assertAllAdapters(t, db, config.AdapterFilesystem)
 	assertSchemaSQLContains(t, db, "chunks_vec", "CREATE VIRTUAL TABLE chunks_vec USING vec0")
 	assertSchemaSQLContains(t, db, "chunks_vec", "embedding float[8] distance_metric=cosine")
 	assertColumnType(t, db, `SELECT typeof(embedding) FROM chunks_vec LIMIT 1`, "blob")
@@ -498,6 +499,17 @@ func mustWriteFile(tb testing.TB, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		tb.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func assertAllAdapters(t *testing.T, db *sql.DB, want string) {
+	t.Helper()
+	var bad int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts WHERE adapter != ?`, want).Scan(&bad); err != nil {
+		t.Fatalf("query adapter mismatch: %v", err)
+	}
+	if bad != 0 {
+		t.Fatalf("adapter mismatch: %d artifact(s) do not have adapter=%q", bad, want)
 	}
 }
 

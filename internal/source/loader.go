@@ -96,6 +96,7 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 		}
 		annotateSourceRoleMetadata(source.Role, adapterResult)
 		annotateSourceRepoMetadata(resolvedRepo, adapterResult)
+		annotateSourceAdapterMetadata(source.Adapter, adapterResult)
 
 		if err := appendUniqueSpecRecords(result, seenSpecs, source, adapterResult.Specs); err != nil {
 			return nil, err
@@ -186,6 +187,27 @@ func withSourceRepo(metadata map[string]string, repoID string) map[string]string
 		metadata = map[string]string{}
 	}
 	metadata["repo_id"] = repoID
+	return metadata
+}
+
+func annotateSourceAdapterMetadata(adapter string, result *sdk.AdapterResult) {
+	adapter = strings.TrimSpace(adapter)
+	if adapter == "" || result == nil {
+		return
+	}
+	for i := range result.Specs {
+		result.Specs[i].Metadata = withSourceAdapter(result.Specs[i].Metadata, adapter)
+	}
+	for i := range result.Docs {
+		result.Docs[i].Metadata = withSourceAdapter(result.Docs[i].Metadata, adapter)
+	}
+}
+
+func withSourceAdapter(metadata map[string]string, adapter string) map[string]string {
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["source_adapter"] = adapter
 	return metadata
 }
 
