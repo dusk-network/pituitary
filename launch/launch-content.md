@@ -6,39 +6,41 @@ Prepared 2026-03-26. Ready-to-post content for each channel, plus sequencing pla
 
 ## 1. Show HN (Hacker News)
 
-**Title:** Show HN: Pituitary – Catch spec drift before it catches you (Go CLI + MCP)
+**Title:** Show HN: Pituitary – Intent governance for the AI-natives (Go CLI + MCP)
 
 **URL:** https://github.com/dusk-network/pituitary
 
 **Text:**
 
-I kept writing specs and decision docs with AI, then discovering they contradicted each other three sessions later. The architecture doc said one thing, CLAUDE.md said another, and the code did a third.
+Karpathy's recent thread on LLM Knowledge Bases describes a "Linting" layer — something that checks your knowledge base for staleness, contradictions, and inconsistency. That's exactly what Pituitary is, except it already exists and ships today.
 
-Grep doesn't catch semantic drift. Nothing I found watched the whole corpus. So I built Pituitary.
+I ran it on a real repo — 11 specs, 29 docs. It found 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions. The project direction was plagued by doc drifts, runtime contract contradictions, and deprecated terminology surfacing everywhere. The team had been doing routine LLM cleanups — but the LLM says "all clean" while only covering what fits in the context window. The rest keeps rotting. Next PR introduces fresh contradictions on top of the ones that were never actually fixed. It's a treadmill that never converges.
 
-It's a single Go binary that indexes your local markdown specs, docs, and decision records into SQLite, then catches what you can't track by hand:
+I built Pituitary to break this cycle. It's a Go CLI that indexes your entire corpus — specs, docs, decision records — into SQLite and checks all of it structurally, every time:
 
 - Overlapping decisions between specs
 - Docs that contradict accepted specs (with deterministic auto-fix)
 - Code diffs that conflict with spec requirements
 - Terminology that drifted after a conceptual migration
+- Specs that went stale since the code they govern changed
 
 ```
 pituitary init --path .
 pituitary check-doc-drift --scope all
+pituitary check-terminology --scope all
+pituitary compile --dry-run
 git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 ```
 
-No Docker, no API keys, one SQLite file. Deterministic by default — optionally plug in any OpenAI-compatible embedding API (cloud or local) for deeper semantic retrieval.
+No Docker, no API keys, one SQLite file (pure Go, no CGO). Deterministic by default. When it finds terminology drift, `pituitary compile` generates context-aware patches that distinguish prose from identifiers from historical entries — then apply them in one pass. The CCD audit ran entirely on local LLMs (M2 Ultra). No data left the machine.
 
-It also ships an MCP server with 6 tools so Claude Code, Cursor, and Windsurf can query the spec index mid-session. And it runs in CI.
+This matters even more across multiple repos — Pituitary becomes the single point of truth where cross-repo governance converges. It slashes the token costs of false starts and misdirections directly caused by drifting issues, conflicting specs, and obsolete docs.
 
-The problem gets worse the more AI you use. Every session produces more docs that nobody cross-checks. Pituitary is the feedback loop.
+It ships an MCP server with 13 tools across 7 editors (Claude Code, Cursor, Windsurf, Cline, Codex, Gemini, Cowork), and runs in CI.
 
-GitHub: https://github.com/dusk-network/pituitary
-MCP registry: published on modelcontextprotocol.io and mcp.so
+v1.0.0-beta.6: https://github.com/dusk-network/pituitary
 
-Would love feedback, especially from anyone managing 20+ decision records across a codebase.
+Would love feedback — especially from anyone fighting the cleanup treadmill or managing specs across multiple repos.
 
 ---
 
@@ -56,35 +58,41 @@ Would love feedback, especially from anyone managing 20+ decision records across
 
 ## 2. Reddit — r/programming
 
-**Title:** I built a CLI tool that catches when your specs, docs, and code silently contradict each other
+**Title:** I ran a CLI on a real repo — 90 deprecated-term violations, 7 contradictions. The team's LLM cleanups had missed all of it.
 
 **Body:**
 
-Every team I've worked with has the same problem: you write specs, architecture docs, decision records, and CLAUDE.md files. They accumulate. Then three weeks later someone discovers the rate limiting doc says "fixed window" but the spec that was accepted two months ago says "sliding window." Nobody noticed because nobody reads everything.
+Every team I've worked with has the same pattern: specs and docs accumulate, drift creeps in, someone runs an LLM cleanup pass. The LLM says "all clean." You move on. But the cleanup only touched what fit in the context window. The rest keeps rotting — and the next PR introduces fresh contradictions on top of the ones that were never actually fixed.
 
-AI makes it worse. Each session starts fresh. The agent writes more docs, more specs, more decisions — and nobody cross-checks them against each other.
+AI makes it dramatically worse. Each session starts blind. The agent uses deprecated terminology, proposes changes against specs it hasn't read, generates docs that contradict accepted decisions. You clean up after it with another LLM session that has the same partial view. The drift compounds. It's a treadmill that feels productive but never converges.
 
-I built **Pituitary** to fix this. It's a Go CLI that:
+I built **Pituitary** to break the cycle. It's a Go CLI that indexes your entire corpus into SQLite and checks all of it, every time:
 
 1. Indexes your markdown specs, docs, and decision records into SQLite
 2. Detects overlapping decisions between specs
 3. Finds docs that contradict accepted specs (and can auto-fix them)
 4. Checks PR diffs against spec requirements before merge
 5. Audits terminology drift after conceptual migrations
-
-Single binary. No Docker. No API keys required. Deterministic by default.
+6. Compiles terminology findings into context-aware patches (`pituitary compile`)
+7. Flags specs that went stale since the code they govern changed
 
 ```
 pituitary init --path .
 pituitary check-doc-drift --scope all
+pituitary check-terminology --scope all
+pituitary compile --dry-run
 git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 ```
 
-It also ships an MCP server so Claude Code, Cursor, and Windsurf get spec awareness mid-session.
+I ran it on a real repo (11 specs, 29 docs) — 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions. The project direction was derailing: doc drifts, runtime contract contradictions, deprecated terminology surfacing everywhere. All caught with local LLMs. No data left the machine.
+
+This becomes obligatory with multiple repos. Pituitary is the single point of truth where cross-repo governance converges. And it slashes the token costs of false starts and misdirections directly caused by drifting issues, conflicting specs, and obsolete docs.
+
+It ships an MCP server with 13 tools across 7 editors (Claude Code, Cursor, Windsurf, Cline, Codex, Gemini, Cowork). If you've seen Karpathy's thread on LLM Knowledge Bases — this is the "Linting" layer he described, except it already exists.
 
 Open source, MIT licensed: https://github.com/dusk-network/pituitary
 
-Would love to hear how others handle this problem. Do you just accept that docs go stale? Use a wiki? Something else?
+Would love to hear how others handle this. Are you running periodic LLM audits? How's that working out?
 
 ---
 
@@ -101,20 +109,26 @@ The core analysis surface:
 - **Overlap detection** — catch decisions that cover the same ground
 - **Doc drift** — find docs that contradict accepted specs, with deterministic auto-fix
 - **Code compliance** — pipe your PR diff in and check it against spec requirements
-- **Impact analysis** — trace what's affected when a spec changes
-- **Terminology audit** — find displaced terms after conceptual migrations
+- **Impact analysis** — trace what's affected when a spec changes, with severity classification (breaking/behavioral/cosmetic)
+- **Terminology audit + compile** — find displaced terms, then generate context-aware patches that distinguish prose from identifiers from historical entries
+- **Spec freshness** — flag specs that haven't been reviewed since the code they govern changed
+
+On a real repo (11 specs, 29 docs), it caught 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions — drift that routine LLM cleanup passes had been missing because they only see what fits in the context window. Pituitary indexes the whole corpus and checks all of it every time. [Full write-up here.](https://github.com/dusk-network/pituitary/blob/main/docs/use-cases/ccd-terminology-and-drift-audit.md)
 
 Design decisions that might be interesting to Go devs:
 
-- Single binary, no Docker — CGo for `sqlite-vec` is the only non-pure-Go dependency
+- Single binary, no Docker, pure Go — sqlite bindings via Wasm, no CGO dependency
 - SQLite for the index with atomic rebuilds
 - Deterministic retrieval by default (fixture embedder, no API keys needed) — optional OpenAI-compatible embeddings for deeper semantic search
-- CLI-first architecture: the optional MCP server wraps the same CLI commands
+- CLI-first architecture: the optional MCP server (13 tools) wraps the same CLI commands
+- Parallel LLM adjudication with bounded errgroup concurrency
 - Heading toward a kernel/extension adapter pattern (RFC in the repo) to keep the core pure while adding external source adapters
 
-The `spec.toml` + `body.md` bundle format and the indexing pipeline might be worth looking at if you're interested in document analysis in Go.
+Multi-repo support lets you bind sources to named repo roots — governance converges in one place instead of per-repo ad-hoc audits.
 
-MIT licensed: https://github.com/dusk-network/pituitary
+The `spec.toml` + `body.md` bundle format and the indexing pipeline might be worth looking at if you're interested in document analysis in Go. If you've seen Karpathy's thread on LLM Knowledge Bases, Pituitary maps to his "Linting" and "Extra tools" layers.
+
+MIT licensed, v1.0.0-beta.6: https://github.com/dusk-network/pituitary
 
 Contributions welcome — there are `good first issue` labels if you want to pick something up. The codebase has clear package boundaries.
 
@@ -128,31 +142,29 @@ Contributions welcome — there are `good first issue` labels if you want to pic
 
 **Post:**
 
-Your AI writes more specs and docs than you can cross-check.
+@kaboris described a "Linting" layer for LLM Knowledge Bases. I built it. It already ships.
 
-Three sessions later you discover the architecture doc contradicts the spec that was accepted last month. The rate limiting doc says "fixed window" — the spec says "sliding window." Nobody noticed because nobody reads everything.
+Ran it on a real repo — 11 specs, 29 docs. Found 90 deprecated-term violations across 22 artifacts. 7 semantic contradictions. The project was derailing: doc drifts, runtime contract contradictions, deprecated terminology everywhere.
 
-I kept hitting this so I built Pituitary. It's a Go CLI that indexes your markdown specs, docs, and decision records into SQLite, then catches what you can't track by hand:
+The team had been doing LLM cleanups. The LLM says "all clean" — but only covers what fits in context. The rest rots. Next PR adds fresh contradictions on top of the ones never fixed. You fight drift with LLMs, but LLMs created the drift. It never converges.
+
+Pituitary breaks this. It indexes the ENTIRE corpus. Checks ALL of it. Structurally. Every time.
 
 → Overlapping decisions between specs
-→ Docs that silently contradict accepted specs (with deterministic auto-fix)
-→ Code diffs that conflict with spec requirements before merge
-→ Terminology that drifted after a conceptual migration
+→ Docs that contradict accepted specs (with deterministic auto-fix)
+→ Code diffs that conflict with spec requirements
+→ Terminology drift → `compile` generates context-aware patches in one pass
+→ Stale specs the code outgrew
 
-Single binary. No Docker. No API keys. One SQLite file. 30 seconds to first finding on any repo with markdown specs.
+One binary (pure Go). No Docker. No API keys. Local LLMs only. No data left the machine.
 
-pituitary init --path .
-pituitary check-doc-drift --scope all
-git diff origin/main...HEAD | pituitary check-compliance --diff-file -
+Across multiple repos it becomes the single point of truth. Slashes token costs from false starts and misdirections caused by drifting specs and obsolete docs.
 
-It also ships an MCP server with 6 tools — add it to Claude Code, Cursor, or Windsurf and your agent gets spec awareness mid-session. It can check overlap before writing a new spec, or verify a PR doesn't contradict accepted decisions.
+13 MCP tools across 7 editors. Your agent stops guessing — builds against what you actually decided.
 
-The problem gets worse the more AI you use. Every session produces more docs. Nobody cross-checks them. Pituitary is the feedback loop between "what you decided" and "what's actually true."
+v1.0.0-beta.6: github.com/dusk-network/pituitary
 
-Open source, MIT licensed, written in Go.
-github.com/dusk-network/pituitary
-
-Try it. Break it. Tell me what's wrong.
+Try it on your repo. You'll be surprised what your cleanups missed.
 
 ---
 
@@ -217,6 +229,8 @@ When people ask "how is this different from X?":
 - **vs. linters/static analysis:** Linters check code. Pituitary checks the space between specs, docs, and code — the semantic layer that linters can't reach.
 - **vs. "just use grep":** Grep finds text. Pituitary finds when "sliding window" in your spec contradicts "fixed window" in your doc — same concept, different surface text.
 - **vs. Notion/Confluence search:** Those search within one system. Pituitary indexes across all your local markdown and cross-checks them against each other.
+- **vs. "I just run an LLM cleanup pass":** That's the treadmill. The cleanup covers what fits in context, declares victory, and misses the rest. Pituitary indexes the entire corpus structurally — declared terminology policies, deterministic drift detection, compile-to-patch. Not a one-off prompt that gives false confidence.
+- **vs. ad-hoc LLM knowledge-base health checks:** If you're building an LLM knowledge base (à la Karpathy's "linting" layer), Pituitary is the structured version. Persistent governance loop, not a prompt you run and forget.
 
 ---
 

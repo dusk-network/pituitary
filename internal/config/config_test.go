@@ -1518,6 +1518,75 @@ path = "specs"
 	}
 }
 
+func TestDeclaresMultirepoReposReturnsTrueForMultirepoConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+repo_id = "primary"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "shared"
+root = "../shared"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+`)
+
+	got, err := DeclaresMultirepoRepos(configPath)
+	if err != nil {
+		t.Fatalf("DeclaresMultirepoRepos() error = %v", err)
+	}
+	if !got {
+		t.Fatal("DeclaresMultirepoRepos() = false, want true")
+	}
+}
+
+func TestDeclaresMultirepoReposReturnsFalseForSingleRepoConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	configPath := filepath.Join(root, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+`)
+
+	got, err := DeclaresMultirepoRepos(configPath)
+	if err != nil {
+		t.Fatalf("DeclaresMultirepoRepos() error = %v", err)
+	}
+	if got {
+		t.Fatal("DeclaresMultirepoRepos() = true, want false")
+	}
+}
+
+func TestDeclaresMultirepoReposReturnsErrorForMissingFile(t *testing.T) {
+	t.Parallel()
+
+	got, err := DeclaresMultirepoRepos(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err == nil {
+		t.Fatal("DeclaresMultirepoRepos() error = nil, want error")
+	}
+	if got {
+		t.Fatal("DeclaresMultirepoRepos() = true on error, want false")
+	}
+}
+
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

@@ -29,6 +29,7 @@ const (
 type ExplainFileResult struct {
 	AbsolutePath  string                  `json:"absolute_path"`
 	WorkspacePath string                  `json:"workspace_path,omitempty"`
+	RepoID        string                  `json:"repo_id,omitempty"`
 	Summary       ExplainFileSummary      `json:"summary"`
 	Sources       []SourceFileExplanation `json:"sources"`
 }
@@ -102,6 +103,15 @@ func ExplainFile(cfg *config.Config, path string) (*ExplainFileResult, error) {
 	}
 	if pathWithinRoot(cfg.Workspace.RootPath, absolutePath) {
 		result.WorkspacePath = workspaceRelative(cfg.Workspace.RootPath, absolutePath)
+		result.RepoID = config.PrimaryRepoID(cfg)
+	} else {
+		for _, repo := range cfg.Workspace.Repos {
+			if pathWithinRoot(repo.RootPath, absolutePath) {
+				result.RepoID = repo.ID
+				result.WorkspacePath = repo.ID + ":" + workspaceRelative(repo.RootPath, absolutePath)
+				break
+			}
+		}
 	}
 
 	indexedBy := make([]string, 0, len(cfg.Sources))
@@ -109,7 +119,7 @@ func ExplainFile(cfg *config.Config, path string) (*ExplainFileResult, error) {
 	hasSourceCoverage := false
 
 	for _, source := range cfg.Sources {
-		explanation, err := explainFileInSource(cfg.Workspace.RootPath, source, absolutePath)
+		explanation, err := explainFileInSource(source.RepoRootPath, source, absolutePath)
 		if err != nil {
 			return nil, err
 		}

@@ -146,7 +146,11 @@ func resolveExplainPath(cfg *config.Config, path string) (string, error) {
 
 	absPath := trimmed
 	if !filepath.IsAbs(absPath) {
-		absPath = filepath.Join(rootPath, absPath)
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return "", fmt.Errorf("resolve working directory: %w", cwdErr)
+		}
+		absPath = filepath.Join(cwd, absPath)
 	}
 	absPath, err = filepath.Abs(absPath)
 	if err != nil {

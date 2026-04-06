@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/diag"
 )
 
@@ -41,10 +42,11 @@ type configPathOption struct {
 }
 
 type configResolution struct {
-	WorkingDir string                      `json:"working_dir"`
-	SelectedBy string                      `json:"selected_by,omitempty"`
-	Reason     string                      `json:"reason,omitempty"`
-	Candidates []configResolutionCandidate `json:"candidates"`
+	WorkingDir              string                      `json:"working_dir"`
+	SelectedBy              string                      `json:"selected_by,omitempty"`
+	Reason                  string                      `json:"reason,omitempty"`
+	Candidates              []configResolutionCandidate `json:"candidates"`
+	ShadowedMultirepoConfig string                      `json:"shadowed_multirepo_config,omitempty"`
 }
 
 type configResolutionCandidate struct {
@@ -157,8 +159,18 @@ func cliLoggerFromContext(ctx context.Context) *diag.Logger {
 }
 
 func resolveCommandConfigPath(ctx context.Context, localConfigPath string) (string, error) {
-	resolvedPath, _, err := resolveCommandConfigPathWithResolution(ctx, localConfigPath)
+	resolvedPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, localConfigPath)
+	if err == nil && resolution != nil {
+		emitMultirepoShadowWarning(resolution)
+	}
 	return resolvedPath, err
+}
+
+func emitMultirepoShadowWarning(resolution *configResolution) {
+	if resolution == nil || resolution.ShadowedMultirepoConfig == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: selected config shadows parent multirepo config %s\n", filepath.ToSlash(resolution.ShadowedMultirepoConfig))
 }
 
 func resolveCommandConfigPathWithResolution(ctx context.Context, localConfigPath string) (string, *configResolution, error) {
@@ -226,6 +238,26 @@ func resolveCLIConfigPathFromWorkingDir(cwd string, explicitOptions ...configPat
 			if candidate.Detail == "" {
 				candidate.Detail = fmt.Sprintf("ignored because %s won first", configSourceLabel(selected.Source))
 			}
+		}
+	}
+
+	// Detect when the selected config shadows a parent multirepo config.
+	if selected.Source == configSourceDiscovery {
+		selectedSearchDir := discoverySearchDir(selected.Path)
+		for i := range resolution.Candidates {
+			candidate := &resolution.Candidates[i]
+			if candidate.Source != configSourceDiscovery || candidate.Status != "shadowed" || strings.TrimSpace(candidate.Path) == "" {
+				continue
+			}
+			if discoverySearchDir(candidate.Path) == selectedSearchDir {
+				continue
+			}
+			isMultirepo, err := config.DeclaresMultirepoRepos(candidate.Path)
+			if err != nil || !isMultirepo {
+				continue
+			}
+			resolution.ShadowedMultirepoConfig = candidate.Path
+			break
 		}
 	}
 
