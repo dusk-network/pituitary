@@ -273,6 +273,7 @@ func TestRunExplainFileJSONSupportsAbsolutePathFromConfiguredSecondaryRepo(t *te
 		Result struct {
 			AbsolutePath  string `json:"absolute_path"`
 			WorkspacePath string `json:"workspace_path"`
+			RepoID        string `json:"repo_id"`
 			Summary       struct {
 				Status    string   `json:"status"`
 				IndexedBy []string `json:"indexed_by"`
@@ -293,8 +294,11 @@ func TestRunExplainFileJSONSupportsAbsolutePathFromConfiguredSecondaryRepo(t *te
 	if got, want := payload.Result.Summary.Status, "indexed"; got != want {
 		t.Fatalf("summary status = %q, want %q", got, want)
 	}
-	if payload.Result.WorkspacePath != "" {
-		t.Fatalf("workspace path = %q, want empty for secondary repo absolute path", payload.Result.WorkspacePath)
+	if got, want := payload.Result.WorkspacePath, "shared:docs/guides/api-rate-limits.md"; got != want {
+		t.Fatalf("workspace path = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.RepoID, "shared"; got != want {
+		t.Fatalf("repo_id = %q, want %q", got, want)
 	}
 	if len(payload.Result.Summary.IndexedBy) != 1 || payload.Result.Summary.IndexedBy[0] != "shared-docs" {
 		t.Fatalf("indexed_by = %+v, want shared-docs", payload.Result.Summary.IndexedBy)
