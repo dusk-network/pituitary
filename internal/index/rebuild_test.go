@@ -528,6 +528,11 @@ func TestAdapterFromMetadata(t *testing.T) {
 			metadata: map[string]string{"source_adapter": ""},
 			want:     config.AdapterFilesystem,
 		},
+		{
+			name:     "source_adapter whitespace-only falls back",
+			metadata: map[string]string{"source_adapter": "  "},
+			want:     config.AdapterFilesystem,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

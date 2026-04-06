@@ -613,9 +613,9 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 }
 
 // adapterFromMetadata returns the source adapter recorded in metadata, falling
-// back to the filesystem adapter when the key is absent or empty.
+// back to the filesystem adapter when the key is absent or blank.
 func adapterFromMetadata(metadata map[string]string) string {
-	if v := metadata["source_adapter"]; v != "" {
+	if v := strings.TrimSpace(metadata["source_adapter"]); v != "" {
 		return v
 	}
 	return config.AdapterFilesystem
