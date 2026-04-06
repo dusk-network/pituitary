@@ -103,7 +103,7 @@ func ExplainFile(cfg *config.Config, path string) (*ExplainFileResult, error) {
 	}
 	if pathWithinRoot(cfg.Workspace.RootPath, absolutePath) {
 		result.WorkspacePath = workspaceRelative(cfg.Workspace.RootPath, absolutePath)
-		result.RepoID = cfg.Workspace.RepoID
+		result.RepoID = config.PrimaryRepoID(cfg)
 	} else {
 		for _, repo := range cfg.Workspace.Repos {
 			if pathWithinRoot(repo.RootPath, absolutePath) {

@@ -284,6 +284,40 @@ body = "body.md"
 	}
 }
 
+func TestExplainFileDerivesRepoIDWhenNotExplicit(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	primary := filepath.Join(root, "myrepo")
+	mustWriteFile(t, filepath.Join(root, "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(primary)+`"
+index_path = "`+filepath.ToSlash(filepath.Join(root, ".pituitary", "pituitary.db"))+`"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+`)
+	mustWriteFile(t, filepath.Join(primary, "docs", "guide.md"), "# Guide\n")
+
+	cfg, err := config.Load(filepath.Join(root, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := ExplainFile(cfg, filepath.Join(primary, "docs", "guide.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile() error = %v", err)
+	}
+	// RepoID should be derived from the workspace root directory name "myrepo"
+	if got, want := result.RepoID, "myrepo"; got != want {
+		t.Fatalf("RepoID = %q, want %q (derived from workspace root dir)", got, want)
+	}
+}
+
 func findSourceExplanation(sources []SourceFileExplanation, match func(SourceFileExplanation) bool) (SourceFileExplanation, bool) {
 	for _, source := range sources {
 		if match(source) {

@@ -32,9 +32,9 @@ Single binary. No Docker. No API keys required. One SQLite file.
 
 ## What It Catches
 
-You already know your docs drift. You run LLM cleanup passes, it says "all clean," and you move on. But the cleanup only covered what fit in the context window. The rest keeps rotting. Next PR introduces three new contradictions on top of the ones that were never actually fixed. It's a treadmill that feels productive but never converges. Pituitary replaces that treadmill with a structural guarantee: it indexes the entire corpus and checks all of it, every time.
+You already know your docs drift. You fight it with LLM cleanup passes. The LLM says "all clean" — but it only covered what fit in the context window. The rest keeps rotting. Next PR introduces fresh contradictions on top of the ones that were never actually fixed. It's a treadmill that feels productive but never converges. Meanwhile the token costs pile up: false starts, misdirections, and wasted context directly caused by drifting issues, conflicting specs, and obsolete docs.
 
-On a [real repo](docs/use-cases/ccd-terminology-and-drift-audit.md) with 11 specs and 29 docs, Pituitary found 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions — drift the team had been fighting with routine cleanups and losing.
+Pituitary replaces that treadmill with a structural guarantee: it indexes the entire corpus and checks all of it, every time. On a [real repo](docs/use-cases/ccd-terminology-and-drift-audit.md) with 11 specs and 29 docs, it found 90 deprecated-term violations across 22 artifacts and 7 semantic contradictions. The project direction was plagued by doc drifts, runtime contract contradictions, and deprecated terminology surfacing everywhere — Pituitary rescued it. Across multiple repos, it becomes the single point of truth where governance converges.
 
 **Overlapping decisions.** A new spec covers ground an existing one already handles.
 

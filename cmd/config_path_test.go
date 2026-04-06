@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,5 +376,73 @@ include = ["*.md"]
 	want := filepath.Join(root, ".pituitary", "pituitary.toml")
 	if got := resolution.ShadowedMultirepoConfig; got != want {
 		t.Fatalf("ShadowedMultirepoConfig = %q, want %q", got, want)
+	}
+}
+
+func TestResolveCommandConfigPathEmitsShadowWarning(t *testing.T) {
+	root := t.TempDir()
+	resolvedRoot, resolveErr := filepath.EvalSymlinks(root)
+	if resolveErr != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", root, resolveErr)
+	}
+	childRepo := filepath.Join(resolvedRoot, "child")
+
+	// Parent multirepo config.
+	mustWriteFileCmd(t, filepath.Join(resolvedRoot, ".pituitary", "pituitary.toml"), `
+[workspace]
+root = "`+filepath.ToSlash(childRepo)+`"
+repo_id = "child"
+index_path = ".pituitary/pituitary.db"
+
+[[workspace.repos]]
+id = "shared"
+root = "`+filepath.ToSlash(filepath.Join(resolvedRoot, "shared"))+`"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+`)
+	mustWriteFileCmd(t, filepath.Join(childRepo, ".pituitary", "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["*.md"]
+`)
+	mustWriteFileCmd(t, filepath.Join(childRepo, "docs", "readme.md"), "# Hello\n")
+
+	// Capture stderr.
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	exitCode := withWorkingDir(t, childRepo, func() int {
+		ctx := context.Background()
+		_, err := resolveCommandConfigPath(ctx, "")
+		if err != nil {
+			t.Fatalf("resolveCommandConfigPath() error = %v", err)
+		}
+		return 0
+	})
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	if !strings.Contains(buf.String(), "shadows parent multirepo config") {
+		t.Fatalf("stderr = %q, want shadow warning", buf.String())
 	}
 }

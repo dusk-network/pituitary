@@ -216,6 +216,30 @@ func Load(path string) (*Config, error) {
 	return loadFromData(data, configPath)
 }
 
+// DeclaresMultirepoRepos reports whether the config file at path declares
+// one or more workspace.repos entries. It parses only the TOML structure
+// and does not validate filesystem paths, making it safe for discovery-time
+// checks where referenced repo roots may not exist on disk.
+func DeclaresMultirepoRepos(path string) (bool, error) {
+	configPath, err := filepath.Abs(path)
+	if err != nil {
+		return false, fmt.Errorf("resolve config path: %w", err)
+	}
+
+	// #nosec G304 -- configPath is the explicit config file selected by the caller.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false, fmt.Errorf("open %s: %w", configPath, err)
+	}
+
+	raw, err := parse(bytes.NewReader(data))
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", configPath, err)
+	}
+
+	return len(raw.Workspace.Repos) > 0, nil
+}
+
 // LoadFromText parses config from text content as if it were read from the
 // given path. This allows validating a generated config before writing it
 // to disk.

@@ -2,7 +2,7 @@
 
 **Name:** Pituitary
 
-**Short description:** Catch spec drift before it catches you — detect overlap, stale docs, code contradictions, and impact across your specs, docs, and decision records.
+**Short description:** Intent governance for the AI-natives — detect overlap, stale docs, code contradictions, terminology drift, and impact across your specs, docs, and decision records. Indexes the full corpus so your agent stops guessing and builds against what you actually decided.
 
 **Category:** Developer Tools / Documentation
 
@@ -20,6 +20,13 @@
 | `analyze_impact` | Trace which specs, code refs, and docs are affected when a spec changes. |
 | `check_doc_drift` | Find docs that have gone stale relative to accepted specs, with cited evidence. |
 | `review_spec` | Full composite review: overlap + comparison + impact + drift + remediation. |
+| `check_compliance` | Check a PR diff against accepted specs for contradictions. |
+| `check_terminology` | Audit terminology against declared policies. Separates actionable violations from tolerated historical uses. |
+| `governed_by` | Look up which specs govern a given file or path. |
+| `compile_preview` | Preview context-aware terminology patches before applying. |
+| `fix_preview` | Preview deterministic auto-fix edits before applying. |
+| `status` | Index health at a glance: artifact counts, runtime profile, staleness. |
+| `explain_file` | Explain a file's role in the spec/doc corpus and its governance relationships. |
 
 ## Requirements
 

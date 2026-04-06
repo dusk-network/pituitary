@@ -159,8 +159,18 @@ func cliLoggerFromContext(ctx context.Context) *diag.Logger {
 }
 
 func resolveCommandConfigPath(ctx context.Context, localConfigPath string) (string, error) {
-	resolvedPath, _, err := resolveCommandConfigPathWithResolution(ctx, localConfigPath)
+	resolvedPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, localConfigPath)
+	if err == nil && resolution != nil {
+		emitMultirepoShadowWarning(resolution)
+	}
 	return resolvedPath, err
+}
+
+func emitMultirepoShadowWarning(resolution *configResolution) {
+	if resolution == nil || resolution.ShadowedMultirepoConfig == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: selected config shadows parent multirepo config %s\n", filepath.ToSlash(resolution.ShadowedMultirepoConfig))
 }
 
 func resolveCommandConfigPathWithResolution(ctx context.Context, localConfigPath string) (string, *configResolution, error) {
@@ -242,8 +252,8 @@ func resolveCLIConfigPathFromWorkingDir(cwd string, explicitOptions ...configPat
 			if discoverySearchDir(candidate.Path) == selectedSearchDir {
 				continue
 			}
-			cfg, loadErr := config.Load(candidate.Path)
-			if loadErr != nil || len(cfg.Workspace.Repos) == 0 {
+			isMultirepo, err := config.DeclaresMultirepoRepos(candidate.Path)
+			if err != nil || !isMultirepo {
 				continue
 			}
 			resolution.ShadowedMultirepoConfig = candidate.Path
