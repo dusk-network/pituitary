@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/app"
-	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/runtimeprobe"
 )
@@ -59,6 +58,7 @@ type statusArtifactLocation struct {
 	CanonicalizeBundleRoot string   `json:"canonicalize_bundle_root"`
 	IgnorePatterns         []string `json:"ignore_patterns,omitempty"`
 	RelocationHints        []string `json:"relocation_hints,omitempty"`
+	MultirepoParent        string   `json:"multirepo_parent,omitempty"`
 }
 
 func runStatus(args []string, stdout, stderr io.Writer) int {
@@ -150,7 +150,7 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 		DocCount:          result.Index.DocCount,
 		ChunkCount:        result.Index.ChunkCount,
 		Repos:             append([]index.RepoCoverage(nil), result.Index.Repos...),
-		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.ConfigPath, result.Index.IndexPath),
+		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.ConfigPath, result.Index.IndexPath, resolution),
 		RelationGraph:     result.RelationGraph,
 		Runtime:           result.Runtime,
 		Guidance:          guidance,
@@ -181,7 +181,7 @@ func newStatusRuntimeConfig(runtimeConfig *app.RuntimeConfigStatus) *statusRunti
 	}
 }
 
-func buildStatusArtifactLocations(workspaceRoot, configPath, indexPath string) *statusArtifactLocation {
+func buildStatusArtifactLocations(workspaceRoot, configPath, indexPath string, resolution *configResolution) *statusArtifactLocation {
 	if strings.TrimSpace(workspaceRoot) == "" || strings.TrimSpace(indexPath) == "" {
 		return nil
 	}
@@ -210,7 +210,7 @@ func buildStatusArtifactLocations(workspaceRoot, configPath, indexPath string) *
 	}
 	sort.Strings(ignorePatterns)
 
-	return &statusArtifactLocation{
+	loc := &statusArtifactLocation{
 		IndexDir:               indexDir,
 		DiscoverConfigPath:     discoverConfigPath,
 		CanonicalizeBundleRoot: canonicalizeBundleRoot,
@@ -221,6 +221,10 @@ func buildStatusArtifactLocations(workspaceRoot, configPath, indexPath string) *
 			"use `pituitary canonicalize --bundle-dir PATH` to place generated bundles elsewhere",
 		},
 	}
+	if resolution != nil && resolution.ShadowedMultirepoConfig != "" {
+		loc.MultirepoParent = filepath.ToSlash(resolution.ShadowedMultirepoConfig)
+	}
+	return loc
 }
 
 func statusArtifactBaseDir(workspaceRoot, configPath string) string {
@@ -236,33 +240,17 @@ func statusArtifactBaseDir(workspaceRoot, configPath string) string {
 }
 
 func statusResolutionGuidance(selectedConfigPath string, resolution *configResolution) []string {
-	if resolution == nil || resolution.SelectedBy != configSourceDiscovery || strings.TrimSpace(selectedConfigPath) == "" {
+	if resolution == nil || resolution.ShadowedMultirepoConfig == "" {
 		return nil
 	}
-
-	selectedSearchDir := discoverySearchDir(selectedConfigPath)
-	for _, candidate := range resolution.Candidates {
-		if candidate.Source != configSourceDiscovery || candidate.Status != "shadowed" || strings.TrimSpace(candidate.Path) == "" {
-			continue
-		}
-		if discoverySearchDir(candidate.Path) == selectedSearchDir {
-			continue
-		}
-
-		cfg, err := config.Load(candidate.Path)
-		if err != nil || len(cfg.Workspace.Repos) == 0 {
-			continue
-		}
-		return []string{
-			fmt.Sprintf(
-				"selected config %s shadows parent multirepo config %s; use `pituitary --config %s ...` when you intend to operate on the shared workspace",
-				filepath.ToSlash(selectedConfigPath),
-				filepath.ToSlash(candidate.Path),
-				filepath.ToSlash(candidate.Path),
-			),
-		}
+	return []string{
+		fmt.Sprintf(
+			"selected config %s shadows parent multirepo config %s; use `pituitary --config %s ...` when you intend to operate on the shared workspace",
+			filepath.ToSlash(selectedConfigPath),
+			filepath.ToSlash(resolution.ShadowedMultirepoConfig),
+			filepath.ToSlash(resolution.ShadowedMultirepoConfig),
+		),
 	}
-	return nil
 }
 
 func relativeStatusPath(root, path string) string {

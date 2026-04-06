@@ -841,3 +841,34 @@ func comparablePath(path string) string {
 		current = parent
 	}
 }
+
+func TestStatusArtifactLocationsIncludesMultirepoParent(t *testing.T) {
+	parentConfig := "/workspace/.pituitary/pituitary.toml"
+	resolution := &configResolution{
+		ShadowedMultirepoConfig: parentConfig,
+	}
+	workspaceRoot := t.TempDir()
+	configPath := filepath.Join(workspaceRoot, ".pituitary", "pituitary.toml")
+	indexPath := filepath.Join(workspaceRoot, ".pituitary", "pituitary.db")
+	result := buildStatusArtifactLocations(workspaceRoot, configPath, indexPath, resolution)
+	if result == nil {
+		t.Fatal("buildStatusArtifactLocations returned nil")
+	}
+	if got, want := result.MultirepoParent, filepath.ToSlash(parentConfig); got != want {
+		t.Fatalf("MultirepoParent = %q, want %q", got, want)
+	}
+}
+
+func TestStatusArtifactLocationsOmitsMultirepoParentWhenNotShadowed(t *testing.T) {
+	resolution := &configResolution{}
+	workspaceRoot := t.TempDir()
+	configPath := filepath.Join(workspaceRoot, ".pituitary", "pituitary.toml")
+	indexPath := filepath.Join(workspaceRoot, ".pituitary", "pituitary.db")
+	result := buildStatusArtifactLocations(workspaceRoot, configPath, indexPath, resolution)
+	if result == nil {
+		t.Fatal("buildStatusArtifactLocations returned nil")
+	}
+	if result.MultirepoParent != "" {
+		t.Fatalf("MultirepoParent = %q, want empty", result.MultirepoParent)
+	}
+}
