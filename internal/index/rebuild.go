@@ -575,7 +575,7 @@ func insertSpecArtifactContext(ctx context.Context, tx *sql.Tx, spec model.SpecR
 		spec.Status,
 		spec.Domain,
 		spec.SourceRef,
-		config.AdapterFilesystem,
+		adapterFromMetadata(spec.Metadata),
 		spec.BodyFormat,
 		spec.ContentHash,
 		string(metadataJSON),
@@ -601,7 +601,7 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 		nil,
 		nil,
 		doc.SourceRef,
-		config.AdapterFilesystem,
+		adapterFromMetadata(doc.Metadata),
 		doc.BodyFormat,
 		doc.ContentHash,
 		string(metadataJSON),
@@ -610,6 +610,15 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 		return fmt.Errorf("insert doc artifact %s: %w", doc.Ref, err)
 	}
 	return nil
+}
+
+// adapterFromMetadata returns the source adapter recorded in metadata, falling
+// back to the filesystem adapter when the key is absent or blank.
+func adapterFromMetadata(metadata map[string]string) string {
+	if v := strings.TrimSpace(metadata["source_adapter"]); v != "" {
+		return v
+	}
+	return config.AdapterFilesystem
 }
 
 func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title string, plan artifactChunkPlan, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, int, int, error) {
