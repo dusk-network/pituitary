@@ -67,12 +67,12 @@ Updated guide content for freshness testing.
 	if len(status.Issues) != 1 || status.Issues[0].Kind != "content_fingerprint_mismatch" {
 		t.Fatalf("freshness.issues = %+v, want content_fingerprint_mismatch", status.Issues)
 	}
-	if !strings.Contains(status.Action, "pituitary index --rebuild") {
-		t.Fatalf("freshness.action = %q, want rebuild guidance", status.Action)
+	if !strings.Contains(status.Action, "pituitary index --update") {
+		t.Fatalf("freshness.action = %q, want update guidance", status.Action)
 	}
 }
 
-func TestInspectFreshnessReportsIncompatibleWhenSourceConfigChanges(t *testing.T) {
+func TestInspectFreshnessReportsStaleWhenSourceConfigChanges(t *testing.T) {
 	t.Parallel()
 
 	cfg := loadFreshnessFixtureConfig(t)
@@ -90,11 +90,14 @@ func TestInspectFreshnessReportsIncompatibleWhenSourceConfigChanges(t *testing.T
 	if err != nil {
 		t.Fatalf("InspectFreshnessContext() error = %v", err)
 	}
-	if got, want := status.State, freshnessStateIncompatible; got != want {
+	if got, want := status.State, freshnessStateStale; got != want {
 		t.Fatalf("freshness.state = %q, want %q", got, want)
 	}
 	if len(status.Issues) == 0 || status.Issues[0].Kind != "source_fingerprint_mismatch" {
 		t.Fatalf("freshness.issues = %+v, want source_fingerprint_mismatch", status.Issues)
+	}
+	if !strings.Contains(status.Action, "pituitary index --update") {
+		t.Fatalf("freshness.action = %q, want update guidance", status.Action)
 	}
 }
 
@@ -124,7 +127,7 @@ func TestInspectFreshnessIgnoresSourceOrderingChanges(t *testing.T) {
 	}
 }
 
-func TestInspectFreshnessReportsIncompatibleWhenMetadataIsMissing(t *testing.T) {
+func TestInspectFreshnessReportsStaleWhenSourceMetadataIsMissing(t *testing.T) {
 	t.Parallel()
 
 	cfg := loadFreshnessFixtureConfig(t)
@@ -151,11 +154,14 @@ func TestInspectFreshnessReportsIncompatibleWhenMetadataIsMissing(t *testing.T) 
 	if err != nil {
 		t.Fatalf("InspectFreshnessContext() error = %v", err)
 	}
-	if got, want := status.State, freshnessStateIncompatible; got != want {
+	if got, want := status.State, freshnessStateStale; got != want {
 		t.Fatalf("freshness.state = %q, want %q", got, want)
 	}
 	if len(status.Issues) == 0 || status.Issues[0].Kind != "missing_source_fingerprint" {
 		t.Fatalf("freshness.issues = %+v, want missing_source_fingerprint", status.Issues)
+	}
+	if !strings.Contains(status.Action, "pituitary index --update") {
+		t.Fatalf("freshness.action = %q, want update guidance", status.Action)
 	}
 }
 
@@ -225,7 +231,7 @@ func TestInspectFreshnessReturnsSourceMismatchBeforeReloadingWorkspaceContent(t 
 	if err != nil {
 		t.Fatalf("InspectFreshnessContext() error = %v", err)
 	}
-	if got, want := status.State, freshnessStateIncompatible; got != want {
+	if got, want := status.State, freshnessStateStale; got != want {
 		t.Fatalf("freshness.state = %q, want %q", got, want)
 	}
 	if len(status.Issues) == 0 || status.Issues[0].Kind != "source_fingerprint_mismatch" {

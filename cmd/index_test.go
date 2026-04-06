@@ -97,7 +97,7 @@ path = "specs"
 	if stdout.Len() != 0 {
 		t.Fatalf("runIndex() wrote unexpected stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), `pituitary index: one of --rebuild or --dry-run is required`) {
+	if !strings.Contains(stderr.String(), `pituitary index: exactly one of --rebuild, --update, or --dry-run is required`) {
 		t.Fatalf("runIndex() stderr %q does not contain mode requirement", stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); !os.IsNotExist(err) {
@@ -132,7 +132,7 @@ path = "specs"
 	if stdout.Len() != 0 {
 		t.Fatalf("runIndex() wrote unexpected stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), `pituitary index: exactly one of --rebuild or --dry-run is allowed`) {
+	if !strings.Contains(stderr.String(), `pituitary index: exactly one of --rebuild, --update, or --dry-run is required`) {
 		t.Fatalf("runIndex() stderr %q does not contain conflicting-mode message", stderr.String())
 	}
 }

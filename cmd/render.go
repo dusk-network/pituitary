@@ -139,6 +139,16 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 		fmt.Fprintln(w, "database write: skipped")
 		return
 	}
+	if result.Update {
+		fmt.Fprintf(w, "updated %d artifact(s): %d added, %d updated, %d removed, %d unchanged\n",
+			result.ArtifactCount, result.AddedCount, result.UpdatedCount, result.RemovedCount, result.UnchangedCount)
+		fmt.Fprintf(w, "chunks: %d total, %d reused, %d embedded\n", result.ChunkCount, result.ReusedChunkCount, result.EmbeddedChunkCount)
+		fmt.Fprintf(w, "edges: %d\n", result.EdgeCount)
+		fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+		renderIndexRepoCoverage(w, result.Repos)
+		renderIndexSourceSummaries(w, result.Sources)
+		return
+	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
 	renderIndexReuseSummary(w, result)
