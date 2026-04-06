@@ -15,6 +15,7 @@ import (
 
 type indexRequest struct {
 	Rebuild bool `json:"rebuild"`
+	Update  bool `json:"update,omitempty"`
 	DryRun  bool `json:"dry_run,omitempty"`
 	Full    bool `json:"full,omitempty"`
 	Verbose bool `json:"verbose,omitempty"`
@@ -38,10 +39,11 @@ func runIndex(args []string, stdout, stderr io.Writer) int {
 func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("index", "pituitary [--config PATH] index (--rebuild | --dry-run) [--full] [--format FORMAT]")
+	help := newCommandHelp("index", "pituitary [--config PATH] index (--rebuild | --update | --dry-run) [--full] [--format FORMAT]")
 
 	var (
 		rebuild    bool
+		update     bool
 		dryRun     bool
 		full       bool
 		verbose    bool
@@ -49,6 +51,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		configPath string
 	)
 	fs.BoolVar(&rebuild, "rebuild", false, "rebuild the local index")
+	fs.BoolVar(&update, "update", false, "incrementally update the index, writing only changed artifacts")
 	fs.BoolVar(&dryRun, "dry-run", false, "validate config and sources without writing the index")
 	fs.BoolVar(&full, "full", false, "force a full re-embed instead of reusing compatible chunk vectors")
 	fs.BoolVar(&verbose, "verbose", false, "include per-source details for index planning and rebuild output")
@@ -70,22 +73,32 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		}, 2)
 	}
 	if err := validateCLIFormat("index", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, DryRun: dryRun, Full: full, Verbose: verbose}, cliIssue{
+		return writeCLIError(stdout, stderr, format, "index", indexRequest{Rebuild: rebuild, Update: update, DryRun: dryRun, Full: full, Verbose: verbose}, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
 		}, 2)
 	}
-	request := indexRequest{Rebuild: rebuild, DryRun: dryRun, Full: full, Verbose: verbose}
-	if rebuild && dryRun {
+	request := indexRequest{Rebuild: rebuild, Update: update, DryRun: dryRun, Full: full, Verbose: verbose}
+	modeCount := 0
+	if rebuild {
+		modeCount++
+	}
+	if update {
+		modeCount++
+	}
+	if dryRun {
+		modeCount++
+	}
+	if modeCount != 1 {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "validation_error",
-			Message: "exactly one of --rebuild or --dry-run is allowed",
+			Message: "exactly one of --rebuild, --update, or --dry-run is required",
 		}, 2)
 	}
-	if !rebuild && !dryRun {
+	if full && update {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "validation_error",
-			Message: "one of --rebuild or --dry-run is required",
+			Message: "--full is only valid with --rebuild",
 		}, 2)
 	}
 
@@ -138,29 +151,18 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	var result *index.RebuildResult
-	switch format {
-	case commandFormatText:
-		result, err = index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, func(event index.RebuildProgressEvent) {
-			fmt.Fprintf(stderr, "pituitary index: %s %d/%d %s %s (%d chunk(s))\n", event.Phase, event.Current, event.Total, event.ArtifactKind, event.ArtifactRef, event.ChunkCount)
-		})
-	case commandFormatJSON:
-		encoder := json.NewEncoder(stderr)
-		result, err = index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, func(event index.RebuildProgressEvent) {
-			_ = encoder.Encode(indexProgressLine{
-				Event:        "rebuild_progress",
-				Command:      "index",
-				Phase:        event.Phase,
-				ArtifactKind: event.ArtifactKind,
-				ArtifactRef:  event.ArtifactRef,
-				Current:      event.Current,
-				Total:        event.Total,
-				ChunkCount:   event.ChunkCount,
-			})
-		})
-	default:
-		result, err = index.RebuildContextWithOptions(ctx, cfg, records, index.RebuildOptions{Full: full})
+	if update {
+		result, err = runIndexUpdate(ctx, cfg, records, format, stderr)
+	} else {
+		result, err = runIndexRebuild(ctx, cfg, records, full, format, stderr)
 	}
 	if err != nil {
+		if index.IsUpdatePrecondition(err) {
+			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+				Code:    "precondition_error",
+				Message: err.Error(),
+			}, 2)
+		}
 		if index.IsGraphValidationError(err) {
 			return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 				Code:    "validation_error",
@@ -173,9 +175,13 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 				Message: "dependency unavailable:\n" + err.Error(),
 			}, 3)
 		}
+		action := "rebuild"
+		if update {
+			action = "update"
+		}
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "internal_error",
-			Message: "rebuild failed:\n" + err.Error(),
+			Message: action + " failed:\n" + err.Error(),
 		}, 2)
 	}
 	if !verbose {
@@ -183,4 +189,39 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)
+}
+
+func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, format string, stderr io.Writer) (*index.RebuildResult, error) {
+	progressReporter := indexProgressReporter(format, stderr)
+	return index.UpdateWithProgressContextAndOptions(ctx, cfg, records, progressReporter)
+}
+
+func runIndexRebuild(ctx context.Context, cfg *config.Config, records *source.LoadResult, full bool, format string, stderr io.Writer) (*index.RebuildResult, error) {
+	progressReporter := indexProgressReporter(format, stderr)
+	return index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, progressReporter)
+}
+
+func indexProgressReporter(format string, stderr io.Writer) index.RebuildProgressReporter {
+	switch format {
+	case commandFormatText:
+		return func(event index.RebuildProgressEvent) {
+			fmt.Fprintf(stderr, "pituitary index: %s %d/%d %s %s (%d chunk(s))\n", event.Phase, event.Current, event.Total, event.ArtifactKind, event.ArtifactRef, event.ChunkCount)
+		}
+	case commandFormatJSON:
+		encoder := json.NewEncoder(stderr)
+		return func(event index.RebuildProgressEvent) {
+			_ = encoder.Encode(indexProgressLine{
+				Event:        "rebuild_progress",
+				Command:      "index",
+				Phase:        event.Phase,
+				ArtifactKind: event.ArtifactKind,
+				ArtifactRef:  event.ArtifactRef,
+				Current:      event.Current,
+				Total:        event.Total,
+				ChunkCount:   event.ChunkCount,
+			})
+		}
+	default:
+		return nil
+	}
 }

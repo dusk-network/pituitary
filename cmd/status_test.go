@@ -280,8 +280,8 @@ This guide changed after indexing.
 	if !strings.Contains(out, "index content fingerprint") {
 		t.Fatalf("runStatus() output %q does not contain content fingerprint reason", out)
 	}
-	if !strings.Contains(out, "run `pituitary index --rebuild`") {
-		t.Fatalf("runStatus() output %q does not contain rebuild guidance", out)
+	if !strings.Contains(out, "pituitary index --update") && !strings.Contains(out, "pituitary index --rebuild") {
+		t.Fatalf("runStatus() output %q does not contain update or rebuild guidance", out)
 	}
 }
 

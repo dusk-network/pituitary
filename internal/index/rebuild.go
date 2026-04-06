@@ -22,8 +22,10 @@ import (
 const schemaVersion = 3
 
 // RebuildResult reports the staged rebuild outcome.
+// When Update is true, the result describes an incremental update instead of a full rebuild.
 type RebuildResult struct {
 	DryRun              bool                       `json:"dry_run,omitempty"`
+	Update              bool                       `json:"update,omitempty"`
 	IndexPath           string                     `json:"index_path"`
 	FullRebuild         bool                       `json:"full_rebuild,omitempty"`
 	ArtifactCount       int                        `json:"artifact_count"`
@@ -35,6 +37,10 @@ type RebuildResult struct {
 	ReusedArtifactCount int                        `json:"reused_artifact_count,omitempty"`
 	ReusedChunkCount    int                        `json:"reused_chunk_count,omitempty"`
 	EmbeddedChunkCount  int                        `json:"embedded_chunk_count,omitempty"`
+	AddedCount          int                        `json:"added_count,omitempty"`
+	UpdatedCount        int                        `json:"updated_count,omitempty"`
+	RemovedCount        int                        `json:"removed_count,omitempty"`
+	UnchangedCount      int                        `json:"unchanged_count,omitempty"`
 	ContentFingerprint  string                     `json:"content_fingerprint"`
 	Repos               []RepoCoverage             `json:"repo_coverage,omitempty"`
 	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`

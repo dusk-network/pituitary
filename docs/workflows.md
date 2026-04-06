@@ -29,6 +29,7 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `explain-file PATH` | Explain how one file is classified by configured sources |
 | `canonicalize --path PATH` | Promote one inferred contract into a spec bundle |
 | `index --rebuild [--full]` | Rebuild the SQLite index |
+| `index --update` | Incremental update: diff and write only changed artifacts |
 | `index --dry-run` | Validate config and sources without writing |
 | `status [--check-runtime all]` | Report index state, config, freshness, runtime readiness |
 | `version` | Print version info |

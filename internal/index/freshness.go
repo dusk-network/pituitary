@@ -45,7 +45,7 @@ type StaleIndexError struct {
 
 func (e *StaleIndexError) Error() string {
 	if e == nil || e.Status == nil {
-		return "index is stale; run `pituitary index --rebuild`"
+		return "index is stale; run `pituitary index --update` or `pituitary index --rebuild`"
 	}
 	parts := make([]string, 0, len(e.Status.Issues))
 	for _, issue := range e.Status.Issues {
@@ -55,7 +55,7 @@ func (e *StaleIndexError) Error() string {
 	}
 	switch {
 	case len(parts) == 0 && strings.TrimSpace(e.Status.Action) == "":
-		return "index is stale; run `pituitary index --rebuild`"
+		return "index is stale; run `pituitary index --update` or `pituitary index --rebuild`"
 	case len(parts) == 0:
 		return fmt.Sprintf("index is %s; %s", e.Status.State, e.Status.Action)
 	default:
@@ -168,9 +168,7 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 	if len(issues) != 0 {
 		status.Issues = issues
 		status.State = deriveFreshnessState(issues)
-		if status.State == freshnessStateFresh {
-			status.Action = ""
-		}
+		status.Action = freshnessAction(status.State)
 		return status, nil
 	}
 
@@ -197,10 +195,19 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 
 	status.Issues = issues
 	status.State = deriveFreshnessState(issues)
-	if status.State == freshnessStateFresh {
-		status.Action = ""
-	}
+	status.Action = freshnessAction(status.State)
 	return status, nil
+}
+
+func freshnessAction(state string) string {
+	switch state {
+	case freshnessStateFresh:
+		return ""
+	case freshnessStateStale:
+		return "run `pituitary index --update` or `pituitary index --rebuild`"
+	default:
+		return "run `pituitary index --rebuild`"
+	}
 }
 
 // ConfiguredEmbedderFingerprint derives the configured embedder fingerprint without contacting the provider.
@@ -242,8 +249,10 @@ func deriveFreshnessState(issues []FreshnessIssue) string {
 		return freshnessStateFresh
 	}
 	for _, issue := range issues {
-		if issue.Kind == "content_fingerprint_mismatch" {
-			continue
+		switch issue.Kind {
+		case "content_fingerprint_mismatch", "source_fingerprint_mismatch",
+			"missing_content_fingerprint", "missing_source_fingerprint":
+			continue // stale, not incompatible — --update can repair these
 		}
 		return freshnessStateIncompatible
 	}
