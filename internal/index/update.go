@@ -98,6 +98,12 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	defer db.Close()
 
+	// Migrate schema to v4 if needed (add edge_source column and ast_cache table).
+	// This must run before validateUpdatePreconditions, which checks schema_version.
+	if err := migrateToSchemaV4(ctx, db); err != nil {
+		return nil, fmt.Errorf("schema migration to v4: %w", err)
+	}
+
 	// Step 6: Validate preconditions.
 	if err := validateUpdatePreconditions(ctx, db, embedder.Fingerprint(), dimension); err != nil {
 		return nil, err
@@ -247,7 +253,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 		return nil, fmt.Errorf("delete edges: %w", err)
 	}
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT INTO edges (from_ref, to_ref, edge_type) VALUES (?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
@@ -255,18 +261,26 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 
 	for _, spec := range records.Specs {
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type)); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual"); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual"); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 	}
+
+	// Infer AST-based applies_to edges.
+	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs)
+	if inferErr != nil {
+		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
+	}
+	result.EdgeCount += inferredCount
+	result.InferredEdgeCount = inferredCount
 
 	// Step 10f: Upsert metadata.
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
@@ -602,4 +616,44 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+// migrateToSchemaV4 adds the edge_source column and ast_cache table to an
+// existing v3 index. Only runs when the stored schema version is exactly "3".
+func migrateToSchemaV4(ctx context.Context, db *sql.DB) error {
+	var storedVersion string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion); err != nil {
+		return nil // no metadata row — let validateUpdatePreconditions handle it
+	}
+	if strings.TrimSpace(storedVersion) != "3" {
+		return nil // not a v3 index — nothing to migrate
+	}
+
+	// Add edge_source column if missing.
+	var colCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'edge_source'`).Scan(&colCount); err != nil {
+		return err
+	}
+	if colCount == 0 {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE edges ADD COLUMN edge_source TEXT NOT NULL DEFAULT 'manual'`); err != nil {
+			return fmt.Errorf("add edge_source column: %w", err)
+		}
+	}
+
+	// Create ast_cache table if not present.
+	var tableCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ast_cache'`).Scan(&tableCount); err != nil {
+		return err
+	}
+	if tableCount == 0 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE ast_cache (content_hash TEXT PRIMARY KEY, path TEXT NOT NULL, symbols_json TEXT NOT NULL)`); err != nil {
+			return fmt.Errorf("create ast_cache table: %w", err)
+		}
+	}
+
+	// Bump schema version to 4.
+	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '4' WHERE key = 'schema_version'`); err != nil {
+		return fmt.Errorf("update schema_version: %w", err)
+	}
+	return nil
 }

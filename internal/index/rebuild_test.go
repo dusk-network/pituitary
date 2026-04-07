@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -334,6 +335,119 @@ func TestPrepareRebuildAcceptsSymlinkedStaleStagePathLikeRebuild(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(staleTarget, "keep.txt")); err != nil {
 		t.Fatalf("stale target directory was modified: %v", err)
+	}
+}
+
+func TestRebuildInfersASTEdges(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+
+	// Create pituitary.toml pointing at the temp workspace.
+	configContent := `
+[workspace]
+root = "` + filepath.ToSlash(dir) + `"
+index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = true
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`
+	configPath := filepath.Join(dir, "pituitary.toml")
+	mustWriteFile(t, configPath, configContent)
+
+	// Create a spec whose body mentions "SlidingWindowLimiter".
+	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), `## Overview
+
+This spec governs the SlidingWindowLimiter implementation.
+`)
+
+	// Create a Go source file that defines SlidingWindowLimiter.
+	mustWriteFile(t, filepath.Join(dir, "src", "limiter.go"), `package limiter
+
+type SlidingWindowLimiter struct {
+	window int
+}
+
+func NewSlidingWindowLimiter(w int) *SlidingWindowLimiter {
+	return &SlidingWindowLimiter{window: w}
+}
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig: %v", err)
+	}
+
+	result, err := Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	if result.InferredEdgeCount == 0 {
+		t.Fatal("expected at least one inferred edge")
+	}
+
+	// Verify governed-by returns the inferred edge.
+	govResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/limiter.go")
+	if err != nil {
+		t.Fatalf("GovernedBy: %v", err)
+	}
+	if len(govResult.Specs) == 0 {
+		t.Fatal("expected governed-by to find SPEC-042 for src/limiter.go")
+	}
+	if govResult.Specs[0].Ref != "SPEC-042" {
+		t.Errorf("expected SPEC-042, got %s", govResult.Specs[0].Ref)
+	}
+	if govResult.Specs[0].Source != "inferred" {
+		t.Errorf("expected source=inferred, got %s", govResult.Specs[0].Source)
+	}
+
+	// Verify status reports governance coverage.
+	status, err := ReadStatusContext(context.Background(), cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if status.GovernanceCoverage == nil {
+		t.Fatal("expected governance coverage in status")
+	}
+	if status.GovernanceCoverage.InferredEdges == 0 {
+		t.Error("expected InferredEdges > 0")
+	}
+	if status.GovernanceCoverage.TotalFiles == 0 {
+		t.Error("expected TotalFiles > 0")
+	}
+
+	// Verify the schema has both edge_source column and ast_cache table.
+	db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertSchemaObject(t, db, "table", "ast_cache")
+
+	var edgeSource string
+	if err := db.QueryRow(`SELECT edge_source FROM edges WHERE edge_type = 'applies_to' AND edge_source = 'inferred' LIMIT 1`).Scan(&edgeSource); err != nil {
+		t.Fatalf("query inferred edge: %v", err)
+	}
+	if edgeSource != "inferred" {
+		t.Errorf("expected edge_source=inferred, got %s", edgeSource)
 	}
 }
 

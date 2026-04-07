@@ -9,6 +9,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/ncruces/go-sqlite3 v0.21.3
+	github.com/odvcencio/gotreesitter v0.13.4
 	golang.org/x/sync v0.20.0
 )
 
