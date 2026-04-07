@@ -409,7 +409,7 @@ func NewSlidingWindowLimiter(w int) *SlidingWindowLimiter {
 	}
 
 	// Verify governed-by returns the inferred edge.
-	govResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/limiter.go", "")
+	govResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/limiter.go", "", "")
 	if err != nil {
 		t.Fatalf("GovernedBy: %v", err)
 	}
@@ -709,8 +709,8 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "5" {
-		t.Errorf("schema_version = %q, want 5", version)
+	if version != "6" {
+		t.Errorf("schema_version = %q, want 6", version)
 	}
 
 	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).
@@ -755,7 +755,7 @@ func TestGovernedByTemporalFilter(t *testing.T) {
 	// The fixture has applies_to edges from SPEC-042 and SPEC-055 to
 	// code://src/api/middleware/ratelimiter.go. SPEC-008 is superseded so
 	// governed-by only returns accepted specs.
-	result, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "")
+	result, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "", "")
 	if err != nil {
 		t.Fatalf("GovernedBy (no filter): %v", err)
 	}
@@ -765,7 +765,7 @@ func TestGovernedByTemporalFilter(t *testing.T) {
 
 	// With a future date, should still return results (edges are currently valid).
 	futureDate := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02")
-	futureResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", futureDate)
+	futureResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", futureDate, "")
 	if err != nil {
 		t.Fatalf("GovernedBy (future): %v", err)
 	}
@@ -776,7 +776,7 @@ func TestGovernedByTemporalFilter(t *testing.T) {
 	// With a very old date (before edges existed), should return no results
 	// because valid_from was set to the rebuild timestamp.
 	pastDate := "1970-01-01"
-	pastResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", pastDate)
+	pastResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", pastDate, "")
 	if err != nil {
 		t.Fatalf("GovernedBy (past): %v", err)
 	}
@@ -840,6 +840,86 @@ func TestRebuildSetsValidToForSupersededSpecs(t *testing.T) {
 		}
 		if validTo.Valid {
 			t.Errorf("active spec SPEC-042 edge to %s has non-NULL valid_to = %s", toRef, validTo.String)
+		}
+	}
+}
+
+func TestRebuildSetsConfidenceTiersOnEdges(t *testing.T) {
+	t.Parallel()
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	db, err := OpenReadOnlyContext(context.Background(), cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer db.Close()
+
+	// All manual edges should have confidence='extracted' and score=1.0.
+	rows, err := db.Query(`SELECT from_ref, to_ref, confidence, confidence_score FROM edges WHERE edge_source = 'manual'`)
+	if err != nil {
+		t.Fatalf("query manual edges: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fromRef, toRef, confidence string
+		var score float64
+		if err := rows.Scan(&fromRef, &toRef, &confidence, &score); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if confidence != "extracted" {
+			t.Errorf("manual edge %s->%s has confidence=%q, want extracted", fromRef, toRef, confidence)
+		}
+		if score != 1.0 {
+			t.Errorf("manual edge %s->%s has confidence_score=%f, want 1.0", fromRef, toRef, score)
+		}
+	}
+}
+
+func TestGovernedByConfidenceFilter(t *testing.T) {
+	t.Parallel()
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// Without confidence filter, should return all governing specs.
+	allResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "", "")
+	if err != nil {
+		t.Fatalf("GovernedBy (no filter): %v", err)
+	}
+	if len(allResult.Specs) == 0 {
+		t.Skip("no governing specs found; skipping confidence filter test")
+	}
+
+	// With min-confidence=extracted, should return only extracted edges (all manual edges).
+	extractedResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "", "extracted")
+	if err != nil {
+		t.Fatalf("GovernedBy (extracted): %v", err)
+	}
+	// All fixture edges are manual (extracted), so counts should match.
+	if len(extractedResult.Specs) != len(allResult.Specs) {
+		t.Errorf("extracted filter returned %d specs, expected %d", len(extractedResult.Specs), len(allResult.Specs))
+	}
+
+	// Verify confidence fields are populated.
+	for _, spec := range allResult.Specs {
+		if spec.Confidence == "" {
+			t.Errorf("spec %s has empty confidence", spec.Ref)
+		}
+		if spec.ConfidenceScore == 0 {
+			t.Errorf("spec %s has zero confidence_score", spec.Ref)
 		}
 	}
 }

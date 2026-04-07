@@ -23,11 +23,13 @@ type Status struct {
 // GovernanceCoverage reports the percentage of indexed source files that have
 // at least one governance link (manual or inferred applies_to edge).
 type GovernanceCoverage struct {
-	TotalFiles    int     `json:"total_files"`
-	GovernedFiles int     `json:"governed_files"`
-	Percentage    float64 `json:"percentage"`
-	ManualEdges   int     `json:"manual_edges"`
-	InferredEdges int     `json:"inferred_edges"`
+	TotalFiles     int     `json:"total_files"`
+	GovernedFiles  int     `json:"governed_files"`
+	Percentage     float64 `json:"percentage"`
+	ManualEdges    int     `json:"manual_edges"`
+	InferredEdges  int     `json:"inferred_edges"`
+	ExtractedEdges int     `json:"extracted_edges,omitempty"`
+	AmbiguousEdges int     `json:"ambiguous_edges,omitempty"`
 }
 
 // ReadStatus inspects the configured index path and returns basic counts.
@@ -113,6 +115,16 @@ func queryGovernanceCoverageContext(ctx context.Context, db *sql.DB) (*Governanc
 		`SELECT COUNT(*) FROM edges WHERE edge_type = 'applies_to' AND edge_source = 'inferred'`).
 		Scan(&coverage.InferredEdges); err != nil {
 		return nil, err
+	}
+
+	// Count edges by confidence tier (schema v6+).
+	if hasEdgeConfidenceColumn(ctx, db) {
+		_ = db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM edges WHERE edge_type = 'applies_to' AND confidence = 'extracted'`).
+			Scan(&coverage.ExtractedEdges)
+		_ = db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM edges WHERE edge_type = 'applies_to' AND confidence = 'ambiguous'`).
+			Scan(&coverage.AmbiguousEdges)
 	}
 
 	return &coverage, nil

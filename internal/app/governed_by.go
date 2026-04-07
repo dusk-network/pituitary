@@ -10,8 +10,9 @@ import (
 
 // GovernedByRequest captures the input for a governed-by query.
 type GovernedByRequest struct {
-	Path   string `json:"path" jsonschema_description:"Workspace-relative file path to look up governing specs for"`
-	AtDate string `json:"at_date,omitempty" jsonschema_description:"ISO date for point-in-time governance query (e.g. 2025-03-15)"`
+	Path          string `json:"path" jsonschema_description:"Workspace-relative file path to look up governing specs for"`
+	AtDate        string `json:"at_date,omitempty" jsonschema_description:"ISO date for point-in-time governance query (e.g. 2025-03-15)"`
+	MinConfidence string `json:"min_confidence,omitempty" jsonschema_description:"Minimum confidence tier: extracted, inferred, or ambiguous"`
 }
 
 // GovernedByResult captures the governing specs for a given path.
@@ -25,7 +26,7 @@ type GovernedByResult struct {
 // GovernedBy loads config, queries the index for specs governing the given path, and classifies failures.
 func GovernedBy(ctx context.Context, configPath string, request GovernedByRequest) Response[GovernedByRequest, GovernedByResult] {
 	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{}, func(cfg *config.Config) (*GovernedByResult, error) {
-		result, err := index.GovernedByContext(ctx, cfg.Workspace.ResolvedIndexPath, request.Path, request.AtDate)
+		result, err := index.GovernedByContext(ctx, cfg.Workspace.ResolvedIndexPath, request.Path, request.AtDate, request.MinConfidence)
 		if err != nil {
 			return nil, err
 		}

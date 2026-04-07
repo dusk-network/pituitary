@@ -49,6 +49,9 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
 
+	var minConfidence string
+	fs.StringVar(&minConfidence, "min-confidence", "", "minimum confidence tier: extracted, inferred, or ambiguous")
+
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
 			Code:    "validation_error",
@@ -129,6 +132,9 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 
 	if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
 		request.AtDate = trimmedAt
+	}
+	if trimmedConf := strings.TrimSpace(minConfidence); trimmedConf != "" {
+		request.MinConfidence = trimmedConf
 	}
 	operation := app.CheckDocDrift(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {

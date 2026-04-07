@@ -89,10 +89,11 @@ type exclusivePhraseFamily struct {
 
 // ComplianceRequest is the normalized compliance input.
 type ComplianceRequest struct {
-	Paths    []string `json:"paths,omitempty"`
-	DiffFile string   `json:"diff_file,omitempty"`
-	DiffText string   `json:"diff_text,omitempty"`
-	AtDate   string   `json:"at_date,omitempty"`
+	Paths         []string `json:"paths,omitempty"`
+	DiffFile      string   `json:"diff_file,omitempty"`
+	DiffText      string   `json:"diff_text,omitempty"`
+	AtDate        string   `json:"at_date,omitempty"`
+	MinConfidence string   `json:"min_confidence,omitempty"`
 }
 
 // ComplianceRelevantSpec reports one accepted spec considered during evaluation.
@@ -188,6 +189,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	defer repo.Close()
 	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.minConfidence = strings.TrimSpace(request.MinConfidence)
 
 	targets, err := loadComplianceTargetsContext(ctx, cfg, request)
 	if err != nil {
