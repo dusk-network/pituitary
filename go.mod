@@ -9,6 +9,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/ncruces/go-sqlite3 v0.21.3
+	github.com/odvcencio/gotreesitter v0.13.4
 	golang.org/x/sync v0.20.0
 )
 
@@ -19,7 +20,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/odvcencio/gotreesitter v0.13.4 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect

@@ -858,12 +858,17 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	cachedSymbols := loadCachedASTSymbols(ctx, cfg.Workspace.ResolvedIndexPath)
 
 	// Extract symbols from each code file.
+	const maxFileSize = 1 << 20 // 1 MB — skip minified bundles and generated files
 	fileSymbols := make(map[string][]ast.Symbol, len(codePaths))
 	for _, relPath := range codePaths {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
 		fullPath := filepath.Join(workspaceRoot, relPath)
+		info, err := os.Stat(fullPath)
+		if err != nil || info.Size() > maxFileSize {
+			continue
+		}
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
 			continue

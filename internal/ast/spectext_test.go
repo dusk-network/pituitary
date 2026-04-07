@@ -41,33 +41,3 @@ func TestScanSpecIdentifiersFiltersCommonWords(t *testing.T) {
 		}
 	}
 }
-
-func TestScanSpecPaths(t *testing.T) {
-	t.Parallel()
-	body := `The implementation is in src/api/middleware/ratelimiter.go
-and config in src/api/config/limits.yaml.`
-
-	paths := ScanSpecPaths(body)
-	want := map[string]bool{
-		"src/api/middleware/ratelimiter.go": true,
-		"src/api/config/limits.yaml":        true,
-	}
-	got := make(map[string]bool)
-	for _, p := range paths {
-		got[p] = true
-	}
-	for name := range want {
-		if !got[name] {
-			t.Errorf("expected path %q in scan results, got %v", name, paths)
-		}
-	}
-}
-
-func TestScanSpecPathsIgnoresNoSlash(t *testing.T) {
-	t.Parallel()
-	body := "The file ratelimiter.go contains the implementation."
-	paths := ScanSpecPaths(body)
-	if len(paths) != 0 {
-		t.Errorf("expected no paths for filename without slash, got %v", paths)
-	}
-}

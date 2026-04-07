@@ -84,9 +84,10 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 func queryGovernanceCoverageContext(ctx context.Context, db *sql.DB) (*GovernanceCoverage, error) {
 	var coverage GovernanceCoverage
 
-	// Count distinct governed file paths.
+	// Count distinct governed code file paths (scoped to code:// refs to avoid
+	// inflating coverage with config:// refs that aren't in ast_cache).
 	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(DISTINCT to_ref) FROM edges WHERE edge_type = 'applies_to'`).
+		`SELECT COUNT(DISTINCT to_ref) FROM edges WHERE edge_type = 'applies_to' AND to_ref LIKE 'code://%'`).
 		Scan(&coverage.GovernedFiles); err != nil {
 		return nil, err
 	}
@@ -94,19 +95,25 @@ func queryGovernanceCoverageContext(ctx context.Context, db *sql.DB) (*Governanc
 	// Count total source files tracked in ast_cache.
 	var tableCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ast_cache'`).Scan(&tableCount); err == nil && tableCount > 0 {
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ast_cache`).Scan(&coverage.TotalFiles)
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ast_cache`).Scan(&coverage.TotalFiles); err != nil {
+			return nil, err
+		}
 	}
 	if coverage.TotalFiles > 0 {
 		coverage.Percentage = float64(coverage.GovernedFiles) / float64(coverage.TotalFiles) * 100
 	}
 
 	// Count edges by source.
-	_ = db.QueryRowContext(ctx,
+	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM edges WHERE edge_type = 'applies_to' AND edge_source = 'manual'`).
-		Scan(&coverage.ManualEdges)
-	_ = db.QueryRowContext(ctx,
+		Scan(&coverage.ManualEdges); err != nil {
+		return nil, err
+	}
+	if err := db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM edges WHERE edge_type = 'applies_to' AND edge_source = 'inferred'`).
-		Scan(&coverage.InferredEdges)
+		Scan(&coverage.InferredEdges); err != nil {
+		return nil, err
+	}
 
 	return &coverage, nil
 }

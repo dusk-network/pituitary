@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -12,10 +13,9 @@ const MinIdentifierLength = 6
 
 // identifierRE matches PascalCase, camelCase, snake_case, and UPPER_SNAKE
 // identifiers that are at least MinIdentifierLength characters.
-var identifierRE = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]{5,})\b`)
-
-// pathRE matches file-system-like paths containing at least one slash.
-var pathRE = regexp.MustCompile("(?:^|[\\s`\"'(])([A-Za-z0-9_.][A-Za-z0-9_./\\-]*(?:\\.[a-z]{1,10}))")
+// The {5,} quantifier is MinIdentifierLength-1 because the first character is
+// matched separately by [A-Za-z_].
+var identifierRE = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]{` + fmt.Sprintf("%d", MinIdentifierLength-1) + `,})\b`)
 
 // ScanSpecIdentifiers extracts identifier-like tokens from spec body text.
 // Only identifiers with length >= MinIdentifierLength are returned.
@@ -35,25 +35,6 @@ func ScanSpecIdentifiers(body string) []string {
 		if !seen[m] {
 			seen[m] = true
 			result = append(result, m)
-		}
-	}
-	return result
-}
-
-// ScanSpecPaths extracts file-path-like strings from spec body text.
-// A path must contain at least one "/" to be considered.
-func ScanSpecPaths(body string) []string {
-	matches := pathRE.FindAllStringSubmatch(body, -1)
-	seen := make(map[string]bool)
-	var result []string
-	for _, m := range matches {
-		path := strings.TrimSpace(m[1])
-		if !strings.Contains(path, "/") {
-			continue
-		}
-		if !seen[path] {
-			seen[path] = true
-			result = append(result, path)
 		}
 	}
 	return result

@@ -98,14 +98,15 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	defer db.Close()
 
+	// Migrate schema to v4 if needed (add edge_source column and ast_cache table).
+	// This must run before validateUpdatePreconditions, which checks schema_version.
+	if err := migrateToSchemaV4(ctx, db); err != nil {
+		return nil, fmt.Errorf("schema migration to v4: %w", err)
+	}
+
 	// Step 6: Validate preconditions.
 	if err := validateUpdatePreconditions(ctx, db, embedder.Fingerprint(), dimension); err != nil {
 		return nil, err
-	}
-
-	// Migrate schema to v4 if needed (add edge_source column and ast_cache table).
-	if err := migrateToSchemaV4(ctx, db); err != nil {
-		return nil, fmt.Errorf("schema migration to v4: %w", err)
 	}
 
 	// Step 7: Load stored artifact refs and content hashes.
@@ -618,9 +619,17 @@ func copyFile(src, dst string) error {
 }
 
 // migrateToSchemaV4 adds the edge_source column and ast_cache table to an
-// existing v3 index. The migration is idempotent.
+// existing v3 index. Only runs when the stored schema version is exactly "3".
 func migrateToSchemaV4(ctx context.Context, db *sql.DB) error {
-	// Check if edge_source column already exists.
+	var storedVersion string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion); err != nil {
+		return nil // no metadata row — let validateUpdatePreconditions handle it
+	}
+	if strings.TrimSpace(storedVersion) != "3" {
+		return nil // not a v3 index — nothing to migrate
+	}
+
+	// Add edge_source column if missing.
 	var colCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'edge_source'`).Scan(&colCount); err != nil {
 		return err
@@ -642,8 +651,8 @@ func migrateToSchemaV4(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	// Update schema version metadata.
-	if _, err := db.ExecContext(ctx, `INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', '4')`); err != nil {
+	// Bump schema version to 4.
+	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '4' WHERE key = 'schema_version'`); err != nil {
 		return fmt.Errorf("update schema_version: %w", err)
 	}
 	return nil
