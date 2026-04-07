@@ -38,19 +38,67 @@ type explainFileArgs struct {
 	Path string `json:"path" jsonschema_description:"File path to classify"`
 }
 
-// mcpStatusResult is a JSON-tagged subset of app.StatusResult focused on
-// freshness and basic index health — the most useful view for MCP agents.
+// mcpStatusResult is the tiered context response for MCP agents.
+// L0 (~50 tokens): workspace identity, counts, index freshness.
+// L1 (~200 tokens): active governance findings and protocol.
+// L2/L3 are served by domain-specific tools (search_specs, governed_by, etc.).
 type mcpStatusResult struct {
-	WorkspaceRoot    string                     `json:"workspace_root"`
-	IndexExists      bool                       `json:"index_exists"`
-	SpecCount        int                        `json:"spec_count"`
-	DocCount         int                        `json:"doc_count"`
-	ChunkCount       int                        `json:"chunk_count"`
-	EmbedderProvider string                     `json:"embedder_provider,omitempty"`
-	AnalysisProvider string                     `json:"analysis_provider,omitempty"`
-	Freshness        *index.FreshnessStatus     `json:"freshness,omitempty"`
-	RelationGraph    *index.RelationGraphStatus `json:"relation_graph,omitempty"`
-	Guidance         []string                   `json:"guidance,omitempty"`
+	// L0: Workspace identity
+	WorkspaceRoot    string                 `json:"workspace_root"`
+	IndexExists      bool                   `json:"index_exists"`
+	SpecCount        int                    `json:"spec_count"`
+	DocCount         int                    `json:"doc_count"`
+	ChunkCount       int                    `json:"chunk_count"`
+	EmbedderProvider string                 `json:"embedder_provider,omitempty"`
+	AnalysisProvider string                 `json:"analysis_provider,omitempty"`
+	Freshness        *index.FreshnessStatus `json:"freshness,omitempty"`
+	// L1: Active governance signals
+	RelationGraph      *index.RelationGraphStatus `json:"relation_graph,omitempty"`
+	GovernanceCoverage *index.GovernanceCoverage  `json:"governance_coverage,omitempty"`
+	Guidance           []string                   `json:"guidance,omitempty"`
+	// Governance protocol: tells the AI when to use each tool
+	GovernanceProtocol *governanceProtocol `json:"governance_protocol,omitempty"`
+}
+
+// governanceProtocol teaches the AI when to use governance tools.
+type governanceProtocol struct {
+	Instructions []governanceInstruction `json:"instructions"`
+}
+
+// governanceInstruction is one rule in the governance protocol.
+type governanceInstruction struct {
+	Trigger string `json:"trigger"`
+	Action  string `json:"action"`
+	Tool    string `json:"tool"`
+}
+
+// defaultGovernanceProtocol returns the standard governance protocol that
+// teaches the AI when to check governance automatically.
+func defaultGovernanceProtocol() *governanceProtocol {
+	return &governanceProtocol{
+		Instructions: []governanceInstruction{
+			{
+				Trigger: "BEFORE modifying any file",
+				Action:  "Check for governing specs that constrain the file",
+				Tool:    "governed_by",
+			},
+			{
+				Trigger: "BEFORE committing code changes",
+				Action:  "Verify no spec violations in the diff",
+				Tool:    "check_compliance",
+			},
+			{
+				Trigger: "AFTER accepting or modifying a spec",
+				Action:  "Trace downstream effects on other specs, code, and docs",
+				Tool:    "analyze_impact",
+			},
+			{
+				Trigger: "WHEN writing or updating documentation",
+				Action:  "Verify the doc aligns with accepted specs",
+				Tool:    "check_doc_drift",
+			},
+		},
+	}
 }
 
 // --- Existing tools ---
@@ -97,7 +145,7 @@ func compareSpecsTool(options Options) mcpserver.ServerTool {
 func analyzeImpactTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"analyze_impact",
-		mcpgo.WithDescription("Analyze impacted specs, refs, and docs for an indexed spec."),
+		mcpgo.WithDescription("Analyze impacted specs, refs, and docs for an indexed spec. Per governance protocol: call AFTER accepting or modifying a spec."),
 		mcpgo.WithInputSchema[analyzeImpactArgs](),
 		mcpgo.WithOutputSchema[analysis.AnalyzeImpactResult](),
 	)
@@ -110,7 +158,7 @@ func analyzeImpactTool(options Options) mcpserver.ServerTool {
 func checkDocDriftTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"check_doc_drift",
-		mcpgo.WithDescription("Find documentation that contradicts accepted specs."),
+		mcpgo.WithDescription("Find documentation that contradicts accepted specs. Per governance protocol: call WHEN writing or updating documentation."),
 		mcpgo.WithInputSchema[analysis.DocDriftRequest](),
 		mcpgo.WithOutputSchema[analysis.DocDriftResult](),
 	)
@@ -138,7 +186,7 @@ func reviewSpecTool(options Options) mcpserver.ServerTool {
 func checkComplianceTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"check_compliance",
-		mcpgo.WithDescription("Check whether code or a diff complies with accepted specs."),
+		mcpgo.WithDescription("Check whether code or a diff complies with accepted specs. Per governance protocol: call BEFORE committing."),
 		mcpgo.WithInputSchema[analysis.ComplianceRequest](),
 		mcpgo.WithOutputSchema[analysis.ComplianceResult](),
 	)
@@ -164,7 +212,7 @@ func checkTerminologyTool(options Options) mcpserver.ServerTool {
 func governedByTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"governed_by",
-		mcpgo.WithDescription("Return the accepted specs that govern a given file path via applies_to edges."),
+		mcpgo.WithDescription("Return the accepted specs that govern a given file path via applies_to edges. Per governance protocol: call BEFORE modifying any file."),
 		mcpgo.WithInputSchema[app.GovernedByRequest](),
 		mcpgo.WithOutputSchema[app.GovernedByResult](),
 	)
@@ -203,7 +251,7 @@ func fixPreviewTool(options Options) mcpserver.ServerTool {
 func statusTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"status",
-		mcpgo.WithDescription("Check index freshness and workspace health."),
+		mcpgo.WithDescription("Check index freshness, workspace health, and governance protocol. Call this first to get the governance_protocol that tells you when to use each tool."),
 		mcpgo.WithInputSchema[struct{}](),
 		mcpgo.WithOutputSchema[mcpStatusResult](),
 	)
@@ -362,18 +410,22 @@ func statusHandler(options Options) mcpgo.TypedToolHandlerFunc[struct{}] {
 		}
 		r := operation.Result
 		result := &mcpStatusResult{
+			// L0: Workspace identity
 			WorkspaceRoot:    r.WorkspaceRoot,
 			EmbedderProvider: r.EmbedderProvider,
 			AnalysisProvider: r.AnalysisProvider,
-			RelationGraph:    r.RelationGraph,
 			Freshness:        r.Freshness,
-			Guidance:         r.Guidance,
+			// L1: Active governance signals
+			RelationGraph:      r.RelationGraph,
+			Guidance:           r.Guidance,
+			GovernanceProtocol: defaultGovernanceProtocol(),
 		}
 		if r.Index != nil {
 			result.IndexExists = r.Index.Exists
 			result.SpecCount = r.Index.SpecCount
 			result.DocCount = r.Index.DocCount
 			result.ChunkCount = r.Index.ChunkCount
+			result.GovernanceCoverage = r.Index.GovernanceCoverage
 		}
 		return mcpgo.NewToolResultStructuredOnly(result), nil
 	}
