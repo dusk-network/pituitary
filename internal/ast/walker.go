@@ -21,8 +21,13 @@ var ignoredDirs = map[string]bool{
 	".next":        true,
 }
 
+// MaxWalkFiles is the maximum number of source files returned by WalkWorkspace.
+// This bounds memory and parse time for very large workspaces.
+const MaxWalkFiles = 5000
+
 // WalkWorkspace returns workspace-relative paths for all source files in
-// supported languages, skipping common ignored directories.
+// supported languages, skipping common ignored directories. At most
+// MaxWalkFiles paths are returned.
 func WalkWorkspace(root string) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -35,6 +40,9 @@ func WalkWorkspace(root string) ([]string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if len(paths) >= MaxWalkFiles {
+			return filepath.SkipAll
 		}
 		lang := DetectLanguage(path)
 		if lang == "" {

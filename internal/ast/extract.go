@@ -9,7 +9,8 @@ import (
 )
 
 // parserMu serializes tree-sitter parsing. The gotreesitter Language objects
-// contain shared mutable state (DFA token source pool) that is not goroutine-safe.
+// contain shared mutable state (DFA token source pool) that is not
+// goroutine-safe, even through ParserPool.
 var parserMu sync.Mutex
 
 // SymbolKind classifies an extracted code symbol.
@@ -96,6 +97,7 @@ func ExtractSymbols(src []byte, lang LangID) (symbols []Symbol, err error) {
 func extractSymbols(src []byte, lang LangID) ([]Symbol, error) {
 	parserMu.Lock()
 	defer parserMu.Unlock()
+
 	grammar := GrammarFor(lang)
 	if grammar == nil {
 		return nil, fmt.Errorf("unsupported language: %q", lang)

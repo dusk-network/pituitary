@@ -834,8 +834,24 @@ func fingerprint(parts []string) string {
 // tree-sitter, matches them against spec body text, and inserts inferred
 // applies_to edges into the staging database.
 func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord) (int, error) {
+	if !cfg.Workspace.InferAppliesTo {
+		return 0, nil
+	}
 	workspaceRoot := cfg.Workspace.RootPath
 	if workspaceRoot == "" {
+		return 0, nil
+	}
+
+	// Quick check: if no spec body contains matchable identifiers, skip the
+	// expensive filesystem walk and tree-sitter parsing entirely.
+	hasMatchable := false
+	for _, spec := range specs {
+		if len(ast.ScanSpecIdentifiers(spec.BodyText)) > 0 {
+			hasMatchable = true
+			break
+		}
+	}
+	if !hasMatchable {
 		return 0, nil
 	}
 

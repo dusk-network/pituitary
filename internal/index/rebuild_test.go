@@ -349,6 +349,7 @@ func TestRebuildInfersASTEdges(t *testing.T) {
 [workspace]
 root = "` + filepath.ToSlash(dir) + `"
 index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = true
 
 [runtime.embedder]
 provider = "fixture"
