@@ -15,6 +15,7 @@ type analysisRepository struct {
 	ctx            context.Context
 	db             *sql.DB
 	atDate         string // ISO date for point-in-time queries; empty = current
+	minConfidence  string // minimum confidence tier filter; empty = all
 	specCache      map[string]specDocument
 	docCache       map[string]docDocument
 	allSpecsLoaded bool

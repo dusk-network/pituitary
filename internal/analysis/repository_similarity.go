@@ -285,6 +285,7 @@ WHERE a.kind = ?
 	}
 	builder.WriteString(")")
 	appendTemporalEdgeClause(&builder, &args, r.atDate)
+	appendMinConfidenceEdgeClause(&builder, r.minConfidence)
 	appendExcludedRefsClause(&builder, &args, excludeRefs)
 	builder.WriteString(" ORDER BY a.ref ASC")
 
@@ -313,6 +314,7 @@ WHERE a.kind = ?
   AND e.to_ref = ?`)
 	args = append(args, model.ArtifactKindSpec, edgeType, toRef)
 	appendTemporalEdgeClause(&builder, &args, r.atDate)
+	appendMinConfidenceEdgeClause(&builder, r.minConfidence)
 	appendExcludedRefsClause(&builder, &args, excludeRefs)
 	builder.WriteString(" ORDER BY a.ref ASC")
 
@@ -323,6 +325,17 @@ WHERE a.kind = ?
 	defer rows.Close()
 
 	return scanRefRows(rows)
+}
+
+// appendMinConfidenceEdgeClause adds a WHERE filter on edge confidence tier
+// when minConfidence is non-empty.
+func appendMinConfidenceEdgeClause(builder *strings.Builder, minConfidence string) {
+	switch strings.TrimSpace(strings.ToLower(minConfidence)) {
+	case "extracted":
+		builder.WriteString(` AND e.confidence = 'extracted'`)
+	case "inferred":
+		builder.WriteString(` AND e.confidence IN ('extracted', 'inferred')`)
+	}
 }
 
 // appendTemporalEdgeClause adds WHERE conditions to filter edges by temporal

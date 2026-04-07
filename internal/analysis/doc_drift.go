@@ -225,6 +225,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	}
 	defer repo.Close()
 	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.minConfidence = strings.TrimSpace(request.MinConfidence)
 
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if err != nil {
