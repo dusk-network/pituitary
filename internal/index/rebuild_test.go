@@ -692,12 +692,11 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 		t.Fatalf("source.LoadFromConfig: %v", err)
 	}
 
-	before := time.Now().UTC().Truncate(time.Second)
+	today := time.Now().UTC().Format("2006-01-02")
 	_, err = Rebuild(cfg, records)
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
 	}
-	after := time.Now().UTC().Truncate(time.Second).Add(time.Second)
 
 	db, err := OpenReadOnlyContext(context.Background(), cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
@@ -714,7 +713,7 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 		t.Errorf("schema_version = %q, want 5", version)
 	}
 
-	// Verify that manual edges have valid_from set within the rebuild window.
+	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).
 	rows, err := db.Query(`SELECT from_ref, to_ref, edge_type, edge_source, valid_from, valid_to FROM edges WHERE edge_source = 'manual'`)
 	if err != nil {
 		t.Fatalf("query edges: %v", err)
@@ -730,16 +729,11 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 		}
 		manualCount++
 		if !validFrom.Valid {
-			t.Errorf("edge %s->%s (%s) has NULL valid_from, expected a timestamp", fromRef, toRef, edgeType)
+			t.Errorf("edge %s->%s (%s) has NULL valid_from, expected a date", fromRef, toRef, edgeType)
 			continue
 		}
-		ts, err := time.Parse(time.RFC3339, validFrom.String)
-		if err != nil {
-			t.Errorf("edge %s->%s valid_from %q is not RFC3339: %v", fromRef, toRef, validFrom.String, err)
-			continue
-		}
-		if ts.Before(before) || ts.After(after) {
-			t.Errorf("edge %s->%s valid_from %s outside rebuild window [%s, %s]", fromRef, toRef, ts, before, after)
+		if validFrom.String != today {
+			t.Errorf("edge %s->%s valid_from = %q, want %q", fromRef, toRef, validFrom.String, today)
 		}
 	}
 	if manualCount == 0 {

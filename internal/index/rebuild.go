@@ -429,7 +429,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	}
 	defer edgeStmt.Close()
 
-	rebuildTime := time.Now().UTC().Format(time.RFC3339)
+	rebuildTime := time.Now().UTC().Format("2006-01-02")
 	rebuildTimePtr := &rebuildTime
 
 	for _, spec := range records.Specs {
@@ -510,7 +510,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	}
 
 	// Infer AST-based applies_to edges from code file symbols.
-	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs)
+	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, rebuildTimePtr)
 	if inferErr != nil {
 		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
 	}
@@ -847,7 +847,7 @@ func fingerprint(parts []string) string {
 // inferASTEdgesContext walks the workspace for code files, extracts symbols via
 // tree-sitter, matches them against spec body text, and inserts inferred
 // applies_to edges into the staging database.
-func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord) (int, error) {
+func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord, validFrom *string) (int, error) {
 	if !cfg.Workspace.InferAppliesTo {
 		return 0, nil
 	}
@@ -944,7 +944,7 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	count := 0
 	for _, edge := range inferred {
 		ref := "code://" + edge.FilePath
-		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", nil, nil); err != nil {
+		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", validFrom, nil); err != nil {
 			// INSERT OR IGNORE means duplicate-key errors won't happen,
 			// but handle unexpected errors.
 			return count, err

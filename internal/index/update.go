@@ -264,7 +264,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	defer edgeStmt.Close()
 
-	updateTime := time.Now().UTC().Format(time.RFC3339)
+	updateTime := time.Now().UTC().Format("2006-01-02")
 	updateTimePtr := &updateTime
 
 	for _, spec := range records.Specs {
@@ -287,7 +287,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 
 	// Infer AST-based applies_to edges.
-	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs)
+	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, updateTimePtr)
 	if inferErr != nil {
 		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
 	}

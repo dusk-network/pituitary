@@ -112,9 +112,16 @@ WHERE a.kind = 'spec'
 // appendTemporalClause adds a temporal validity filter to the SQL query when
 // atDate is non-empty. It filters for edges active at the given date using:
 // valid_from <= atDate AND (valid_to IS NULL OR valid_to >= atDate).
+// The date is normalized to YYYY-MM-DD for consistent TEXT comparison with
+// stored values.
 func appendTemporalClause(builder *strings.Builder, args *[]any, atDate string) {
+	atDate = strings.TrimSpace(atDate)
 	if atDate == "" {
 		return
+	}
+	// Normalize: truncate to date-only (YYYY-MM-DD) for consistent comparison.
+	if len(atDate) > 10 {
+		atDate = atDate[:10]
 	}
 	builder.WriteString(` AND (e.valid_from IS NULL OR e.valid_from <= ?)`)
 	*args = append(*args, atDate)

@@ -62,7 +62,6 @@ type DriftEvidence struct {
 	DocSection    string `json:"doc_section,omitempty"`
 	DocExcerpt    string `json:"doc_excerpt,omitempty"`
 	LinkReason    string `json:"link_reason,omitempty"`
-	DriftOnset    string `json:"drift_onset,omitempty"` // ISO date when spec edge became active, if temporal data available
 }
 
 // DriftConfidence reports how certain the analysis is about one judgment.

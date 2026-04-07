@@ -32,8 +32,6 @@ type ImpactedSpec struct {
 	Status             string                     `json:"status,omitempty"`
 	Relationship       string                     `json:"relationship"`
 	Historical         bool                       `json:"historical"`
-	ValidFrom          string                     `json:"valid_from,omitempty"`
-	ValidTo            string                     `json:"valid_to,omitempty"`
 	Inference          *model.InferenceConfidence `json:"inference,omitempty"`
 	Severity           string                     `json:"severity,omitempty"`
 	SeverityConfidence float64                    `json:"severity_confidence,omitempty"`
