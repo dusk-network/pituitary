@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,8 +10,9 @@ import (
 
 // GoverningSpec reports one accepted spec that governs a set of code/config refs.
 type GoverningSpec struct {
-	Ref   string `json:"ref"`
-	Title string `json:"title"`
+	Ref    string `json:"ref"`
+	Title  string `json:"title"`
+	Source string `json:"source"` // "manual" or "inferred"
 }
 
 // GoverningSpecsResult is the structured result of a governed-by query.
@@ -35,9 +37,21 @@ func GovernedByContext(ctx context.Context, dbPath string, path string) (*Govern
 	}
 	defer db.Close()
 
+	hasSource := hasEdgeSourceColumn(ctx, db)
+
 	var builder strings.Builder
 	args := make([]any, 0, len(refs))
-	builder.WriteString(`
+	if hasSource {
+		builder.WriteString(`
+SELECT DISTINCT a.ref, COALESCE(a.title, ''), e.edge_source
+FROM edges e
+JOIN artifacts a ON a.ref = e.from_ref
+WHERE a.kind = 'spec'
+  AND a.status = 'accepted'
+  AND e.edge_type = 'applies_to'
+  AND e.to_ref IN (`)
+	} else {
+		builder.WriteString(`
 SELECT DISTINCT a.ref, COALESCE(a.title, '')
 FROM edges e
 JOIN artifacts a ON a.ref = e.from_ref
@@ -45,6 +59,7 @@ WHERE a.kind = 'spec'
   AND a.status = 'accepted'
   AND e.edge_type = 'applies_to'
   AND e.to_ref IN (`)
+	}
 	for i, ref := range refs {
 		if i > 0 {
 			builder.WriteString(", ")
@@ -52,7 +67,11 @@ WHERE a.kind = 'spec'
 		builder.WriteString("?")
 		args = append(args, ref)
 	}
-	builder.WriteString(")\nORDER BY a.ref")
+	if hasSource {
+		builder.WriteString(")\nORDER BY e.edge_source, a.ref")
+	} else {
+		builder.WriteString(")\nORDER BY a.ref")
+	}
 
 	rows, err := db.QueryContext(ctx, builder.String(), args...)
 	if err != nil {
@@ -63,8 +82,15 @@ WHERE a.kind = 'spec'
 	var specs []GoverningSpec
 	for rows.Next() {
 		var spec GoverningSpec
-		if err := rows.Scan(&spec.Ref, &spec.Title); err != nil {
-			return nil, fmt.Errorf("scan governing spec: %w", err)
+		if hasSource {
+			if err := rows.Scan(&spec.Ref, &spec.Title, &spec.Source); err != nil {
+				return nil, fmt.Errorf("scan governing spec: %w", err)
+			}
+		} else {
+			if err := rows.Scan(&spec.Ref, &spec.Title); err != nil {
+				return nil, fmt.Errorf("scan governing spec: %w", err)
+			}
+			spec.Source = "manual"
 		}
 		specs = append(specs, spec)
 	}
@@ -87,6 +113,12 @@ func governedRefsForPath(path string) []string {
 	default:
 		return []string{"code://" + path, "config://" + path}
 	}
+}
+
+func hasEdgeSourceColumn(ctx context.Context, db *sql.DB) bool {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'edge_source'`).Scan(&count)
+	return err == nil && count > 0
 }
 
 func normalizePath(path string) string {

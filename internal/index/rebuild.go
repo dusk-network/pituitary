@@ -13,13 +13,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dusk-network/pituitary/internal/ast"
 	"github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
@@ -41,6 +42,7 @@ type RebuildResult struct {
 	UpdatedCount        int                        `json:"updated_count,omitempty"`
 	RemovedCount        int                        `json:"removed_count,omitempty"`
 	UnchangedCount      int                        `json:"unchanged_count,omitempty"`
+	InferredEdgeCount   int                        `json:"inferred_edge_count,omitempty"`
 	ContentFingerprint  string                     `json:"content_fingerprint"`
 	Repos               []RepoCoverage             `json:"repo_coverage,omitempty"`
 	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`
@@ -420,7 +422,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	}
 	defer vectorStmt.Close()
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT INTO edges (from_ref, to_ref, edge_type) VALUES (?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
@@ -455,13 +457,13 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 		}
 
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type)); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual"); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual"); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
@@ -496,6 +498,14 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 			result.ReusedArtifactCount++
 		}
 	}
+
+	// Infer AST-based applies_to edges from code file symbols.
+	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs)
+	if inferErr != nil {
+		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
+	}
+	result.EdgeCount += inferredCount
+	result.InferredEdgeCount = inferredCount
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit rebuild transaction: %w", err)
@@ -542,7 +552,13 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			from_ref      TEXT NOT NULL,
 			to_ref        TEXT NOT NULL,
 			edge_type     TEXT NOT NULL,
+			edge_source   TEXT NOT NULL DEFAULT 'manual',
 			PRIMARY KEY (from_ref, to_ref, edge_type)
+		)`,
+		`CREATE TABLE ast_cache (
+			content_hash  TEXT PRIMARY KEY,
+			path          TEXT NOT NULL,
+			symbols_json  TEXT NOT NULL
 		)`,
 		`CREATE TABLE metadata (
 			key           TEXT PRIMARY KEY,
@@ -743,9 +759,9 @@ func textForEmbedding(title string, section chunk.Section) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType string) error {
-	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType); err != nil {
-		return fmt.Errorf("insert edge %s -> %s (%s): %w", fromRef, toRef, edgeType, err)
+func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string) error {
+	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource); err != nil {
+		return fmt.Errorf("insert edge %s -> %s (%s, %s): %w", fromRef, toRef, edgeType, edgeSource, err)
 	}
 	return nil
 }
@@ -812,4 +828,144 @@ func fingerprint(parts []string) string {
 	sort.Strings(parts)
 	hash := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(hash[:])
+}
+
+// inferASTEdgesContext walks the workspace for code files, extracts symbols via
+// tree-sitter, matches them against spec body text, and inserts inferred
+// applies_to edges into the staging database.
+func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord) (int, error) {
+	workspaceRoot := cfg.Workspace.RootPath
+	if workspaceRoot == "" {
+		return 0, nil
+	}
+
+	codePaths, err := ast.WalkWorkspace(workspaceRoot)
+	if err != nil {
+		return 0, fmt.Errorf("walk workspace for AST extraction: %w", err)
+	}
+	if len(codePaths) == 0 {
+		return 0, nil
+	}
+
+	// Prepare cache insert statement.
+	cacheStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO ast_cache (content_hash, path, symbols_json) VALUES (?, ?, ?)`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare ast_cache insert: %w", err)
+	}
+	defer cacheStmt.Close()
+
+	// Load cached symbols from the previous index if available.
+	cachedSymbols := loadCachedASTSymbols(ctx, cfg.Workspace.ResolvedIndexPath)
+
+	// Extract symbols from each code file.
+	fileSymbols := make(map[string][]ast.Symbol, len(codePaths))
+	for _, relPath := range codePaths {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		fullPath := filepath.Join(workspaceRoot, relPath)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		hash := ast.ContentHash(content, relPath)
+
+		// Check cache first.
+		if cached, ok := cachedSymbols[hash]; ok {
+			fileSymbols[relPath] = cached
+			if err := insertASTCache(ctx, cacheStmt, hash, relPath, cached); err != nil {
+				return 0, err
+			}
+			continue
+		}
+
+		lang := ast.DetectLanguage(relPath)
+		if lang == "" {
+			continue
+		}
+		symbols, err := ast.ExtractSymbols(content, lang)
+		if err != nil {
+			continue
+		}
+		fileSymbols[relPath] = symbols
+		if err := insertASTCache(ctx, cacheStmt, hash, relPath, symbols); err != nil {
+			return 0, err
+		}
+	}
+
+	// Build spec summaries for matching.
+	specSummaries := make([]ast.SpecSummary, len(specs))
+	for i, spec := range specs {
+		specSummaries[i] = ast.SpecSummary{
+			Ref:             spec.Ref,
+			Body:            spec.BodyText,
+			ManualAppliesTo: spec.AppliesTo,
+		}
+	}
+
+	// Run inference and insert edges.
+	inferred := ast.InferEdges(fileSymbols, specSummaries)
+	count := 0
+	for _, edge := range inferred {
+		ref := "code://" + edge.FilePath
+		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred"); err != nil {
+			// INSERT OR IGNORE means duplicate-key errors won't happen,
+			// but handle unexpected errors.
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func loadCachedASTSymbols(ctx context.Context, indexPath string) map[string][]ast.Symbol {
+	result := make(map[string][]ast.Symbol)
+	if indexPath == "" {
+		return result
+	}
+	info, err := os.Stat(indexPath)
+	if err != nil || info.IsDir() {
+		return result
+	}
+	db, err := OpenReadOnlyContext(ctx, indexPath)
+	if err != nil {
+		return result
+	}
+	defer db.Close()
+
+	// Check if ast_cache table exists (schema v4+).
+	var tableCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ast_cache'`).Scan(&tableCount); err != nil || tableCount == 0 {
+		return result
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT content_hash, symbols_json FROM ast_cache`)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var hash, symbolsJSON string
+		if err := rows.Scan(&hash, &symbolsJSON); err != nil {
+			continue
+		}
+		var symbols []ast.Symbol
+		if err := json.Unmarshal([]byte(symbolsJSON), &symbols); err != nil {
+			continue
+		}
+		result[hash] = symbols
+	}
+	return result
+}
+
+func insertASTCache(ctx context.Context, stmt *sql.Stmt, hash, path string, symbols []ast.Symbol) error {
+	data, err := json.Marshal(symbols)
+	if err != nil {
+		return fmt.Errorf("marshal AST symbols for cache: %w", err)
+	}
+	if _, err := stmt.ExecContext(ctx, hash, path, string(data)); err != nil {
+		return fmt.Errorf("insert AST cache %s: %w", path, err)
+	}
+	return nil
 }
