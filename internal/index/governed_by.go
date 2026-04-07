@@ -24,7 +24,9 @@ type GoverningSpecsResult struct {
 
 // GovernedByContext queries the index for accepted specs whose applies_to edges
 // match any of the candidate refs derived from the given workspace-relative path.
-func GovernedByContext(ctx context.Context, dbPath string, path string) (*GoverningSpecsResult, error) {
+// When atDate is non-empty, only edges active at that date are considered
+// (valid_from <= atDate AND (valid_to IS NULL OR valid_to >= atDate)).
+func GovernedByContext(ctx context.Context, dbPath string, path string, atDate string) (*GoverningSpecsResult, error) {
 	normalized := normalizePath(path)
 	if normalized == "" || normalized == "." {
 		return nil, fmt.Errorf("governed_by requires a non-empty file path")
@@ -40,7 +42,7 @@ func GovernedByContext(ctx context.Context, dbPath string, path string) (*Govern
 	hasSource := hasEdgeSourceColumn(ctx, db)
 
 	var builder strings.Builder
-	args := make([]any, 0, len(refs))
+	args := make([]any, 0, len(refs)+2)
 	if hasSource {
 		builder.WriteString(`
 SELECT DISTINCT a.ref, COALESCE(a.title, ''), e.edge_source
@@ -67,10 +69,12 @@ WHERE a.kind = 'spec'
 		builder.WriteString("?")
 		args = append(args, ref)
 	}
+	builder.WriteString(")")
+	appendTemporalClause(&builder, &args, atDate)
 	if hasSource {
-		builder.WriteString(")\nORDER BY e.edge_source, a.ref")
+		builder.WriteString("\nORDER BY e.edge_source, a.ref")
 	} else {
-		builder.WriteString(")\nORDER BY a.ref")
+		builder.WriteString("\nORDER BY a.ref")
 	}
 
 	rows, err := db.QueryContext(ctx, builder.String(), args...)
@@ -103,6 +107,19 @@ WHERE a.kind = 'spec'
 		Refs:  refs,
 		Specs: specs,
 	}, nil
+}
+
+// appendTemporalClause adds a temporal validity filter to the SQL query when
+// atDate is non-empty. It filters for edges active at the given date using:
+// valid_from <= atDate AND (valid_to IS NULL OR valid_to >= atDate).
+func appendTemporalClause(builder *strings.Builder, args *[]any, atDate string) {
+	if atDate == "" {
+		return
+	}
+	builder.WriteString(` AND (e.valid_from IS NULL OR e.valid_from <= ?)`)
+	*args = append(*args, atDate)
+	builder.WriteString(` AND (e.valid_to IS NULL OR e.valid_to >= ?)`)
+	*args = append(*args, atDate)
 }
 
 // governedRefsForPath generates the candidate edge refs for a workspace path.

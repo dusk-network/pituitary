@@ -267,7 +267,7 @@ func (r *analysisRepository) specRefsSharingAppliesTo(appliesTo []string, exclud
 	}
 
 	var builder strings.Builder
-	args := make([]any, 0, 2+len(appliesTo)+len(excludeRefs))
+	args := make([]any, 0, 2+len(appliesTo)+len(excludeRefs)+2)
 	builder.WriteString(`
 SELECT DISTINCT a.ref
 FROM edges e
@@ -284,6 +284,7 @@ WHERE a.kind = ?
 		args = append(args, ref)
 	}
 	builder.WriteString(")")
+	appendTemporalEdgeClause(&builder, &args, r.atDate)
 	appendExcludedRefsClause(&builder, &args, excludeRefs)
 	builder.WriteString(" ORDER BY a.ref ASC")
 
@@ -302,7 +303,7 @@ func (r *analysisRepository) specRefsWithIncomingEdge(edgeType model.RelationTyp
 	}
 
 	var builder strings.Builder
-	args := make([]any, 0, 3+len(excludeRefs))
+	args := make([]any, 0, 3+len(excludeRefs)+2)
 	builder.WriteString(`
 SELECT DISTINCT a.ref
 FROM edges e
@@ -311,6 +312,7 @@ WHERE a.kind = ?
   AND e.edge_type = ?
   AND e.to_ref = ?`)
 	args = append(args, model.ArtifactKindSpec, edgeType, toRef)
+	appendTemporalEdgeClause(&builder, &args, r.atDate)
 	appendExcludedRefsClause(&builder, &args, excludeRefs)
 	builder.WriteString(" ORDER BY a.ref ASC")
 
@@ -321,6 +323,18 @@ WHERE a.kind = ?
 	defer rows.Close()
 
 	return scanRefRows(rows)
+}
+
+// appendTemporalEdgeClause adds WHERE conditions to filter edges by temporal
+// validity when atDate is non-empty.
+func appendTemporalEdgeClause(builder *strings.Builder, args *[]any, atDate string) {
+	if atDate == "" {
+		return
+	}
+	builder.WriteString(` AND (e.valid_from IS NULL OR e.valid_from <= ?)`)
+	*args = append(*args, atDate)
+	builder.WriteString(` AND (e.valid_to IS NULL OR e.valid_to >= ?)`)
+	*args = append(*args, atDate)
 }
 
 func appendExcludedRefsClause(builder *strings.Builder, args *[]any, excludeRefs []string) {

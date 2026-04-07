@@ -39,12 +39,14 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 		requestFile string
 		format      string
 		configPath  string
+		atDate      string
 	)
 	fs.Var(&paths, "path", "workspace-relative or absolute file path; repeat to check multiple files")
 	fs.StringVar(&diffFile, "diff-file", "", "path to a unified diff file, or - for stdin")
 	fs.StringVar(&requestFile, "request-file", "", "path to compliance request JSON, or - for stdin")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-compliance", nil, cliIssue{
@@ -124,6 +126,9 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 		}
 	}
 
+	if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
+		request.AtDate = trimmedAt
+	}
 	operation := app.CheckCompliance(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-compliance", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)

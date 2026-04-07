@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/ast"
 	"github.com/dusk-network/pituitary/internal/chunk"
@@ -20,7 +21,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
@@ -422,11 +423,14 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	}
 	defer vectorStmt.Close()
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source) VALUES (?, ?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
 	defer edgeStmt.Close()
+
+	rebuildTime := time.Now().UTC().Format(time.RFC3339)
+	rebuildTimePtr := &rebuildTime
 
 	for _, spec := range records.Specs {
 		if err := ctx.Err(); err != nil {
@@ -456,14 +460,20 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 			result.ReusedArtifactCount++
 		}
 
+		// Superseded or deprecated specs get valid_to set to close their edges.
+		var edgeValidTo *string
+		if spec.Status == "superseded" || spec.Status == "deprecated" {
+			edgeValidTo = rebuildTimePtr
+		}
+
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", rebuildTimePtr, edgeValidTo); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", rebuildTimePtr, edgeValidTo); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
@@ -535,7 +545,9 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			adapter       TEXT NOT NULL,
 			body_format   TEXT NOT NULL,
 			content_hash  TEXT NOT NULL,
-			metadata_json TEXT NOT NULL
+			metadata_json TEXT NOT NULL,
+			valid_from    TEXT,
+			valid_to      TEXT
 		)`,
 		`CREATE TABLE chunks (
 			id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -553,6 +565,8 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			to_ref        TEXT NOT NULL,
 			edge_type     TEXT NOT NULL,
 			edge_source   TEXT NOT NULL DEFAULT 'manual',
+			valid_from    TEXT,
+			valid_to      TEXT,
 			PRIMARY KEY (from_ref, to_ref, edge_type)
 		)`,
 		`CREATE TABLE ast_cache (
@@ -759,8 +773,8 @@ func textForEmbedding(title string, section chunk.Section) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string) error {
-	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource); err != nil {
+func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string, validFrom, validTo *string) error {
+	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource, validFrom, validTo); err != nil {
 		return fmt.Errorf("insert edge %s -> %s (%s, %s): %w", fromRef, toRef, edgeType, edgeSource, err)
 	}
 	return nil
@@ -930,7 +944,7 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	count := 0
 	for _, edge := range inferred {
 		ref := "code://" + edge.FilePath
-		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred"); err != nil {
+		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", nil, nil); err != nil {
 			// INSERT OR IGNORE means duplicate-key errors won't happen,
 			// but handle unexpected errors.
 			return count, err

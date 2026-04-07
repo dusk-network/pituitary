@@ -42,6 +42,7 @@ type DocDriftRequest struct {
 	Scope    string   `json:"scope,omitempty"`
 	DiffFile string   `json:"diff_file,omitempty"`
 	DiffText string   `json:"diff_text,omitempty"`
+	AtDate   string   `json:"at_date,omitempty"`
 }
 
 // DocDriftScope reports the normalized selector.
@@ -61,6 +62,7 @@ type DriftEvidence struct {
 	DocSection    string `json:"doc_section,omitempty"`
 	DocExcerpt    string `json:"doc_excerpt,omitempty"`
 	LinkReason    string `json:"link_reason,omitempty"`
+	DriftOnset    string `json:"drift_onset,omitempty"` // ISO date when spec edge became active, if temporal data available
 }
 
 // DriftConfidence reports how certain the analysis is about one judgment.
@@ -222,6 +224,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 	defer repo.Close()
+	repo.atDate = strings.TrimSpace(request.AtDate)
 
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if err != nil {

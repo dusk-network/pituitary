@@ -29,6 +29,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		summary     bool
 		format      string
 		configPath  string
+		atDate      string
 	)
 	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
@@ -37,6 +38,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 	fs.BoolVar(&summary, "summary", false, "emit a concise ranked summary in text output and include summary metadata in JSON")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{
@@ -118,6 +120,9 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		}
 	}
 
+	if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
+		request.AtDate = trimmedAt
+	}
 	operation := app.AnalyzeImpact(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
