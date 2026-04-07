@@ -37,12 +37,13 @@ type docDocument struct {
 
 // DocDriftRequest is the normalized doc-drift input.
 type DocDriftRequest struct {
-	DocRef   string   `json:"doc_ref,omitempty"`
-	DocRefs  []string `json:"doc_refs,omitempty"`
-	Scope    string   `json:"scope,omitempty"`
-	DiffFile string   `json:"diff_file,omitempty"`
-	DiffText string   `json:"diff_text,omitempty"`
-	AtDate   string   `json:"at_date,omitempty"`
+	DocRef        string   `json:"doc_ref,omitempty"`
+	DocRefs       []string `json:"doc_refs,omitempty"`
+	Scope         string   `json:"scope,omitempty"`
+	DiffFile      string   `json:"diff_file,omitempty"`
+	DiffText      string   `json:"diff_text,omitempty"`
+	AtDate        string   `json:"at_date,omitempty"`
+	MinConfidence string   `json:"min_confidence,omitempty"`
 }
 
 // DocDriftScope reports the normalized selector.

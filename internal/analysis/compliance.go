@@ -89,10 +89,11 @@ type exclusivePhraseFamily struct {
 
 // ComplianceRequest is the normalized compliance input.
 type ComplianceRequest struct {
-	Paths    []string `json:"paths,omitempty"`
-	DiffFile string   `json:"diff_file,omitempty"`
-	DiffText string   `json:"diff_text,omitempty"`
-	AtDate   string   `json:"at_date,omitempty"`
+	Paths         []string `json:"paths,omitempty"`
+	DiffFile      string   `json:"diff_file,omitempty"`
+	DiffText      string   `json:"diff_text,omitempty"`
+	AtDate        string   `json:"at_date,omitempty"`
+	MinConfidence string   `json:"min_confidence,omitempty"`
 }
 
 // ComplianceRelevantSpec reports one accepted spec considered during evaluation.
@@ -105,19 +106,21 @@ type ComplianceRelevantSpec struct {
 
 // ComplianceFinding reports one compliant, conflicting, or unspecified item.
 type ComplianceFinding struct {
-	Path           string  `json:"path"`
-	SpecRef        string  `json:"spec_ref,omitempty"`
-	Title          string  `json:"title,omitempty"`
-	SectionHeading string  `json:"section_heading,omitempty"`
-	Code           string  `json:"code"`
-	Message        string  `json:"message"`
-	Traceability   string  `json:"traceability,omitempty"`
-	LimitingFactor string  `json:"limiting_factor,omitempty"`
-	Suggestion     string  `json:"suggestion,omitempty"`
-	Expected       string  `json:"expected,omitempty"`
-	Observed       string  `json:"observed,omitempty"`
-	Provenance     string  `json:"provenance,omitempty"`
-	Confidence     float64 `json:"confidence,omitempty"`
+	Path                string  `json:"path"`
+	SpecRef             string  `json:"spec_ref,omitempty"`
+	Title               string  `json:"title,omitempty"`
+	SectionHeading      string  `json:"section_heading,omitempty"`
+	Code                string  `json:"code"`
+	Message             string  `json:"message"`
+	Traceability        string  `json:"traceability,omitempty"`
+	LimitingFactor      string  `json:"limiting_factor,omitempty"`
+	Suggestion          string  `json:"suggestion,omitempty"`
+	Expected            string  `json:"expected,omitempty"`
+	Observed            string  `json:"observed,omitempty"`
+	Provenance          string  `json:"provenance,omitempty"`
+	Confidence          float64 `json:"confidence,omitempty"`
+	EdgeConfidence      string  `json:"edge_confidence,omitempty"`       // "extracted", "inferred", or "ambiguous"
+	EdgeConfidenceScore float64 `json:"edge_confidence_score,omitempty"` // 0.0–1.0
 }
 
 // ComplianceResult is the structured compliance output.
