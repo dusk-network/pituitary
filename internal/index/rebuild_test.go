@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
@@ -408,7 +409,7 @@ func NewSlidingWindowLimiter(w int) *SlidingWindowLimiter {
 	}
 
 	// Verify governed-by returns the inferred edge.
-	govResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/limiter.go")
+	govResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/limiter.go", "")
 	if err != nil {
 		t.Fatalf("GovernedBy: %v", err)
 	}
@@ -680,5 +681,165 @@ func TestAdapterFromMetadata(t *testing.T) {
 				t.Errorf("adapterFromMetadata() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
+	t.Parallel()
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	_, err = Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	db, err := OpenReadOnlyContext(context.Background(), cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer db.Close()
+
+	// Verify schema version is 5.
+	var version string
+	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatalf("read schema_version: %v", err)
+	}
+	if version != "5" {
+		t.Errorf("schema_version = %q, want 5", version)
+	}
+
+	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).
+	rows, err := db.Query(`SELECT from_ref, to_ref, edge_type, edge_source, valid_from, valid_to FROM edges WHERE edge_source = 'manual'`)
+	if err != nil {
+		t.Fatalf("query edges: %v", err)
+	}
+	defer rows.Close()
+
+	manualCount := 0
+	for rows.Next() {
+		var fromRef, toRef, edgeType, edgeSource string
+		var validFrom, validTo sql.NullString
+		if err := rows.Scan(&fromRef, &toRef, &edgeType, &edgeSource, &validFrom, &validTo); err != nil {
+			t.Fatalf("scan edge: %v", err)
+		}
+		manualCount++
+		if !validFrom.Valid {
+			t.Errorf("edge %s->%s (%s) has NULL valid_from, expected a date", fromRef, toRef, edgeType)
+			continue
+		}
+		if validFrom.String != today {
+			t.Errorf("edge %s->%s valid_from = %q, want %q", fromRef, toRef, validFrom.String, today)
+		}
+	}
+	if manualCount == 0 {
+		t.Fatal("expected at least one manual edge")
+	}
+}
+
+func TestGovernedByTemporalFilter(t *testing.T) {
+	t.Parallel()
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	// The fixture has applies_to edges from SPEC-042 and SPEC-055 to
+	// code://src/api/middleware/ratelimiter.go. SPEC-008 is superseded so
+	// governed-by only returns accepted specs.
+	result, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "")
+	if err != nil {
+		t.Fatalf("GovernedBy (no filter): %v", err)
+	}
+	if len(result.Specs) == 0 {
+		t.Skip("no governing specs found; skipping temporal filter test")
+	}
+
+	// With a future date, should still return results (edges are currently valid).
+	futureDate := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02")
+	futureResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", futureDate)
+	if err != nil {
+		t.Fatalf("GovernedBy (future): %v", err)
+	}
+	if len(futureResult.Specs) != len(result.Specs) {
+		t.Errorf("future query returned %d specs, expected %d", len(futureResult.Specs), len(result.Specs))
+	}
+
+	// With a very old date (before edges existed), should return no results
+	// because valid_from was set to the rebuild timestamp.
+	pastDate := "1970-01-01"
+	pastResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", pastDate)
+	if err != nil {
+		t.Fatalf("GovernedBy (past): %v", err)
+	}
+	if len(pastResult.Specs) != 0 {
+		t.Errorf("past query returned %d specs, expected 0", len(pastResult.Specs))
+	}
+}
+
+func TestRebuildSetsValidToForSupersededSpecs(t *testing.T) {
+	t.Parallel()
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	db, err := OpenReadOnlyContext(context.Background(), cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer db.Close()
+
+	// SPEC-008 is superseded — its edges should have valid_to set.
+	rows, err := db.Query(`SELECT to_ref, valid_from, valid_to FROM edges WHERE from_ref = 'SPEC-008' AND edge_source = 'manual'`)
+	if err != nil {
+		t.Fatalf("query SPEC-008 edges: %v", err)
+	}
+	defer rows.Close()
+
+	edgeCount := 0
+	for rows.Next() {
+		var toRef string
+		var validFrom, validTo sql.NullString
+		if err := rows.Scan(&toRef, &validFrom, &validTo); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		edgeCount++
+		if !validTo.Valid {
+			t.Errorf("superseded spec SPEC-008 edge to %s has NULL valid_to", toRef)
+		}
+	}
+	if edgeCount == 0 {
+		t.Fatal("expected edges from SPEC-008")
+	}
+
+	// SPEC-042 is accepted — its edges should NOT have valid_to set.
+	rows2, err := db.Query(`SELECT to_ref, valid_to FROM edges WHERE from_ref = 'SPEC-042' AND edge_source = 'manual'`)
+	if err != nil {
+		t.Fatalf("query SPEC-042 edges: %v", err)
+	}
+	defer rows2.Close()
+
+	for rows2.Next() {
+		var toRef string
+		var validTo sql.NullString
+		if err := rows2.Scan(&toRef, &validTo); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if validTo.Valid {
+			t.Errorf("active spec SPEC-042 edge to %s has non-NULL valid_to = %s", toRef, validTo.String)
+		}
 	}
 }

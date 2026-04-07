@@ -42,6 +42,7 @@ type DocDriftRequest struct {
 	Scope    string   `json:"scope,omitempty"`
 	DiffFile string   `json:"diff_file,omitempty"`
 	DiffText string   `json:"diff_text,omitempty"`
+	AtDate   string   `json:"at_date,omitempty"`
 }
 
 // DocDriftScope reports the normalized selector.
@@ -222,6 +223,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		return nil, err
 	}
 	defer repo.Close()
+	repo.atDate = strings.TrimSpace(request.AtDate)
 
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if err != nil {

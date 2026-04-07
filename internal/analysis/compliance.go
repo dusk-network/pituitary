@@ -92,6 +92,7 @@ type ComplianceRequest struct {
 	Paths    []string `json:"paths,omitempty"`
 	DiffFile string   `json:"diff_file,omitempty"`
 	DiffText string   `json:"diff_text,omitempty"`
+	AtDate   string   `json:"at_date,omitempty"`
 }
 
 // ComplianceRelevantSpec reports one accepted spec considered during evaluation.
@@ -186,6 +187,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 		return nil, err
 	}
 	defer repo.Close()
+	repo.atDate = strings.TrimSpace(request.AtDate)
 
 	targets, err := loadComplianceTargetsContext(ctx, cfg, request)
 	if err != nil {

@@ -21,6 +21,7 @@ type AnalyzeImpactRequest struct {
 	SpecRecord *model.SpecRecord `json:"spec_record,omitempty"`
 	ChangeType string            `json:"change_type"`
 	Summary    bool              `json:"summary,omitempty"`
+	AtDate     string            `json:"at_date,omitempty"`
 }
 
 // ImpactedSpec reports one affected spec.
@@ -137,6 +138,7 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 		return nil, err
 	}
 	defer repo.Close()
+	repo.atDate = strings.TrimSpace(request.AtDate)
 
 	candidate, err := loadCandidate(repo, OverlapRequest{
 		SpecRef:    request.SpecRef,

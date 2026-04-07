@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
@@ -102,6 +103,10 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	// This must run before validateUpdatePreconditions, which checks schema_version.
 	if err := migrateToSchemaV4(ctx, db); err != nil {
 		return nil, fmt.Errorf("schema migration to v4: %w", err)
+	}
+	// Migrate schema to v5 if needed (add temporal validity columns).
+	if err := migrateToSchemaV5(ctx, db); err != nil {
+		return nil, fmt.Errorf("schema migration to v5: %w", err)
 	}
 
 	// Step 6: Validate preconditions.
@@ -253,21 +258,28 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 		return nil, fmt.Errorf("delete edges: %w", err)
 	}
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source) VALUES (?, ?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
 	defer edgeStmt.Close()
 
+	updateTime := time.Now().UTC().Format("2006-01-02")
+	updateTimePtr := &updateTime
+
 	for _, spec := range records.Specs {
+		var edgeValidTo *string
+		if spec.Status == "superseded" || spec.Status == "deprecated" {
+			edgeValidTo = updateTimePtr
+		}
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", updateTimePtr, edgeValidTo); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual"); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", updateTimePtr, edgeValidTo); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
@@ -275,7 +287,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 
 	// Infer AST-based applies_to edges.
-	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs)
+	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, updateTimePtr)
 	if inferErr != nil {
 		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
 	}
@@ -654,6 +666,45 @@ func migrateToSchemaV4(ctx context.Context, db *sql.DB) error {
 	// Bump schema version to 4.
 	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '4' WHERE key = 'schema_version'`); err != nil {
 		return fmt.Errorf("update schema_version: %w", err)
+	}
+	return nil
+}
+
+// migrateToSchemaV5 adds temporal validity columns (valid_from, valid_to) to
+// the edges and artifacts tables. Only runs when the stored schema version is "4".
+func migrateToSchemaV5(ctx context.Context, db *sql.DB) error {
+	var storedVersion string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(storedVersion) != "4" {
+		return nil
+	}
+
+	addColumn := func(table, column string) error {
+		var count int
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = '%s'`, table, column)).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s TEXT`, table, column)); err != nil {
+				return fmt.Errorf("add %s.%s column: %w", table, column, err)
+			}
+		}
+		return nil
+	}
+
+	for _, col := range []string{"valid_from", "valid_to"} {
+		if err := addColumn("edges", col); err != nil {
+			return err
+		}
+		if err := addColumn("artifacts", col); err != nil {
+			return err
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
+		return fmt.Errorf("update schema_version to 5: %w", err)
 	}
 	return nil
 }

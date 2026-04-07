@@ -14,6 +14,7 @@ type analysisRepository struct {
 	cfg            *config.Config
 	ctx            context.Context
 	db             *sql.DB
+	atDate         string // ISO date for point-in-time queries; empty = current
 	specCache      map[string]specDocument
 	docCache       map[string]docDocument
 	allSpecsLoaded bool

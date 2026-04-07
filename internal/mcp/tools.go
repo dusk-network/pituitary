@@ -21,6 +21,7 @@ type compareSpecsArgs struct {
 type analyzeImpactArgs struct {
 	SpecRef    string `json:"spec_ref" jsonschema_description:"Indexed spec ref to analyze"`
 	ChangeType string `json:"change_type,omitempty" jsonschema_description:"accepted, modified, or deprecated"`
+	AtDate     string `json:"at_date,omitempty" jsonschema_description:"ISO date for point-in-time governance query"`
 }
 
 type compilePreviewArgs struct {
@@ -262,6 +263,7 @@ func analyzeImpactHandler(options Options) mcpgo.TypedToolHandlerFunc[analyzeImp
 		operation := app.AnalyzeImpact(ctx, options.normalized().ConfigPath, analysis.AnalyzeImpactRequest{
 			SpecRef:    args.SpecRef,
 			ChangeType: args.ChangeType,
+			AtDate:     args.AtDate,
 		})
 		if operation.Issue != nil {
 			return mcpgo.NewToolResultError(operation.Issue.Message), nil
