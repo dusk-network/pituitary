@@ -108,6 +108,10 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	if err := migrateToSchemaV5(ctx, db); err != nil {
 		return nil, fmt.Errorf("schema migration to v5: %w", err)
 	}
+	// Migrate schema to v6 if needed (add confidence tiers to edges).
+	if err := migrateToSchemaV6(ctx, db); err != nil {
+		return nil, fmt.Errorf("schema migration to v6: %w", err)
+	}
 
 	// Step 6: Validate preconditions.
 	if err := validateUpdatePreconditions(ctx, db, embedder.Fingerprint(), dimension); err != nil {
@@ -258,7 +262,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 		return nil, fmt.Errorf("delete edges: %w", err)
 	}
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to, confidence, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
@@ -273,13 +277,13 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 			edgeValidTo = updateTimePtr
 		}
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", updateTimePtr, edgeValidTo); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", updateTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", updateTimePtr, edgeValidTo); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", updateTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
@@ -705,6 +709,48 @@ func migrateToSchemaV5(ctx context.Context, db *sql.DB) error {
 
 	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
 		return fmt.Errorf("update schema_version to 5: %w", err)
+	}
+	return nil
+}
+
+// migrateToSchemaV6 adds confidence tier columns to the edges table and
+// backfills existing edges based on edge_source. Only runs when schema is "5".
+func migrateToSchemaV6(ctx context.Context, db *sql.DB) error {
+	var storedVersion string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(storedVersion) != "5" {
+		return nil
+	}
+
+	addColumn := func(table, column, ddl string) error {
+		var count int
+		if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = '%s'`, table, column)).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s`, table, ddl)); err != nil {
+				return fmt.Errorf("add %s.%s: %w", table, column, err)
+			}
+		}
+		return nil
+	}
+
+	if err := addColumn("edges", "confidence", "confidence TEXT NOT NULL DEFAULT 'extracted'"); err != nil {
+		return err
+	}
+	if err := addColumn("edges", "confidence_score", "confidence_score REAL NOT NULL DEFAULT 1.0"); err != nil {
+		return err
+	}
+
+	// Backfill: inferred edges get confidence='inferred', score=0.7.
+	if _, err := db.ExecContext(ctx, `UPDATE edges SET confidence = 'inferred', confidence_score = 0.7 WHERE edge_source = 'inferred' AND confidence = 'extracted'`); err != nil {
+		return fmt.Errorf("backfill inferred confidence: %w", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '6' WHERE key = 'schema_version'`); err != nil {
+		return fmt.Errorf("update schema_version to 6: %w", err)
 	}
 	return nil
 }

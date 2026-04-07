@@ -21,7 +21,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
@@ -423,7 +423,7 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	}
 	defer vectorStmt.Close()
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)`)
+	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to, confidence, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare edge insert: %w", err)
 	}
@@ -467,13 +467,13 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 		}
 
 		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", rebuildTimePtr, edgeValidTo); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", rebuildTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
 		}
 		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", rebuildTimePtr, edgeValidTo); err != nil {
+			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", rebuildTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
 				return nil, err
 			}
 			result.EdgeCount++
@@ -561,12 +561,14 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			embedding float[%d] distance_metric=cosine
 		)`, dimension),
 		`CREATE TABLE edges (
-			from_ref      TEXT NOT NULL,
-			to_ref        TEXT NOT NULL,
-			edge_type     TEXT NOT NULL,
-			edge_source   TEXT NOT NULL DEFAULT 'manual',
-			valid_from    TEXT,
-			valid_to      TEXT,
+			from_ref         TEXT NOT NULL,
+			to_ref           TEXT NOT NULL,
+			edge_type        TEXT NOT NULL,
+			edge_source      TEXT NOT NULL DEFAULT 'manual',
+			valid_from       TEXT,
+			valid_to         TEXT,
+			confidence       TEXT NOT NULL DEFAULT 'extracted',
+			confidence_score REAL NOT NULL DEFAULT 1.0,
 			PRIMARY KEY (from_ref, to_ref, edge_type)
 		)`,
 		`CREATE TABLE ast_cache (
@@ -773,8 +775,20 @@ func textForEmbedding(title string, section chunk.Section) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string, validFrom, validTo *string) error {
-	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource, validFrom, validTo); err != nil {
+// EdgeConfidence describes the confidence tier and score for an edge.
+type EdgeConfidence struct {
+	Tier  string  // "extracted", "inferred", or "ambiguous"
+	Score float64 // 0.0–1.0
+}
+
+// Standard confidence values for edge insertion.
+var (
+	ConfidenceExtracted = EdgeConfidence{Tier: "extracted", Score: 1.0}
+	ConfidenceInferred  = EdgeConfidence{Tier: "inferred", Score: 0.7}
+)
+
+func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string, validFrom, validTo *string, conf EdgeConfidence) error {
+	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource, validFrom, validTo, conf.Tier, conf.Score); err != nil {
 		return fmt.Errorf("insert edge %s -> %s (%s, %s): %w", fromRef, toRef, edgeType, edgeSource, err)
 	}
 	return nil
@@ -944,7 +958,7 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	count := 0
 	for _, edge := range inferred {
 		ref := "code://" + edge.FilePath
-		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", validFrom, nil); err != nil {
+		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", validFrom, nil, ConfidenceInferred); err != nil {
 			// INSERT OR IGNORE means duplicate-key errors won't happen,
 			// but handle unexpected errors.
 			return count, err
