@@ -106,21 +106,19 @@ type ComplianceRelevantSpec struct {
 
 // ComplianceFinding reports one compliant, conflicting, or unspecified item.
 type ComplianceFinding struct {
-	Path                string  `json:"path"`
-	SpecRef             string  `json:"spec_ref,omitempty"`
-	Title               string  `json:"title,omitempty"`
-	SectionHeading      string  `json:"section_heading,omitempty"`
-	Code                string  `json:"code"`
-	Message             string  `json:"message"`
-	Traceability        string  `json:"traceability,omitempty"`
-	LimitingFactor      string  `json:"limiting_factor,omitempty"`
-	Suggestion          string  `json:"suggestion,omitempty"`
-	Expected            string  `json:"expected,omitempty"`
-	Observed            string  `json:"observed,omitempty"`
-	Provenance          string  `json:"provenance,omitempty"`
-	Confidence          float64 `json:"confidence,omitempty"`
-	EdgeConfidence      string  `json:"edge_confidence,omitempty"`       // "extracted", "inferred", or "ambiguous"
-	EdgeConfidenceScore float64 `json:"edge_confidence_score,omitempty"` // 0.0–1.0
+	Path           string  `json:"path"`
+	SpecRef        string  `json:"spec_ref,omitempty"`
+	Title          string  `json:"title,omitempty"`
+	SectionHeading string  `json:"section_heading,omitempty"`
+	Code           string  `json:"code"`
+	Message        string  `json:"message"`
+	Traceability   string  `json:"traceability,omitempty"`
+	LimitingFactor string  `json:"limiting_factor,omitempty"`
+	Suggestion     string  `json:"suggestion,omitempty"`
+	Expected       string  `json:"expected,omitempty"`
+	Observed       string  `json:"observed,omitempty"`
+	Provenance     string  `json:"provenance,omitempty"`
+	Confidence     float64 `json:"confidence,omitempty"`
 }
 
 // ComplianceResult is the structured compliance output.
@@ -191,6 +189,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	defer repo.Close()
 	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.minConfidence = strings.TrimSpace(request.MinConfidence)
 
 	targets, err := loadComplianceTargetsContext(ctx, cfg, request)
 	if err != nil {
