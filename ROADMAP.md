@@ -73,7 +73,7 @@ This is worth doing before the launch because the skill package is a first-class
 
 The MCP server is already registered on Smithery.ai. The skill package needs a parallel distribution push to the skills/rules directories where developers browse for agent instructions. Each platform's marketplace is a passive discovery channel.
 
-- **Anthropic MCP registry** — skill listing alongside the MCP server entry (listing drafted at [`/launch/mcp-registry.md`](launch/mcp-registry.md))
+- **Anthropic MCP registry** — skill listing alongside the MCP server entry
 - **Cowork plugin marketplace** — publish `skills/pituitary-cli/` as a Cowork skill; this puts it in front of every Cowork user looking for developer tools
 - **cursor.directory** — submit the AGENTS-compatible install guide once the packaging guidance is finalized
 - **Windsurf community rules** — publish the same AGENTS-compatible guidance if the community directory accepts it
@@ -84,10 +84,10 @@ Update the README to add a "Use with your editor" section that lists all support
 ### Launch — Show HN, MCP registries, GitHub Discussions
 No issue · `priority:now` · effort: ~2 hours total
 
-The launch materials are fully written and sitting unpublished in `/launch/`. The remaining engineering dependency is the skill package expansion work.
+The launch materials are written (maintained in a private workspace). The remaining engineering dependency is the skill package expansion work.
 
-- Publish [`/launch/show-hn.md`](launch/show-hn.md) — add a paragraph on multi-editor skill coverage and the optimization methodology
-- Submit to Smithery.ai (config at `server.json` / `Dockerfile.smithery` is ready) and Anthropic's MCP registry (listing at [`/launch/mcp-registry.md`](launch/mcp-registry.md))
+- Publish Show HN post — add a paragraph on multi-editor skill coverage and the optimization methodology
+- Submit to Smithery.ai (config at `server.json` / `Dockerfile.smithery` is ready) and Anthropic's MCP registry
 - Enable GitHub Discussions and link from the README Contributing section
 
 ---
