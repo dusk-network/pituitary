@@ -107,7 +107,10 @@ func CompareSpecsContext(ctx context.Context, cfg *config.Config, request Compar
 	}
 	for _, ref := range refs {
 		if _, ok := specs[ref]; !ok {
-			availableRefs, _ := repo.knownSpecRefs()
+			availableRefs, err := repo.knownSpecRefs()
+			if err != nil {
+				return nil, err
+			}
 			return nil, newSpecRefNotFoundError(ref, availableRefs)
 		}
 	}

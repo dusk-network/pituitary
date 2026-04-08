@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -91,15 +90,27 @@ func (r *analysisRepository) loadSelectedSpecs(refs []string) (map[string]specDo
 }
 
 func (r *analysisRepository) knownSpecRefs() ([]string, error) {
-	specs, err := r.loadAllSpecs()
+	rows, err := r.db.QueryContext(r.ctx, `
+SELECT ref
+FROM artifacts
+WHERE kind = ?
+ORDER BY ref ASC`, "spec")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query spec refs: %w", err)
 	}
-	refs := make([]string, 0, len(specs))
-	for ref := range specs {
+	defer rows.Close()
+
+	refs := make([]string, 0)
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, fmt.Errorf("scan spec ref: %w", err)
+		}
 		refs = append(refs, ref)
 	}
-	sort.Strings(refs)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate spec refs: %w", err)
+	}
 	return refs, nil
 }
 
