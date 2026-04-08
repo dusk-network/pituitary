@@ -61,7 +61,7 @@ func QueryRationaleContext(ctx context.Context, dbPath string, paths []string) (
 		}
 		var rationale []ast.Rationale
 		if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
-			continue
+			return nil, fmt.Errorf("decode rationale_json for path %q: %w", path, err)
 		}
 		if len(rationale) > 0 {
 			results = append(results, FileRationale{Path: path, Rationale: rationale})

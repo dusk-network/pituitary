@@ -1032,7 +1032,9 @@ func loadCachedASTData(ctx context.Context, indexPath string) map[string]cachedA
 		}
 		var rationale []ast.Rationale
 		if rationaleJSON != "" {
-			_ = json.Unmarshal([]byte(rationaleJSON), &rationale)
+			if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
+				continue
+			}
 		}
 		result[hash] = cachedASTEntry{Symbols: symbols, Rationale: rationale}
 	}

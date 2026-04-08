@@ -109,6 +109,8 @@ func cleanCommentText(line string) string {
 	for _, prefix := range []string{"//", "# ", "#", "/*", "*/", "* ", "*"} {
 		line = strings.TrimPrefix(line, prefix)
 	}
+	// Strip trailing */ for single-line block comments.
+	line = strings.TrimSuffix(line, "*/")
 	return strings.TrimSpace(line)
 }
 
@@ -140,29 +142,19 @@ func findNearestSymbol(lineNum int, symbolLines []symbolLine) string {
 	if len(symbolLines) == 0 {
 		return ""
 	}
-	// Find the closest symbol that is at or after the rationale line,
-	// or the closest one before it.
-	bestName := ""
-	bestDist := int(^uint(0) >> 1) // max int
+	// Prefer the first symbol that is at or after the rationale line.
+	// If there is no such symbol, fall back to the nearest symbol before it.
+	beforeName := ""
 
 	for _, sl := range symbolLines {
-		dist := lineNum - sl.line
-		if dist < 0 {
-			dist = -dist
-		}
-		// Prefer symbols that come after the comment (the comment is about
-		// the following code). Tie-break: closer wins.
 		if sl.line >= lineNum {
-			// Symbol is at or after comment — strong candidate.
-			if dist < bestDist || (dist == bestDist && bestName == "") {
-				bestDist = dist
-				bestName = sl.name
-			}
-			break // first symbol after comment is the best
+			// symbolLines is sorted by line, so the first symbol at or after
+			// the comment is the preferred match.
+			return sl.name
 		}
-		// Symbol is before comment — keep as fallback.
-		bestDist = dist
-		bestName = sl.name
+		// Keep the latest symbol before the comment as the fallback.
+		beforeName = sl.name
 	}
-	return bestName
+
+	return beforeName
 }
