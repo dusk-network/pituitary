@@ -171,6 +171,48 @@ func TestRenderStatusResultIncludesRuntimeProbe(t *testing.T) {
 	}
 }
 
+func TestRenderStatusResultCompactSuppressesVerboseSections(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderStatusResult(&stdout, &statusResult{
+		EmbedderProvider: "fixture",
+		IndexExists:      true,
+		Freshness: &index.FreshnessStatus{
+			State:  "stale",
+			Action: "run `pituitary index --rebuild`",
+		},
+		SpecCount:  3,
+		DocCount:   2,
+		ChunkCount: 17,
+		Guidance: []string{
+			"use `pituitary status --check-runtime embedder` for runtime diagnostics",
+		},
+		Compact: true,
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"━━◈ status",
+		"3 specs  2 docs  17 chunks",
+		"run `pituitary index --rebuild`",
+		"use `pituitary status --check-runtime embedder` for runtime diagnostics",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderStatusResult() compact output %q does not contain %q", output, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"workspace:",
+		"config resolution:",
+		"artifact index dir:",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("renderStatusResult() compact output %q unexpectedly contains %q", output, unwanted)
+		}
+	}
+}
+
 func TestRenderCommandTableSearchSpecs(t *testing.T) {
 	t.Parallel()
 
@@ -360,7 +402,7 @@ func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
 		"paths: src/api/middleware/tenant_limiter.go",
 		"UNSPECIFIED: 1",
 		"traceability semantic_neighbor_without_applies_to",
-		"limiting factor spec_metadata_gap",
+		"limiting factor accepted spec metadata is missing explicit applies_to coverage",
 		`If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,
 	} {
 		if !strings.Contains(output, want) {

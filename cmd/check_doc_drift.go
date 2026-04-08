@@ -30,10 +30,11 @@ func runCheckDocDrift(args []string, stdout, stderr io.Writer) int {
 func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-doc-drift", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-doc-drift", "pituitary [--config PATH] check-doc-drift ([--doc-ref REF]... | [--scope all] | [--diff-file PATH|-]) [--request-file PATH|-] [--format FORMAT]")
+	help := newCommandHelp("check-doc-drift", "pituitary [--config PATH] check-doc-drift ([--doc-ref REF | --path PATH]... | [--scope all] | [--diff-file PATH|-]) [--request-file PATH|-] [--format FORMAT]")
 
 	var (
 		docRefs     docRefList
+		docPaths    docRefList
 		scope       string
 		diffFile    string
 		requestFile string
@@ -42,6 +43,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 		atDate      string
 	)
 	fs.Var(&docRefs, "doc-ref", "target doc ref; repeat to supply doc_refs")
+	fs.Var(&docPaths, "path", "workspace-relative or absolute path to an indexed doc; repeat to supply paths")
 	fs.StringVar(&scope, "scope", "", "scope selector; only \"all\" is valid")
 	fs.StringVar(&diffFile, "diff-file", "", "path to a unified diff file, or - for stdin")
 	fs.StringVar(&requestFile, "request-file", "", "path to doc drift request JSON, or - for stdin")
@@ -84,10 +86,10 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 
 	var request analysis.DocDriftRequest
 	switch {
-	case trimmedRequestFile != "" && (len(docRefs) > 0 || strings.TrimSpace(scope) != "" || strings.TrimSpace(diffFile) != ""):
+	case trimmedRequestFile != "" && (len(docRefs) > 0 || len(docPaths) > 0 || strings.TrimSpace(scope) != "" || strings.TrimSpace(diffFile) != ""):
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
 			Code:    "validation_error",
-			Message: "use either --request-file or the doc-ref/scope/diff-file flags",
+			Message: "use either --request-file or the doc-ref/path/scope/diff-file flags",
 		}, 2)
 	case trimmedRequestFile != "":
 		cfg, err := config.Load(resolvedConfigPath)
@@ -121,7 +123,15 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 				Message: err.Error(),
 			}, 2)
 		}
-		request, err = docDriftRequestFromFlags(cfg.Workspace.RootPath, []string(docRefs), strings.TrimSpace(scope), strings.TrimSpace(diffFile))
+		resolvedDocRefs := append([]string(nil), docRefs...)
+		if len(docPaths) > 0 {
+			resolvedPaths, err := resolveIndexedDocRefsWithConfigContext(ctx, cfg, []string(docPaths))
+			if err != nil {
+				return writeDocPathResolutionError(stdout, stderr, format, "check-doc-drift", nil, err)
+			}
+			resolvedDocRefs = append(resolvedDocRefs, resolvedPaths...)
+		}
+		request, err = docDriftRequestFromFlags(cfg.Workspace.RootPath, resolvedDocRefs, strings.TrimSpace(scope), strings.TrimSpace(diffFile))
 		if err != nil {
 			return writeCLIError(stdout, stderr, format, "check-doc-drift", nil, cliIssue{
 				Code:    "validation_error",
@@ -155,11 +165,11 @@ func docDriftRequestFromFlags(workspaceRoot string, docRefs []string, scope, dif
 
 	switch {
 	case len(refs) > 0 && (scope != "" || diffFile != ""):
-		return analysis.DocDriftRequest{}, fmt.Errorf("exactly one of --doc-ref, --scope, or --diff-file is required")
+		return analysis.DocDriftRequest{}, fmt.Errorf("exactly one of --doc-ref/--path, --scope, or --diff-file is required")
 	case scope != "" && diffFile != "":
-		return analysis.DocDriftRequest{}, fmt.Errorf("exactly one of --doc-ref, --scope, or --diff-file is required")
+		return analysis.DocDriftRequest{}, fmt.Errorf("exactly one of --doc-ref/--path, --scope, or --diff-file is required")
 	case len(refs) == 0 && scope == "" && diffFile == "":
-		return analysis.DocDriftRequest{}, fmt.Errorf("one of --doc-ref, --scope, or --diff-file is required")
+		return analysis.DocDriftRequest{}, fmt.Errorf("one of --doc-ref/--path, --scope, or --diff-file is required")
 	case diffFile != "":
 		diffText, err := loadComplianceDiffFile(workspaceRoot, diffFile)
 		if err != nil {

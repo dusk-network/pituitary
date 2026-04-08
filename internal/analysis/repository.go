@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -87,6 +88,19 @@ func (r *analysisRepository) loadSelectedSpecs(refs []string) (map[string]specDo
 		return map[string]specDocument{}, nil
 	}
 	return r.loadSpecs(refs)
+}
+
+func (r *analysisRepository) knownSpecRefs() ([]string, error) {
+	specs, err := r.loadAllSpecs()
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(specs))
+	for ref := range specs {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return refs, nil
 }
 
 func (r *analysisRepository) loadAllDocs() (map[string]docDocument, error) {
