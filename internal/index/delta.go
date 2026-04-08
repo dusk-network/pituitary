@@ -15,6 +15,7 @@ type GovernanceDelta struct {
 	UpdatedSpecs []DeltaSpec `json:"updated_specs,omitempty"`
 	AddedEdges   []DeltaEdge `json:"added_edges,omitempty"`
 	RemovedEdges []DeltaEdge `json:"removed_edges,omitempty"`
+	UpdatedEdges []DeltaEdge `json:"updated_edges,omitempty"`
 	Summary      string      `json:"summary"`
 }
 
@@ -53,10 +54,11 @@ type snapshotEdge struct {
 
 // snapshotArtifact holds one artifact's governance-relevant metadata.
 type snapshotArtifact struct {
-	ref    string
-	title  string
-	status string
-	domain string
+	ref         string
+	title       string
+	status      string
+	domain      string
+	contentHash string
 }
 
 // snapshotEdgesContext loads all edges from the current database state.
@@ -80,7 +82,7 @@ func snapshotEdgesContext(ctx context.Context, db *sql.DB) ([]snapshotEdge, erro
 
 // snapshotSpecArtifactsContext loads spec artifact metadata from the current database state.
 func snapshotSpecArtifactsContext(ctx context.Context, db *sql.DB) ([]snapshotArtifact, error) {
-	rows, err := db.QueryContext(ctx, `SELECT ref, COALESCE(title,''), COALESCE(status,''), COALESCE(domain,'') FROM artifacts WHERE kind = 'spec'`)
+	rows, err := db.QueryContext(ctx, `SELECT ref, COALESCE(title,''), COALESCE(status,''), COALESCE(domain,''), content_hash FROM artifacts WHERE kind = 'spec'`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot spec artifacts: %w", err)
 	}
@@ -89,7 +91,7 @@ func snapshotSpecArtifactsContext(ctx context.Context, db *sql.DB) ([]snapshotAr
 	var artifacts []snapshotArtifact
 	for rows.Next() {
 		var a snapshotArtifact
-		if err := rows.Scan(&a.ref, &a.title, &a.status, &a.domain); err != nil {
+		if err := rows.Scan(&a.ref, &a.title, &a.status, &a.domain, &a.contentHash); err != nil {
 			return nil, fmt.Errorf("scan snapshot artifact: %w", err)
 		}
 		artifacts = append(artifacts, a)
@@ -118,7 +120,7 @@ func snapshotEdgesTxContext(ctx context.Context, tx *sql.Tx) ([]snapshotEdge, er
 
 // snapshotSpecArtifactsTxContext loads spec artifact metadata from within a transaction.
 func snapshotSpecArtifactsTxContext(ctx context.Context, tx *sql.Tx) ([]snapshotArtifact, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT ref, COALESCE(title,''), COALESCE(status,''), COALESCE(domain,'') FROM artifacts WHERE kind = 'spec'`)
+	rows, err := tx.QueryContext(ctx, `SELECT ref, COALESCE(title,''), COALESCE(status,''), COALESCE(domain,''), content_hash FROM artifacts WHERE kind = 'spec'`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot spec artifacts (tx): %w", err)
 	}
@@ -127,7 +129,7 @@ func snapshotSpecArtifactsTxContext(ctx context.Context, tx *sql.Tx) ([]snapshot
 	var artifacts []snapshotArtifact
 	for rows.Next() {
 		var a snapshotArtifact
-		if err := rows.Scan(&a.ref, &a.title, &a.status, &a.domain); err != nil {
+		if err := rows.Scan(&a.ref, &a.title, &a.status, &a.domain, &a.contentHash); err != nil {
 			return nil, fmt.Errorf("scan snapshot artifact (tx): %w", err)
 		}
 		artifacts = append(artifacts, a)
@@ -142,7 +144,7 @@ func computeGovernanceDelta(
 ) *GovernanceDelta {
 	delta := &GovernanceDelta{}
 
-	// Diff artifacts.
+	// Diff artifacts (including content_hash for body change detection).
 	oldArtMap := make(map[string]snapshotArtifact, len(oldArtifacts))
 	for _, a := range oldArtifacts {
 		oldArtMap[a.ref] = a
@@ -158,7 +160,7 @@ func computeGovernanceDelta(
 			delta.AddedSpecs = append(delta.AddedSpecs, DeltaSpec{
 				Ref: a.ref, Title: a.title, Status: a.status, Domain: a.domain,
 			})
-		} else if old.status != a.status || old.domain != a.domain || old.title != a.title {
+		} else if old.status != a.status || old.domain != a.domain || old.title != a.title || old.contentHash != a.contentHash {
 			delta.UpdatedSpecs = append(delta.UpdatedSpecs, DeltaSpec{
 				Ref: a.ref, Title: a.title, Status: a.status, Domain: a.domain,
 			})
@@ -172,7 +174,7 @@ func computeGovernanceDelta(
 		}
 	}
 
-	// Diff edges.
+	// Diff edges (key: from_ref+to_ref+edge_type; also detect attribute changes).
 	oldEdgeSet := make(map[edgeKey]snapshotEdge, len(oldEdges))
 	for _, e := range oldEdges {
 		oldEdgeSet[edgeKey{e.fromRef, e.toRef, e.edgeType}] = e
@@ -183,8 +185,14 @@ func computeGovernanceDelta(
 	}
 
 	for k, e := range newEdgeSet {
-		if _, existed := oldEdgeSet[k]; !existed {
+		old, existed := oldEdgeSet[k]
+		if !existed {
 			delta.AddedEdges = append(delta.AddedEdges, DeltaEdge{
+				FromRef: e.fromRef, ToRef: e.toRef, EdgeType: e.edgeType,
+				EdgeSource: e.edgeSource, Confidence: e.confidence,
+			})
+		} else if old.edgeSource != e.edgeSource || old.confidence != e.confidence {
+			delta.UpdatedEdges = append(delta.UpdatedEdges, DeltaEdge{
 				FromRef: e.fromRef, ToRef: e.toRef, EdgeType: e.edgeType,
 				EdgeSource: e.edgeSource, Confidence: e.confidence,
 			})
@@ -205,6 +213,7 @@ func computeGovernanceDelta(
 	sort.Slice(delta.UpdatedSpecs, func(i, j int) bool { return delta.UpdatedSpecs[i].Ref < delta.UpdatedSpecs[j].Ref })
 	sort.Slice(delta.AddedEdges, func(i, j int) bool { return deltaEdgeLess(delta.AddedEdges[i], delta.AddedEdges[j]) })
 	sort.Slice(delta.RemovedEdges, func(i, j int) bool { return deltaEdgeLess(delta.RemovedEdges[i], delta.RemovedEdges[j]) })
+	sort.Slice(delta.UpdatedEdges, func(i, j int) bool { return deltaEdgeLess(delta.UpdatedEdges[i], delta.UpdatedEdges[j]) })
 
 	delta.Summary = formatDeltaSummary(delta)
 	return delta
@@ -221,7 +230,7 @@ func deltaEdgeLess(a, b DeltaEdge) bool {
 }
 
 func formatDeltaSummary(delta *GovernanceDelta) string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 8)
 	if n := len(delta.AddedSpecs); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d spec(s) added", n))
 	}
@@ -236,6 +245,9 @@ func formatDeltaSummary(delta *GovernanceDelta) string {
 	}
 	if n := len(delta.RemovedEdges); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d edge(s) removed", n))
+	}
+	if n := len(delta.UpdatedEdges); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d edge(s) updated", n))
 	}
 	if len(parts) == 0 {
 		return "no governance changes"

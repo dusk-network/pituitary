@@ -536,9 +536,9 @@ body = "body.md"
 		t.Fatalf("source.LoadFromConfig() error = %v", err)
 	}
 
-	result, err := UpdateContextWithOptions(context.Background(), cfg, records)
+	result, err := UpdateWithDeltaContextAndOptions(context.Background(), cfg, records, UpdateOptions{ComputeDelta: true}, nil)
 	if err != nil {
-		t.Fatalf("UpdateContextWithOptions() error = %v", err)
+		t.Fatalf("UpdateWithDeltaContextAndOptions() error = %v", err)
 	}
 
 	if result.Delta == nil {
@@ -567,9 +567,9 @@ func TestUpdateDeltaNoOpHasNoChanges(t *testing.T) {
 		t.Fatalf("Rebuild() error = %v", err)
 	}
 
-	result, err := UpdateContextWithOptions(context.Background(), cfg, records)
+	result, err := UpdateWithDeltaContextAndOptions(context.Background(), cfg, records, UpdateOptions{ComputeDelta: true}, nil)
 	if err != nil {
-		t.Fatalf("UpdateContextWithOptions() error = %v", err)
+		t.Fatalf("UpdateWithDeltaContextAndOptions() error = %v", err)
 	}
 
 	if result.Delta == nil {

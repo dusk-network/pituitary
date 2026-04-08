@@ -161,7 +161,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 
 	var result *index.RebuildResult
 	if update {
-		result, err = runIndexUpdate(ctx, cfg, records, format, stderr)
+		result, err = runIndexUpdate(ctx, cfg, records, showDelta, format, stderr)
 	} else {
 		result, err = runIndexRebuild(ctx, cfg, records, full, format, stderr)
 	}
@@ -209,8 +209,11 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)
 }
 
-func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, format string, stderr io.Writer) (*index.RebuildResult, error) {
+func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, showDelta bool, format string, stderr io.Writer) (*index.RebuildResult, error) {
 	progressReporter := indexProgressReporter(format, stderr)
+	if showDelta {
+		return index.UpdateWithDeltaContextAndOptions(ctx, cfg, records, index.UpdateOptions{ComputeDelta: true}, progressReporter)
+	}
 	return index.UpdateWithProgressContextAndOptions(ctx, cfg, records, progressReporter)
 }
 

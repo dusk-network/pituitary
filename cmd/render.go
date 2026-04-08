@@ -698,6 +698,9 @@ func renderGovernanceDelta(w io.Writer, delta *index.GovernanceDelta) {
 	for _, e := range delta.RemovedEdges {
 		fmt.Fprintf(w, "  - %s %s %s (%s)\n", e.FromRef, e.EdgeType, e.ToRef, e.EdgeSource)
 	}
+	for _, e := range delta.UpdatedEdges {
+		fmt.Fprintf(w, "  ~ %s %s %s (%s → %s)\n", e.FromRef, e.EdgeType, e.ToRef, e.EdgeSource, e.Confidence)
+	}
 	fmt.Fprintf(w, "  summary: %s\n", delta.Summary)
 }
 
