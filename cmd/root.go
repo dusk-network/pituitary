@@ -133,7 +133,7 @@ func RunContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 }
 
 func printHelp(w io.Writer) {
-	fmt.Fprintln(w, "pituitary bootstrap CLI")
+	fmt.Fprintln(w, "pituitary — consistency governance for specs, docs, and code")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "global options:")
 	fmt.Fprintln(w, "  --config PATH     path to workspace config")

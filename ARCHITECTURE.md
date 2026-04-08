@@ -5,7 +5,7 @@
 
 ## Problem Statement
 
-Pituitary is for managing 20-100+ specifications and the artifacts around them, with automated support for:
+Pituitary is for maintaining consistency between intent (specs, decisions, policies) and implementation (code, docs, configs) across the full lifecycle. For teams managing 20-100+ specifications and the artifacts around them, it provides automated support for:
 
 1. **Overlap detection** — catching when a new spec covers ground already addressed
 2. **Tradeoff analysis** — comparing competing or overlapping specs
@@ -14,7 +14,7 @@ Pituitary is for managing 20-100+ specifications and the artifacts around them, 
 5. **Documentation sync** — keeping non-spec docs aligned with accepted specs
 6. **Spec freshness** — detecting specs that may be stale or superseded by decisions recorded in decision-bearing artifacts
 
-The key constraint is that Pituitary should not be defined by one storage or workflow choice. Specifications may originate in local files, git repositories, PDFs, databases, or other systems. Pituitary's job is to normalize those inputs into a common analysis model, not to own source control, CI, or authoring.
+The key constraint is that Pituitary should not be defined by one storage or workflow choice. Specifications may originate in local files, git repositories, PDFs, databases, or other systems. Pituitary's job is to normalize those inputs into a common governance model — a temporal, confidence-weighted dependency graph — and run consistency analysis against it, not to own source control, CI, or authoring.
 
 ---
 

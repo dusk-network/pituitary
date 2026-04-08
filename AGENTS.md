@@ -5,7 +5,7 @@
 
 ## Project
 
-Pituitary is a spec-management tool for keeping specifications and documentation aligned during the first shipping slice. The current repo is an early bootstrap focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, a CLI-first interface, an optional MCP wrapper, and repo CI validation.
+Pituitary is a consistency governance tool that keeps specifications, documentation, and code aligned. It builds a temporal, confidence-weighted governance graph from spec bundles and docs, then runs overlap, drift, compliance, impact, and freshness analysis against it. The current repo is focused on local filesystem inputs, Markdown docs, SQLite-backed indexing, a CLI-first interface, an optional MCP wrapper, and repo CI validation.
 
 ## Coding Standards
 
