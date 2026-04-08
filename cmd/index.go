@@ -14,11 +14,12 @@ import (
 )
 
 type indexRequest struct {
-	Rebuild bool `json:"rebuild"`
-	Update  bool `json:"update,omitempty"`
-	DryRun  bool `json:"dry_run,omitempty"`
-	Full    bool `json:"full,omitempty"`
-	Verbose bool `json:"verbose,omitempty"`
+	Rebuild   bool `json:"rebuild"`
+	Update    bool `json:"update,omitempty"`
+	DryRun    bool `json:"dry_run,omitempty"`
+	Full      bool `json:"full,omitempty"`
+	Verbose   bool `json:"verbose,omitempty"`
+	ShowDelta bool `json:"show_delta,omitempty"`
 }
 
 type indexProgressLine struct {
@@ -47,6 +48,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		dryRun     bool
 		full       bool
 		verbose    bool
+		showDelta  bool
 		format     string
 		configPath string
 	)
@@ -55,6 +57,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	fs.BoolVar(&dryRun, "dry-run", false, "validate config and sources without writing the index")
 	fs.BoolVar(&full, "full", false, "force a full re-embed instead of reusing compatible chunk vectors")
 	fs.BoolVar(&verbose, "verbose", false, "include per-source details for index planning and rebuild output")
+	fs.BoolVar(&showDelta, "show-delta", false, "show governance graph changes after an incremental update")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
@@ -78,7 +81,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 			Message: err.Error(),
 		}, 2)
 	}
-	request := indexRequest{Rebuild: rebuild, Update: update, DryRun: dryRun, Full: full, Verbose: verbose}
+	request := indexRequest{Rebuild: rebuild, Update: update, DryRun: dryRun, Full: full, Verbose: verbose, ShowDelta: showDelta}
 	modeCount := 0
 	if rebuild {
 		modeCount++
@@ -99,6 +102,12 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "validation_error",
 			Message: "--full is only valid with --rebuild",
+		}, 2)
+	}
+	if showDelta && !update {
+		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
+			Code:    "validation_error",
+			Message: "--show-delta is only valid with --update",
 		}, 2)
 	}
 
@@ -152,7 +161,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 
 	var result *index.RebuildResult
 	if update {
-		result, err = runIndexUpdate(ctx, cfg, records, format, stderr)
+		result, err = runIndexUpdate(ctx, cfg, records, showDelta, format, stderr)
 	} else {
 		result, err = runIndexRebuild(ctx, cfg, records, full, format, stderr)
 	}
@@ -193,12 +202,18 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 	if !verbose {
 		result.Sources = nil
 	}
+	if !showDelta {
+		result.Delta = nil
+	}
 
 	return writeCLISuccess(stdout, stderr, format, "index", request, result, nil)
 }
 
-func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, format string, stderr io.Writer) (*index.RebuildResult, error) {
+func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, showDelta bool, format string, stderr io.Writer) (*index.RebuildResult, error) {
 	progressReporter := indexProgressReporter(format, stderr)
+	if showDelta {
+		return index.UpdateWithDeltaContextAndOptions(ctx, cfg, records, index.UpdateOptions{ComputeDelta: true}, progressReporter)
+	}
 	return index.UpdateWithProgressContextAndOptions(ctx, cfg, records, progressReporter)
 }
 

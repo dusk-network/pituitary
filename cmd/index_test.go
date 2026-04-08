@@ -137,6 +137,35 @@ path = "specs"
 	}
 }
 
+func TestRunIndexShowDeltaRequiresUpdate(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--show-delta"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runIndex() exit code = %d, want 2", exitCode)
+	}
+	if !strings.Contains(stderr.String(), `--show-delta is only valid with --update`) {
+		t.Fatalf("runIndex() stderr %q does not contain show-delta validation message", stderr.String())
+	}
+}
+
 func TestRunIndexRejectsUnknownAdapterInConfig(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `

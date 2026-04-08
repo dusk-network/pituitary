@@ -147,6 +147,7 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 		fmt.Fprintf(w, "database: %s\n", result.IndexPath)
 		renderIndexRepoCoverage(w, result.Repos)
 		renderIndexSourceSummaries(w, result.Sources)
+		renderGovernanceDelta(w, result.Delta)
 		return
 	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
@@ -663,6 +664,44 @@ func renderRepoCoverageLine(repo index.RepoCoverage) string {
 		line += fmt.Sprintf(" | docs: %d", repo.DocCount)
 	}
 	return line
+}
+
+func renderGovernanceDelta(w io.Writer, delta *index.GovernanceDelta) {
+	if delta == nil {
+		return
+	}
+	fmt.Fprintf(w, "\nGovernance delta since last rebuild:\n")
+	for _, s := range delta.AddedSpecs {
+		line := fmt.Sprintf("  + %s added", s.Ref)
+		if s.Status != "" {
+			line += fmt.Sprintf(" (status: %s", s.Status)
+			if s.Domain != "" {
+				line += fmt.Sprintf(", domain: %s", s.Domain)
+			}
+			line += ")"
+		}
+		fmt.Fprintln(w, line)
+	}
+	for _, s := range delta.RemovedSpecs {
+		fmt.Fprintf(w, "  - %s removed\n", s.Ref)
+	}
+	for _, s := range delta.UpdatedSpecs {
+		line := fmt.Sprintf("  ~ %s updated", s.Ref)
+		if s.Status != "" {
+			line += fmt.Sprintf(" (status: %s)", s.Status)
+		}
+		fmt.Fprintln(w, line)
+	}
+	for _, e := range delta.AddedEdges {
+		fmt.Fprintf(w, "  + %s %s %s (%s)\n", e.FromRef, e.EdgeType, e.ToRef, e.EdgeSource)
+	}
+	for _, e := range delta.RemovedEdges {
+		fmt.Fprintf(w, "  - %s %s %s (%s)\n", e.FromRef, e.EdgeType, e.ToRef, e.EdgeSource)
+	}
+	for _, e := range delta.UpdatedEdges {
+		fmt.Fprintf(w, "  ~ %s %s %s (%s → %s)\n", e.FromRef, e.EdgeType, e.ToRef, e.EdgeSource, e.Confidence)
+	}
+	fmt.Fprintf(w, "  summary: %s\n", delta.Summary)
 }
 
 func renderOverlapResult(w io.Writer, result *analysis.OverlapResult) {

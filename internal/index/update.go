@@ -36,19 +36,30 @@ func IsUpdatePrecondition(err error) bool {
 	return errors.As(err, &target)
 }
 
+// UpdateOptions controls optional update behavior.
+type UpdateOptions struct {
+	ComputeDelta bool
+}
+
 // UpdateContextWithOptions performs an incremental index update, writing only
 // changed artifacts to the existing database.
 func UpdateContextWithOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
-	return updateContext(ctx, cfg, records, nil)
+	return updateContext(ctx, cfg, records, UpdateOptions{}, nil)
 }
 
 // UpdateWithProgressContextAndOptions performs an incremental index update with
 // progress reporting.
 func UpdateWithProgressContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
-	return updateContext(ctx, cfg, records, reporter)
+	return updateContext(ctx, cfg, records, UpdateOptions{}, reporter)
 }
 
-func updateContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+// UpdateWithDeltaContextAndOptions performs an incremental index update with
+// progress reporting and governance delta computation.
+func UpdateWithDeltaContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
+	return updateContext(ctx, cfg, records, options, reporter)
+}
+
+func updateContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	embedder, err := prepareRebuildContext(ctx, cfg, records)
 	if err != nil {
 		return nil, err
@@ -77,7 +88,7 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 		return nil, fmt.Errorf("create index backup: %w", err)
 	}
 
-	result, err := applyUpdateContext(ctx, indexPath, cfg, dimension, embedder, records, reporter)
+	result, err := applyUpdateContext(ctx, indexPath, cfg, dimension, embedder, records, options, reporter)
 	if err != nil {
 		// Restore from backup on any failure. Keep the backup in place
 		// if restoration itself fails so the user has a recovery path.
@@ -92,7 +103,7 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	return result, nil
 }
 
-func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
+func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	db, err := openReadWriteContext(ctx, indexPath)
 	if err != nil {
 		return nil, fmt.Errorf("open index for update: %w", err)
@@ -257,6 +268,20 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	result.ChunkCount += unchangedChunkCount
 
+	// Snapshot edges and spec artifacts before edge rebuild for delta computation.
+	var oldEdges []snapshotEdge
+	var oldArtifacts []snapshotArtifact
+	if options.ComputeDelta {
+		oldEdges, err = snapshotEdgesContext(ctx, db)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot old edges: %w", err)
+		}
+		oldArtifacts, err = snapshotSpecArtifactsContext(ctx, db)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot old artifacts: %w", err)
+		}
+	}
+
 	// Step 10e: Full edge rebuild.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM edges`); err != nil {
 		return nil, fmt.Errorf("delete edges: %w", err)
@@ -297,6 +322,19 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	result.EdgeCount += inferredCount
 	result.InferredEdgeCount = inferredCount
+
+	// Compute governance delta from edge and artifact snapshots.
+	if options.ComputeDelta {
+		newEdges, deltaErr := snapshotEdgesTxContext(ctx, tx)
+		if deltaErr != nil {
+			return nil, fmt.Errorf("snapshot new edges: %w", deltaErr)
+		}
+		newArtifacts, deltaErr := snapshotSpecArtifactsTxContext(ctx, tx)
+		if deltaErr != nil {
+			return nil, fmt.Errorf("snapshot new artifacts: %w", deltaErr)
+		}
+		result.Delta = computeGovernanceDelta(oldArtifacts, newArtifacts, oldEdges, newEdges)
+	}
 
 	// Step 10f: Upsert metadata.
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {

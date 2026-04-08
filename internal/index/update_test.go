@@ -485,6 +485,101 @@ func TestUpdatePreservesDBOnFailure(t *testing.T) {
 	}
 }
 
+func TestUpdateDeltaReportsAddedSpec(t *testing.T) {
+	t.Parallel()
+
+	indexPath := filepath.Join(t.TempDir(), "pituitary.db")
+	repoDir := t.TempDir()
+
+	// Set up a spec workspace with one spec.
+	mustWriteFile(t, filepath.Join(repoDir, "specs", "auth", "spec.toml"), `id = "SPEC-001"
+title = "Authentication"
+status = "accepted"
+domain = "auth"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(repoDir, "specs", "auth", "body.md"), "# Authentication\n\nAuth spec body.\n")
+
+	configPath := filepath.Join(t.TempDir(), "pituitary.toml")
+	mustWriteFile(t, configPath, `
+[workspace]
+root = "`+filepath.ToSlash(repoDir)+`"
+index_path = "`+filepath.ToSlash(indexPath)+`"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := loadAndRebuild(t, configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a second spec.
+	mustWriteFile(t, filepath.Join(repoDir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-002"
+title = "Rate Limiting"
+status = "draft"
+domain = "api"
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(repoDir, "specs", "rate-limit", "body.md"), "# Rate Limiting\n\nRate limit spec body.\n")
+
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+
+	result, err := UpdateWithDeltaContextAndOptions(context.Background(), cfg, records, UpdateOptions{ComputeDelta: true}, nil)
+	if err != nil {
+		t.Fatalf("UpdateWithDeltaContextAndOptions() error = %v", err)
+	}
+
+	if result.Delta == nil {
+		t.Fatal("expected non-nil delta")
+	}
+	if len(result.Delta.AddedSpecs) != 1 {
+		t.Fatalf("expected 1 added spec, got %d", len(result.Delta.AddedSpecs))
+	}
+	if result.Delta.AddedSpecs[0].Ref != "SPEC-002" {
+		t.Fatalf("expected added spec SPEC-002, got %s", result.Delta.AddedSpecs[0].Ref)
+	}
+	if !strings.Contains(result.Delta.Summary, "1 spec(s) added") {
+		t.Fatalf("expected summary to mention added spec, got %q", result.Delta.Summary)
+	}
+}
+
+func TestUpdateDeltaNoOpHasNoChanges(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	result, err := UpdateWithDeltaContextAndOptions(context.Background(), cfg, records, UpdateOptions{ComputeDelta: true}, nil)
+	if err != nil {
+		t.Fatalf("UpdateWithDeltaContextAndOptions() error = %v", err)
+	}
+
+	if result.Delta == nil {
+		t.Fatal("expected non-nil delta")
+	}
+	if result.Delta.Summary != "no governance changes" {
+		t.Fatalf("expected no governance changes, got %q", result.Delta.Summary)
+	}
+}
+
 // loadAndRebuild loads config and performs an initial rebuild.
 func loadAndRebuild(t *testing.T, configPath string) (*config.Config, error) {
 	t.Helper()
