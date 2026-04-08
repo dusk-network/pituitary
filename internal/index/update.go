@@ -112,6 +112,10 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	if err := migrateToSchemaV6(ctx, db); err != nil {
 		return nil, fmt.Errorf("schema migration to v6: %w", err)
 	}
+	// Migrate schema to v7 if needed (add rationale_json to ast_cache).
+	if err := migrateToSchemaV7(ctx, db); err != nil {
+		return nil, fmt.Errorf("schema migration to v7: %w", err)
+	}
 
 	// Step 6: Validate preconditions.
 	if err := validateUpdatePreconditions(ctx, db, embedder.Fingerprint(), dimension); err != nil {
@@ -709,6 +713,33 @@ func migrateToSchemaV5(ctx context.Context, db *sql.DB) error {
 
 	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
 		return fmt.Errorf("update schema_version to 5: %w", err)
+	}
+	return nil
+}
+
+// migrateToSchemaV7 adds the rationale_json column to ast_cache for storing
+// extracted rationale comments alongside code symbols. Only runs when schema is "6".
+func migrateToSchemaV7(ctx context.Context, db *sql.DB) error {
+	var storedVersion string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&storedVersion); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(storedVersion) != "6" {
+		return nil
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('ast_cache') WHERE name = 'rationale_json'`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE ast_cache ADD COLUMN rationale_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return fmt.Errorf("add ast_cache.rationale_json column: %w", err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE metadata SET value = '7' WHERE key = 'schema_version'`); err != nil {
+		return fmt.Errorf("update schema_version to 7: %w", err)
 	}
 	return nil
 }

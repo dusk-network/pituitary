@@ -709,8 +709,8 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "6" {
-		t.Errorf("schema_version = %q, want 6", version)
+	if version != "7" {
+		t.Errorf("schema_version = %q, want 7", version)
 	}
 
 	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).
