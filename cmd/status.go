@@ -133,7 +133,11 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	statusOut := newStatusResult(result, resolution)
 	if showFamilies && statusOut != nil && statusOut.IndexExists {
 		familyResult, err := index.DiscoverFamiliesContext(ctx, result.Index.IndexPath)
-		if err == nil {
+		if err != nil {
+			statusOut.Guidance = append(statusOut.Guidance,
+				fmt.Sprintf("unable to discover families: %v", err),
+			)
+		} else {
 			statusOut.Families = familyResult
 		}
 	}

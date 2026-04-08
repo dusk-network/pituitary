@@ -63,7 +63,10 @@ func discoverFamiliesDBContext(ctx context.Context, db *sql.DB) (*FamilyResult, 
 	result := buildFamilyResult(specRefs, communities, adj)
 
 	// Find ungoverned code files: files in ast_cache not covered by any applies_to edge.
-	result.Ungoverned, _ = findUngovernedFilesContext(ctx, db)
+	result.Ungoverned, err = findUngovernedFilesContext(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("find ungoverned files: %w", err)
+	}
 
 	return result, nil
 }
@@ -185,9 +188,10 @@ func louvain(nodes []string, adj map[string]map[string]float64) map[string]int {
 		}
 	}
 
-	// Iterative optimization.
+	// Iterative optimization with a max iteration limit.
+	const maxIterations = 100
 	improved := true
-	for improved {
+	for iter := 0; improved && iter < maxIterations; iter++ {
 		improved = false
 		for _, node := range nodes {
 			currentComm := community[node]
@@ -201,15 +205,19 @@ func louvain(nodes []string, adj map[string]map[string]float64) map[string]int {
 			}
 
 			// Try moving to each neighboring community.
+			// Gain threshold to avoid oscillation on symmetric graphs.
+			const minGain = 1e-6
 			ki := degree[node]
+			edgesToCurrent := neighborComms[currentComm]
 			for comm, edgesIn := range neighborComms {
 				if comm == currentComm {
 					continue
 				}
-				// Modularity gain: edgesIn/m - ki*sumTot/(2*m^2)
-				sumTot := communityDegreeSum(community, degree, comm, node)
-				gain := edgesIn/totalWeight - ki*sumTot/(totalWeight*totalWeight)
-				if gain > bestGain {
+				sumTotNew := communityDegreeSum(community, degree, comm, node)
+				sumTotOld := communityDegreeSum(community, degree, currentComm, node)
+				// Net gain: benefit of joining new - cost of leaving current.
+				gain := (edgesIn-edgesToCurrent)/totalWeight - ki*(sumTotNew-sumTotOld)/(totalWeight*totalWeight)
+				if gain > bestGain+minGain {
 					bestGain = gain
 					bestComm = comm
 				}
@@ -237,14 +245,22 @@ func communityDegreeSum(community map[string]int, degree map[string]float64, com
 }
 
 func renumberCommunities(community map[string]int) map[string]int {
-	remap := make(map[int]int)
-	next := 0
+	unique := make(map[int]struct{})
 	for _, c := range community {
-		if _, exists := remap[c]; !exists {
-			remap[c] = next
-			next++
-		}
+		unique[c] = struct{}{}
 	}
+
+	originalIDs := make([]int, 0, len(unique))
+	for c := range unique {
+		originalIDs = append(originalIDs, c)
+	}
+	sort.Ints(originalIDs)
+
+	remap := make(map[int]int, len(originalIDs))
+	for next, c := range originalIDs {
+		remap[c] = next
+	}
+
 	result := make(map[string]int, len(community))
 	for node, c := range community {
 		result[node] = remap[c]
@@ -289,26 +305,29 @@ func buildFamilyResult(specRefs []string, community map[string]int, adj map[stri
 	}
 }
 
-// computeCohesion calculates intra-community edge density.
-// cohesion = actual_edges / possible_edges
+// computeCohesion calculates intra-community edge density (unweighted).
+// cohesion = actual_connected_pairs / possible_pairs, always in [0, 1].
 func computeCohesion(members []string, adj map[string]map[string]float64) float64 {
 	if len(members) < 2 {
 		return 1.0
 	}
-	memberSet := make(map[string]bool, len(members))
-	for _, m := range members {
-		memberSet[m] = true
-	}
 
 	intraEdges := 0.0
-	for _, m := range members {
-		for neighbor, w := range adj[m] {
-			if memberSet[neighbor] {
-				intraEdges += w
+	for i := 0; i < len(members); i++ {
+		for j := i + 1; j < len(members); j++ {
+			if neighbors, ok := adj[members[i]]; ok {
+				if _, connected := neighbors[members[j]]; connected {
+					intraEdges++
+					continue
+				}
+			}
+			if neighbors, ok := adj[members[j]]; ok {
+				if _, connected := neighbors[members[i]]; connected {
+					intraEdges++
+				}
 			}
 		}
 	}
-	intraEdges /= 2 // undirected, counted twice
 
 	possibleEdges := float64(len(members)) * float64(len(members)-1) / 2
 	return intraEdges / possibleEdges
@@ -317,7 +336,10 @@ func computeCohesion(members []string, adj map[string]map[string]float64) float6
 func findUngovernedFilesContext(ctx context.Context, db *sql.DB) ([]string, error) {
 	// Check if ast_cache table exists.
 	var tableCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ast_cache'`).Scan(&tableCount); err != nil || tableCount == 0 {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ast_cache'`).Scan(&tableCount); err != nil {
+		return nil, fmt.Errorf("check ast_cache table existence: %w", err)
+	}
+	if tableCount == 0 {
 		return nil, nil
 	}
 

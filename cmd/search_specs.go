@@ -140,24 +140,32 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	// Post-filter by family if --family was specified.
 	if familyID >= 0 && operation.Result != nil {
 		cfg, cfgErr := config.Load(resolvedConfigPath)
-		if cfgErr == nil {
-			familyResult, famErr := index.DiscoverFamiliesContext(ctx, cfg.Workspace.ResolvedIndexPath)
-			if famErr == nil {
-				familyMembers := make(map[string]bool)
-				for _, a := range familyResult.Assignments {
-					if a.FamilyID == familyID {
-						familyMembers[a.Ref] = true
-					}
-				}
-				var filtered []index.SearchSpecMatch
-				for _, m := range operation.Result.Matches {
-					if familyMembers[m.Ref] {
-						filtered = append(filtered, m)
-					}
-				}
-				operation.Result.Matches = filtered
+		if cfgErr != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssue{
+				Code:    "config_error",
+				Message: fmt.Sprintf("failed to load config for --family filtering: %v", cfgErr),
+			}, 2)
+		}
+		familyResult, famErr := index.DiscoverFamiliesContext(ctx, cfg.Workspace.ResolvedIndexPath)
+		if famErr != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssue{
+				Code:    "internal_error",
+				Message: fmt.Sprintf("failed to compute families for --family filtering: %v", famErr),
+			}, 2)
+		}
+		familyMembers := make(map[string]bool)
+		for _, a := range familyResult.Assignments {
+			if a.FamilyID == familyID {
+				familyMembers[a.Ref] = true
 			}
 		}
+		var filtered []index.SearchSpecMatch
+		for _, m := range operation.Result.Matches {
+			if familyMembers[m.Ref] {
+				filtered = append(filtered, m)
+			}
+		}
+		operation.Result.Matches = filtered
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "search-specs", operation.Request, operation.Result, nil)
