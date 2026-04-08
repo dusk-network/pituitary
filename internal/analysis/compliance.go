@@ -106,19 +106,23 @@ type ComplianceRelevantSpec struct {
 
 // ComplianceFinding reports one compliant, conflicting, or unspecified item.
 type ComplianceFinding struct {
-	Path           string  `json:"path"`
-	SpecRef        string  `json:"spec_ref,omitempty"`
-	Title          string  `json:"title,omitempty"`
-	SectionHeading string  `json:"section_heading,omitempty"`
-	Code           string  `json:"code"`
-	Message        string  `json:"message"`
-	Traceability   string  `json:"traceability,omitempty"`
-	LimitingFactor string  `json:"limiting_factor,omitempty"`
-	Suggestion     string  `json:"suggestion,omitempty"`
-	Expected       string  `json:"expected,omitempty"`
-	Observed       string  `json:"observed,omitempty"`
-	Provenance     string  `json:"provenance,omitempty"`
-	Confidence     float64 `json:"confidence,omitempty"`
+	Path            string  `json:"path"`
+	SpecRef         string  `json:"spec_ref,omitempty"`
+	Title           string  `json:"title,omitempty"`
+	SectionHeading  string  `json:"section_heading,omitempty"`
+	Code            string  `json:"code"`
+	Message         string  `json:"message"`
+	Traceability    string  `json:"traceability,omitempty"`
+	LimitingFactor  string  `json:"limiting_factor,omitempty"`
+	Suggestion      string  `json:"suggestion,omitempty"`
+	Expected        string  `json:"expected,omitempty"`
+	Observed        string  `json:"observed,omitempty"`
+	Provenance      string  `json:"provenance,omitempty"`
+	Confidence      float64 `json:"confidence,omitempty"`
+	Classification  string  `json:"classification,omitempty"`
+	RationaleText   string  `json:"rationale_text,omitempty"`
+	RationaleKind   string  `json:"rationale_kind,omitempty"`
+	RationaleSymbol string  `json:"rationale_symbol,omitempty"`
 }
 
 // ComplianceResult is the structured compliance output.
@@ -283,6 +287,10 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 		}
 		result.RelevantSpecs = buildComplianceRelevantSpecs(specs, relevant)
 	}
+
+	// Classify conflicts as deliberate_deviation or unintentional_drift
+	// based on rationale comments found in the source files.
+	classifyComplianceConflicts(ctx, cfg, result)
 
 	sortComplianceFindings(result.Compliant)
 	sortComplianceFindings(result.Conflicts)
@@ -1234,6 +1242,68 @@ func buildComplianceRelevantSpecs(specs map[string]specDocument, relevant map[st
 		result = append(result, item)
 	}
 	return result
+}
+
+// classifyComplianceConflicts annotates conflict findings with rationale from
+// the ast_cache. Conflicts with associated rationale are classified as
+// deliberate_deviation; those without are classified as unintentional_drift.
+func classifyComplianceConflicts(ctx context.Context, cfg *config.Config, result *ComplianceResult) {
+	if len(result.Conflicts) == 0 {
+		return
+	}
+
+	// Collect unique paths from conflict findings.
+	pathSet := make(map[string]bool)
+	for _, f := range result.Conflicts {
+		if f.Path != "" {
+			pathSet[f.Path] = true
+		}
+	}
+	paths := make([]string, 0, len(pathSet))
+	for p := range pathSet {
+		paths = append(paths, p)
+	}
+
+	// Query rationale from the index.
+	rationaleEntries, err := index.QueryRationaleContext(ctx, cfg.Workspace.ResolvedIndexPath, paths)
+	if err != nil || len(rationaleEntries) == 0 {
+		// If rationale query fails or returns nothing, classify all as unintentional_drift.
+		for i := range result.Conflicts {
+			if result.Conflicts[i].Classification == "" {
+				result.Conflicts[i].Classification = "unintentional_drift"
+			}
+		}
+		return
+	}
+
+	// Build lookup from path to rationale entries.
+	rationaleByPath := make(map[string]index.FileRationale)
+	for _, fr := range rationaleEntries {
+		rationaleByPath[fr.Path] = fr
+	}
+
+	for i := range result.Conflicts {
+		if result.Conflicts[i].Classification != "" {
+			continue
+		}
+		path := result.Conflicts[i].Path
+		normalizedPath := strings.TrimPrefix(strings.TrimPrefix(path, "code://"), "config://")
+
+		fr, ok := rationaleByPath[normalizedPath]
+		if ok && len(fr.Rationale) > 0 {
+			r := fr.Rationale[0]
+			result.Conflicts[i].Classification = "deliberate_deviation"
+			result.Conflicts[i].RationaleText = r.Text
+			result.Conflicts[i].RationaleKind = string(r.Kind)
+			result.Conflicts[i].RationaleSymbol = r.NearestSymbol
+			result.Conflicts[i].Suggestion = fmt.Sprintf(
+				"Documented rationale found (%s). Update the spec to reflect this decision, or update the code to match the spec.",
+				r.Kind,
+			)
+		} else {
+			result.Conflicts[i].Classification = "unintentional_drift"
+		}
+	}
 }
 
 func sortComplianceFindings(findings []ComplianceFinding) {

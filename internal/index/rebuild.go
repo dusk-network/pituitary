@@ -21,7 +21,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
@@ -573,9 +573,10 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			PRIMARY KEY (from_ref, to_ref, edge_type)
 		)`,
 		`CREATE TABLE ast_cache (
-			content_hash  TEXT PRIMARY KEY,
-			path          TEXT NOT NULL,
-			symbols_json  TEXT NOT NULL
+			content_hash   TEXT PRIMARY KEY,
+			path           TEXT NOT NULL,
+			symbols_json   TEXT NOT NULL,
+			rationale_json TEXT NOT NULL DEFAULT '[]'
 		)`,
 		`CREATE TABLE metadata (
 			key           TEXT PRIMARY KEY,
@@ -893,16 +894,16 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	}
 
 	// Prepare cache insert statement.
-	cacheStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO ast_cache (content_hash, path, symbols_json) VALUES (?, ?, ?)`)
+	cacheStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO ast_cache (content_hash, path, symbols_json, rationale_json) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare ast_cache insert: %w", err)
 	}
 	defer cacheStmt.Close()
 
 	// Load cached symbols from the previous index if available.
-	cachedSymbols := loadCachedASTSymbols(ctx, cfg.Workspace.ResolvedIndexPath)
+	cachedData := loadCachedASTData(ctx, cfg.Workspace.ResolvedIndexPath)
 
-	// Extract symbols from each code file.
+	// Extract symbols and rationale from each code file.
 	const maxFileSize = 1 << 20 // 1 MB — skip minified bundles and generated files
 	fileSymbols := make(map[string][]ast.Symbol, len(codePaths))
 	for _, relPath := range codePaths {
@@ -922,9 +923,9 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 		hash := ast.ContentHash(content, relPath)
 
 		// Check cache first.
-		if cached, ok := cachedSymbols[hash]; ok {
-			fileSymbols[relPath] = cached
-			if err := insertASTCache(ctx, cacheStmt, hash, relPath, cached); err != nil {
+		if cached, ok := cachedData[hash]; ok {
+			fileSymbols[relPath] = cached.Symbols
+			if err := insertASTCacheWithRationale(ctx, cacheStmt, hash, relPath, cached.Symbols, cached.Rationale); err != nil {
 				return 0, err
 			}
 			continue
@@ -938,8 +939,9 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 		if err != nil {
 			continue
 		}
+		rationale := ast.ExtractRationale(content, symbols, lang)
 		fileSymbols[relPath] = symbols
-		if err := insertASTCache(ctx, cacheStmt, hash, relPath, symbols); err != nil {
+		if err := insertASTCacheWithRationale(ctx, cacheStmt, hash, relPath, symbols, rationale); err != nil {
 			return 0, err
 		}
 	}
@@ -969,8 +971,14 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	return count, nil
 }
 
-func loadCachedASTSymbols(ctx context.Context, indexPath string) map[string][]ast.Symbol {
-	result := make(map[string][]ast.Symbol)
+// cachedASTEntry holds both symbols and rationale from the ast_cache.
+type cachedASTEntry struct {
+	Symbols   []ast.Symbol
+	Rationale []ast.Rationale
+}
+
+func loadCachedASTData(ctx context.Context, indexPath string) map[string]cachedASTEntry {
+	result := make(map[string]cachedASTEntry)
 	if indexPath == "" {
 		return result
 	}
@@ -990,31 +998,63 @@ func loadCachedASTSymbols(ctx context.Context, indexPath string) map[string][]as
 		return result
 	}
 
-	rows, err := db.QueryContext(ctx, `SELECT content_hash, symbols_json FROM ast_cache`)
+	// Check if rationale_json column exists (schema v7+).
+	hasRationale := false
+	var colCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('ast_cache') WHERE name = 'rationale_json'`).Scan(&colCount); err == nil && colCount > 0 {
+		hasRationale = true
+	}
+
+	query := `SELECT content_hash, symbols_json FROM ast_cache`
+	if hasRationale {
+		query = `SELECT content_hash, symbols_json, rationale_json FROM ast_cache`
+	}
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return result
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var hash, symbolsJSON string
-		if err := rows.Scan(&hash, &symbolsJSON); err != nil {
+		var rationaleJSON string
+		var scanErr error
+		if hasRationale {
+			scanErr = rows.Scan(&hash, &symbolsJSON, &rationaleJSON)
+		} else {
+			scanErr = rows.Scan(&hash, &symbolsJSON)
+		}
+		if scanErr != nil {
 			continue
 		}
 		var symbols []ast.Symbol
 		if err := json.Unmarshal([]byte(symbolsJSON), &symbols); err != nil {
 			continue
 		}
-		result[hash] = symbols
+		var rationale []ast.Rationale
+		if rationaleJSON != "" {
+			if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
+				continue
+			}
+		}
+		result[hash] = cachedASTEntry{Symbols: symbols, Rationale: rationale}
 	}
 	return result
 }
 
-func insertASTCache(ctx context.Context, stmt *sql.Stmt, hash, path string, symbols []ast.Symbol) error {
-	data, err := json.Marshal(symbols)
+func insertASTCacheWithRationale(ctx context.Context, stmt *sql.Stmt, hash, path string, symbols []ast.Symbol, rationale []ast.Rationale) error {
+	symbolData, err := json.Marshal(symbols)
 	if err != nil {
 		return fmt.Errorf("marshal AST symbols for cache: %w", err)
 	}
-	if _, err := stmt.ExecContext(ctx, hash, path, string(data)); err != nil {
+	if rationale == nil {
+		rationale = []ast.Rationale{}
+	}
+	rationaleData, err := json.Marshal(rationale)
+	if err != nil {
+		return fmt.Errorf("marshal AST rationale for cache: %w", err)
+	}
+	if _, err := stmt.ExecContext(ctx, hash, path, string(symbolData), string(rationaleData)); err != nil {
 		return fmt.Errorf("insert AST cache %s: %w", path, err)
 	}
 	return nil
