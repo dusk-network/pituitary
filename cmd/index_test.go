@@ -46,6 +46,67 @@ path = "specs"
 	}
 }
 
+func TestRunIndexWithJSONAdapter(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "json-specs"
+adapter = "json"
+kind = "json_spec"
+path = "schemas"
+
+[sources.options]
+title_pointer = "/info/title"
+status_pointer = "/meta/status"
+domain_pointer = "/meta/domain"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "schemas", "rate-limit.json"), `{
+  "meta": {
+    "status": "accepted",
+    "domain": "api"
+  },
+  "info": {
+    "title": "JSON Rate Limits"
+  },
+  "limits": {
+    "requests_per_minute": 120
+  }
+}`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	progress := stderr.String()
+	if !strings.Contains(progress, "pituitary index: chunking") {
+		t.Fatalf("runIndex() stderr %q does not contain chunking progress", progress)
+	}
+	if !strings.Contains(progress, "pituitary index: embedding") {
+		t.Fatalf("runIndex() stderr %q does not contain embedding progress", progress)
+	}
+	if !strings.Contains(stdout.String(), "indexed 1 artifact(s)") {
+		t.Fatalf("runIndex() output %q does not contain JSON adapter counts", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
+		t.Fatalf("runIndex() did not create database: %v", err)
+	}
+}
+
 func TestRunIndexReportsRepoCoverage(t *testing.T) {
 	repo := writeMultiRepoSearchWorkspace(t)
 

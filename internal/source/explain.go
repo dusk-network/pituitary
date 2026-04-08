@@ -17,8 +17,11 @@ const (
 	explainReasonNotMatchedByInclude     = "not_matched_by_include"
 	explainReasonExcludedBySelector      = "excluded_by_selector"
 	explainReasonNotMarkdownFile         = "not_markdown_file"
+	explainReasonNotJSONFile             = "not_json_file"
 	explainReasonIndexedMarkdownDoc      = "indexed_markdown_doc"
 	explainReasonIndexedMarkdownContract = "indexed_markdown_contract"
+	explainReasonIndexedJSONSpec         = "indexed_json_spec"
+	explainReasonIndexedJSONDoc          = "indexed_json_doc"
 	explainReasonIndexedSpecBundle       = "indexed_spec_bundle"
 	explainReasonBundleMemberNotIndexed  = "bundle_member_not_indexed_directly"
 	explainReasonNotInSpecBundle         = "not_in_spec_bundle"
@@ -186,6 +189,10 @@ func explainFileInSource(workspaceRoot string, source config.Source, absolutePat
 		return explainMarkdownContractSource(workspaceRoot, explanation, source, absolutePath)
 	case config.SourceKindSpecBundle:
 		return explainSpecBundleSource(workspaceRoot, explanation, source, absolutePath)
+	case "json_spec":
+		return explainJSONSource(explanation, source, model.ArtifactKindSpec, explainReasonIndexedJSONSpec)
+	case "json_doc":
+		return explainJSONSource(explanation, source, model.ArtifactKindDoc, explainReasonIndexedJSONDoc)
 	default:
 		return SourceFileExplanation{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 	}
@@ -210,6 +217,28 @@ func explainMarkdownDocSource(explanation SourceFileExplanation, source config.S
 	explanation.Selected = true
 	explanation.ArtifactKind = model.ArtifactKindDoc
 	explanation.Reason = explainReasonIndexedMarkdownDoc
+	return explanation, nil
+}
+
+func explainJSONSource(explanation SourceFileExplanation, source config.Source, artifactKind, indexedReason string) (SourceFileExplanation, error) {
+	selection, err := evaluateSourcePathSelection(source, explanation.RelativePath)
+	if err != nil {
+		return SourceFileExplanation{}, err
+	}
+	populateSelectionMatches(&explanation, selection)
+
+	if filepath.Ext(explanation.RelativePath) != ".json" {
+		explanation.Reason = explainReasonNotJSONFile
+		return explanation, nil
+	}
+	if !selection.Selected {
+		explanation.Reason = selection.Reason
+		return explanation, nil
+	}
+
+	explanation.Selected = true
+	explanation.ArtifactKind = artifactKind
+	explanation.Reason = indexedReason
 	return explanation, nil
 }
 

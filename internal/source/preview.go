@@ -1,11 +1,13 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/diag"
+	"github.com/dusk-network/pituitary/sdk"
 )
 
 // PreviewResult describes which items each configured source will contribute.
@@ -76,6 +78,10 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 		Exclude: append([]string(nil), source.Exclude...),
 	}
 
+	if source.Adapter != config.AdapterFilesystem {
+		return previewViaAdapter(preview, source)
+	}
+
 	switch source.Kind {
 	case config.SourceKindSpecBundle:
 		bundleDirs, err := discoverSpecBundles(source)
@@ -115,6 +121,45 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 		return SourcePreview{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 	}
 
+	preview.ItemCount = len(preview.Items)
+	return preview, nil
+}
+
+func previewViaAdapter(preview SourcePreview, source config.Source) (SourcePreview, error) {
+	factory := LookupAdapter(source.Adapter)
+	if factory == nil {
+		return SourcePreview{}, unknownAdapterError(source.Name, source.Adapter)
+	}
+
+	adapter := factory()
+	previewer, ok := adapter.(sdk.Previewer)
+	if !ok {
+		return SourcePreview{}, fmt.Errorf("source %q: adapter %q does not support preview", source.Name, source.Adapter)
+	}
+
+	items, err := previewer.Preview(context.Background(), sdk.SourceConfig{
+		Name:          source.Name,
+		Adapter:       source.Adapter,
+		Kind:          source.Kind,
+		Repo:          source.ResolvedRepo,
+		Path:          source.Path,
+		Files:         append([]string(nil), source.Files...),
+		Include:       append([]string(nil), source.Include...),
+		Exclude:       append([]string(nil), source.Exclude...),
+		Options:       config.CloneSourceOptions(source.Options),
+		WorkspaceRoot: source.RepoRootPath,
+		PrimaryRepoID: source.PrimaryRepo,
+	})
+	if err != nil {
+		return SourcePreview{}, fmt.Errorf("source %q: %w", source.Name, err)
+	}
+
+	for _, item := range items {
+		preview.Items = append(preview.Items, PreviewItem{
+			ArtifactKind: item.ArtifactKind,
+			Path:         item.Path,
+		})
+	}
 	preview.ItemCount = len(preview.Items)
 	return preview, nil
 }

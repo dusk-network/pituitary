@@ -124,6 +124,77 @@ func TestRunExplainFileContractJSON(t *testing.T) {
 	}
 }
 
+func TestRunExplainFileJSONSource(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "json-specs"
+adapter = "json"
+kind = "json_spec"
+path = "schemas"
+files = ["rate-limit.json"]
+
+[sources.options]
+title_pointer = "/info/title"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "schemas", "rate-limit.json"), `{
+  "info": {
+    "title": "Rate Limit Schema"
+  }
+}`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runExplainFile([]string{"schemas/rate-limit.json", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runExplainFile() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runExplainFile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Summary struct {
+				Status string `json:"status"`
+			} `json:"summary"`
+			Sources []explainFileSourceJSON `json:"sources"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal explain payload: %v", err)
+	}
+	if got, want := payload.Result.Summary.Status, "indexed"; got != want {
+		t.Fatalf("summary status = %q, want %q", got, want)
+	}
+	source, ok := findExplainFileSource(payload.Result.Sources, func(src explainFileSourceJSON) bool {
+		return src.Name == "json-specs"
+	})
+	if !ok {
+		t.Fatal("did not find json-specs source in payload result")
+	}
+	if got, want := source.Reason, "indexed_json_spec"; got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
+	}
+	if got, want := source.ArtifactKind, "spec"; got != want {
+		t.Fatalf("artifact kind = %q, want %q", got, want)
+	}
+	if !source.Selected {
+		t.Fatalf("source explanation = %+v, want selected source", source)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunExplainFileRejectsMissingPath(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
