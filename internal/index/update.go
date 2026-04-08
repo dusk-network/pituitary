@@ -257,6 +257,16 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	result.ChunkCount += unchangedChunkCount
 
+	// Snapshot edges and spec artifacts before edge rebuild for delta computation.
+	oldEdges, err := snapshotEdgesContext(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot old edges: %w", err)
+	}
+	oldArtifacts, err := snapshotSpecArtifactsContext(ctx, db)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot old artifacts: %w", err)
+	}
+
 	// Step 10e: Full edge rebuild.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM edges`); err != nil {
 		return nil, fmt.Errorf("delete edges: %w", err)
@@ -297,6 +307,17 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 	result.EdgeCount += inferredCount
 	result.InferredEdgeCount = inferredCount
+
+	// Compute governance delta from edge and artifact snapshots.
+	newEdges, err := snapshotEdgesTxContext(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot new edges: %w", err)
+	}
+	newArtifacts, err := snapshotSpecArtifactsTxContext(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot new artifacts: %w", err)
+	}
+	result.Delta = computeGovernanceDelta(oldArtifacts, newArtifacts, oldEdges, newEdges)
 
 	// Step 10f: Upsert metadata.
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {

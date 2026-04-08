@@ -47,6 +47,7 @@ type RebuildResult struct {
 	ContentFingerprint  string                     `json:"content_fingerprint"`
 	Repos               []RepoCoverage             `json:"repo_coverage,omitempty"`
 	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`
+	Delta               *GovernanceDelta           `json:"delta,omitempty"`
 }
 
 // RebuildOptions controls optional rebuild behavior.
