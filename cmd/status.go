@@ -34,6 +34,7 @@ type statusResult struct {
 	Repos             []index.RepoCoverage       `json:"repo_coverage,omitempty"`
 	ArtifactLocations *statusArtifactLocation    `json:"artifact_locations,omitempty"`
 	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
+	Families          *index.FamilyResult        `json:"families,omitempty"`
 	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
 	Guidance          []string                   `json:"guidance,omitempty"`
 }
@@ -74,10 +75,12 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		format       string
 		configPath   string
 		checkRuntime string
+		showFamilies bool
 	)
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&checkRuntime, "check-runtime", string(runtimeprobe.ScopeNone), "runtime probe scope: none, embedder, analysis, or all")
+	fs.BoolVar(&showFamilies, "show-families", false, "discover and display spec families via dependency graph clustering")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "status", nil, cliIssue{
@@ -127,7 +130,19 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	result := response.Result
 
-	return writeCLISuccess(stdout, stderr, format, "status", request, newStatusResult(result, resolution), nil)
+	statusOut := newStatusResult(result, resolution)
+	if showFamilies && statusOut != nil && statusOut.IndexExists {
+		familyResult, err := index.DiscoverFamiliesContext(ctx, result.Index.IndexPath)
+		if err != nil {
+			statusOut.Guidance = append(statusOut.Guidance,
+				fmt.Sprintf("unable to discover families: %v", err),
+			)
+		} else {
+			statusOut.Families = familyResult
+		}
+	}
+
+	return writeCLISuccess(stdout, stderr, format, "status", request, statusOut, nil)
 }
 
 func newStatusResult(result *app.StatusResult, resolution *configResolution) *statusResult {

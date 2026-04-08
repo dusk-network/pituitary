@@ -440,8 +440,36 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 			}
 		}
 	}
+	renderSpecFamilies(w, result.Families)
 	for _, guidance := range result.Guidance {
 		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+	}
+}
+
+func renderSpecFamilies(w io.Writer, families *index.FamilyResult) {
+	if families == nil || len(families.Families) == 0 {
+		return
+	}
+	p := presentationForWriter(w)
+	fmt.Fprintf(w, "  %s\n", p.white("SPEC FAMILIES"))
+	for i, family := range families.Families {
+		memberList := strings.Join(family.Members, ", ")
+		fmt.Fprintf(w, "  %s family %d (%d member(s), cohesion: %.2f): %s\n",
+			p.treeItem(i == len(families.Families)-1 && len(families.Ungoverned) == 0),
+			family.ID, family.Size, family.Cohesion, memberList)
+	}
+	if len(families.Ungoverned) > 0 {
+		fmt.Fprintf(w, "  %s ungoverned files: %d\n", p.dim("coverage gap:"), len(families.Ungoverned))
+		limit := 5
+		if len(families.Ungoverned) < limit {
+			limit = len(families.Ungoverned)
+		}
+		for _, path := range families.Ungoverned[:limit] {
+			fmt.Fprintf(w, "    %s %s\n", p.cross(), path)
+		}
+		if len(families.Ungoverned) > 5 {
+			fmt.Fprintf(w, "    %s ... and %d more\n", p.dim(""), len(families.Ungoverned)-5)
+		}
 	}
 }
 

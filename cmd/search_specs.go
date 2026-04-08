@@ -40,6 +40,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 		configPath  string
 		statuses    searchSpecsFlagList
 		limit       int
+		familyID    int
 	)
 	fs.StringVar(&query, "query", "", "semantic query")
 	fs.StringVar(&requestFile, "request-file", "", "path to search request JSON, or - for stdin")
@@ -48,6 +49,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	fs.StringVar(&domain, "domain", "", "filter by domain")
 	fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
 	fs.IntVar(&limit, "limit", 10, "maximum matches to return")
+	fs.IntVar(&familyID, "family", -1, "filter results to specs in the given family ID")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "search-specs", nil, cliIssue{
@@ -133,6 +135,37 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 	operation := app.SearchSpecs(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
+	}
+
+	// Post-filter by family if --family was specified.
+	if familyID >= 0 && operation.Result != nil {
+		cfg, cfgErr := config.Load(resolvedConfigPath)
+		if cfgErr != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssue{
+				Code:    "config_error",
+				Message: fmt.Sprintf("failed to load config for --family filtering: %v", cfgErr),
+			}, 2)
+		}
+		familyResult, famErr := index.DiscoverFamiliesContext(ctx, cfg.Workspace.ResolvedIndexPath)
+		if famErr != nil {
+			return writeCLIError(stdout, stderr, format, "search-specs", operation.Request, cliIssue{
+				Code:    "internal_error",
+				Message: fmt.Sprintf("failed to compute families for --family filtering: %v", famErr),
+			}, 2)
+		}
+		familyMembers := make(map[string]bool)
+		for _, a := range familyResult.Assignments {
+			if a.FamilyID == familyID {
+				familyMembers[a.Ref] = true
+			}
+		}
+		var filtered []index.SearchSpecMatch
+		for _, m := range operation.Result.Matches {
+			if familyMembers[m.Ref] {
+				filtered = append(filtered, m)
+			}
+		}
+		operation.Result.Matches = filtered
 	}
 
 	return writeCLISuccess(stdout, stderr, format, "search-specs", operation.Request, operation.Result, nil)
