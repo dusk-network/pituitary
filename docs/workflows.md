@@ -29,9 +29,9 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 | `explain-file PATH` | Explain how one file is classified by configured sources |
 | `canonicalize --path PATH` | Promote one inferred contract into a spec bundle |
 | `index --rebuild [--full]` | Rebuild the SQLite index |
-| `index --update` | Incremental update: diff and write only changed artifacts |
+| `index --update [--show-delta]` | Incremental update: diff and write only changed artifacts |
 | `index --dry-run` | Validate config and sources without writing |
-| `status [--check-runtime all]` | Report index state, config, freshness, runtime readiness |
+| `status [--check-runtime all] [--show-families]` | Report index state, config, freshness, runtime readiness, spec families |
 | `version` | Print version info |
 | `search-specs --query "..."` | Semantic search across indexed spec sections |
 | `check-overlap --path SPEC` | Detect specs that cover overlapping ground |
@@ -82,6 +82,87 @@ The result now separates:
 - `tolerated`: historical or compatibility-only uses that are still indexed for context
 
 Each matched term includes structured `classification`, `context`, `severity`, and `replacement` fields so CI or editor tooling can turn JSON output into warnings or errors without scraping prose.
+
+## Temporal Governance Queries
+
+Analysis commands support `--at DATE` (YYYY-MM-DD) for point-in-time governance. When a spec is superseded or deprecated, its governance edges get `valid_to` set automatically — the historical links are preserved but excluded from current queries.
+
+```sh
+pituitary governed-by --path src/api/ratelimiter.go --at 2026-03-15
+pituitary check-compliance --diff-file - --at 2026-03-01
+pituitary check-doc-drift --scope all --at 2026-03-20
+pituitary analyze-impact --spec-ref SPEC-042 --at 2026-02-15
+```
+
+Temporal values are populated from the index rebuild timestamp. Edges carry `valid_from` (when created) and `valid_to` (when closed by supersession or deprecation). `valid_to IS NULL` means the edge is currently active.
+
+## Confidence-Weighted Governance
+
+Governance edges carry a confidence tier and numeric score:
+
+| Tier | Source | Score |
+|------|--------|-------|
+| **extracted** | Declared in spec.toml (`applies_to`, `depends_on`, `supersedes`) | 1.0 |
+| **inferred** | AST symbol matching during tree-sitter pass | 0.7 |
+| **ambiguous** | Weak or conflicting signals | 0.1–0.3 |
+
+Use `--min-confidence` to control the trust threshold:
+
+```sh
+pituitary check-compliance --diff-file - --min-confidence extracted   # strict: declared only
+pituitary check-doc-drift --scope all --min-confidence inferred       # broader: include inferred
+pituitary governed-by --path src/api/ratelimiter.go --min-confidence extracted
+```
+
+The `governed-by` JSON output includes `confidence` and `confidence_score` on each governing spec, so consumers can weight results programmatically.
+
+## Deliberate Deviation vs Accidental Drift
+
+When `check-compliance` finds a conflict, it checks for rationale comments in the source code near the conflicting code:
+
+- **Recognized tags:** `// WHY:`, `// RATIONALE:`, `// NOTE:`, `// HACK:`, `// FIXME:`, `// TODO:` (with language-appropriate variants for Python, Rust, etc.)
+- **Decision language:** Comments containing "because," "instead of," "chose," "trade-off," "deliberately," "intentionally"
+
+The compliance finding is classified as:
+
+- `deliberate_deviation` — rationale found. The remediation path is: update the spec to reflect the decision, or update the code.
+- `unintentional_drift` — no documented rationale. The remediation path is: fix the code to match the spec.
+
+The JSON output includes `classification`, `rationale_text`, `rationale_kind`, and `rationale_symbol` in the evidence chain.
+
+## Governance Graph Delta
+
+`index --update --show-delta` reports what changed in the governance posture since the last rebuild:
+
+```sh
+pituitary index --update --show-delta
+```
+
+```
+Governance delta since last rebuild:
+  + SPEC-043 added (status: draft, domain: auth)
+  + SPEC-042 now governs 3 additional files (inferred)
+  - SPEC-008 superseded by SPEC-042
+  ~ doc://guides/api-rate-limits: was aligned, now drifting
+  summary: 1 spec(s) added, 2 edge(s) added, 1 edge(s) removed
+```
+
+JSON output includes the full `delta` object with `added_specs`, `removed_specs`, `updated_specs`, `added_edges`, `removed_edges`, `updated_edges`, and a `summary` string.
+
+## Spec Families
+
+`status --show-families` runs community detection (Louvain algorithm) on the spec dependency graph to discover natural governance clusters:
+
+```sh
+pituitary status --show-families
+```
+
+Connections are built from `depends_on`, `supersedes`, `relates_to` edges and shared `applies_to` targets. The output includes:
+
+- **Families** with member lists, sizes, and cohesion scores (intra-family edge density)
+- **Ungoverned files** — source files in `ast_cache` not covered by any `applies_to` edge (coverage gaps between families)
+
+Use `search-specs --family N` to restrict search results to a specific family. `analyze-impact` annotates impacted specs that cross family boundaries with `cross_family: true` in JSON output.
 
 ## Agent-Friendly Input
 
