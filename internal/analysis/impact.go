@@ -36,6 +36,7 @@ type ImpactedSpec struct {
 	Severity           string                     `json:"severity,omitempty"`
 	SeverityConfidence float64                    `json:"severity_confidence,omitempty"`
 	SeverityReason     string                     `json:"severity_reason,omitempty"`
+	CrossFamily        bool                       `json:"cross_family,omitempty"`
 }
 
 // ImpactedRef reports one affected code or config reference.

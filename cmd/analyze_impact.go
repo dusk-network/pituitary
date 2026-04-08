@@ -10,6 +10,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/index"
 )
 
 func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
@@ -128,5 +129,38 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
+	// Annotate cross-family impact.
+	annotateCrossFamilyImpact(ctx, resolvedConfigPath, request.SpecRef, operation.Result)
+
 	return writeCLISuccess(stdout, stderr, format, "analyze-impact", operation.Request, operation.Result, nil)
+}
+
+func annotateCrossFamilyImpact(ctx context.Context, configPath string, sourceRef string, result *analysis.AnalyzeImpactResult) {
+	if result == nil || len(result.AffectedSpecs) == 0 || sourceRef == "" {
+		return
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return
+	}
+	familyResult, err := index.DiscoverFamiliesContext(ctx, cfg.Workspace.ResolvedIndexPath)
+	if err != nil || len(familyResult.Assignments) == 0 {
+		return
+	}
+
+	assignmentMap := make(map[string]int)
+	for _, a := range familyResult.Assignments {
+		assignmentMap[a.Ref] = a.FamilyID
+	}
+
+	sourceFamily, ok := assignmentMap[sourceRef]
+	if !ok {
+		return
+	}
+
+	for i := range result.AffectedSpecs {
+		if targetFamily, exists := assignmentMap[result.AffectedSpecs[i].Ref]; exists && targetFamily != sourceFamily {
+			result.AffectedSpecs[i].CrossFamily = true
+		}
+	}
 }
