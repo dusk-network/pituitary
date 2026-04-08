@@ -438,6 +438,11 @@ func TestRunCheckOverlapReportsUnknownSpecRefActionably(t *testing.T) {
 	if !strings.Contains(payload.Errors[0].Message, `unknown --spec-ref "SPEC-999"`) {
 		t.Fatalf("payload error message = %q, want actionable spec-ref detail", payload.Errors[0].Message)
 	}
+	for _, want := range []string{"SPEC-008", "SPEC-042", "SPEC-055"} {
+		if !strings.Contains(payload.Errors[0].Message, want) {
+			t.Fatalf("payload error message = %q, want available ref %q", payload.Errors[0].Message, want)
+		}
+	}
 	if !strings.Contains(payload.Errors[0].Message, "pituitary index --rebuild") {
 		t.Fatalf("payload error message = %q, want rebuild guidance", payload.Errors[0].Message)
 	}

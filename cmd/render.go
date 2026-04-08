@@ -342,6 +342,10 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 		p.dim(statusEmbedderSummary(result.EmbedderProvider)),
 	)
 	fmt.Fprintln(w)
+	if result.Compact {
+		renderCompactStatusDetails(w, result)
+		return
+	}
 
 	if result.WorkspaceRoot != "" {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("workspace:"), result.WorkspaceRoot)
@@ -441,6 +445,35 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 		}
 	}
 	renderSpecFamilies(w, result.Families)
+	for _, guidance := range result.Guidance {
+		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
+	}
+}
+
+func renderCompactStatusDetails(w io.Writer, result *statusResult) {
+	p := presentationForWriter(w)
+	if result.Runtime != nil {
+		summaries := make([]string, 0, len(result.Runtime.Checks))
+		for _, check := range result.Runtime.Checks {
+			summaries = append(summaries, fmt.Sprintf("%s %s", check.Name, check.Status))
+		}
+		if len(summaries) > 0 {
+			fmt.Fprintf(w, "  %s %s | %s\n", p.dim("runtime probe:"), result.Runtime.Scope, strings.Join(summaries, ", "))
+		}
+	}
+	if result.Freshness != nil {
+		for _, issue := range result.Freshness.Issues {
+			fmt.Fprintf(w, "  %s %s\n", p.cross(), issue.Message)
+		}
+		if result.Freshness.Action != "" {
+			fmt.Fprintf(w, "  %s %s\n", p.arrow(), result.Freshness.Action)
+		}
+	}
+	if result.RelationGraph != nil {
+		for _, finding := range result.RelationGraph.Findings {
+			fmt.Fprintf(w, "  %s %s\n", p.cross(), finding.Message)
+		}
+	}
 	for _, guidance := range result.Guidance {
 		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
 	}
@@ -904,7 +937,7 @@ func renderComplianceFindingGroup(w io.Writer, label string, findings []analysis
 			fmt.Fprintf(w, "     %s %s\n", p.dim("traceability"), item.Traceability)
 		}
 		if item.LimitingFactor != "" {
-			fmt.Fprintf(w, "     %s %s\n", p.dim("limiting factor"), item.LimitingFactor)
+			fmt.Fprintf(w, "     %s %s\n", p.dim("limiting factor"), humanizeComplianceLimitingFactor(item.LimitingFactor))
 		}
 		if item.Suggestion != "" {
 			fmt.Fprintf(w, "     %s %s\n", p.arrow(), item.Suggestion)
@@ -2287,6 +2320,17 @@ func humanizeOverlapGuidance(guidance string) string {
 		return "boundary review"
 	default:
 		return guidance
+	}
+}
+
+func humanizeComplianceLimitingFactor(factor string) string {
+	switch factor {
+	case "spec_metadata_gap":
+		return "accepted spec metadata is missing explicit applies_to coverage"
+	case "code_evidence_gap":
+		return "the file or diff does not expose enough literal code evidence to confirm compliance"
+	default:
+		return factor
 	}
 }
 

@@ -3,6 +3,7 @@ package analysis
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // NotFoundError reports a missing indexed artifact.
@@ -20,13 +21,34 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &target)
 }
 
-func newSpecRefNotFoundError(ref string) *NotFoundError {
-	return &NotFoundError{
-		Message: fmt.Sprintf(
-			"unknown --spec-ref %q: the ref is not present in the current index; run `pituitary search-specs --query ...` to inspect indexed spec refs or `pituitary index --rebuild` if the workspace changed",
-			ref,
-		),
+func newSpecRefNotFoundError(ref string, availableRefs []string) *NotFoundError {
+	if len(availableRefs) == 0 {
+		return &NotFoundError{
+			Message: fmt.Sprintf(
+				"unknown --spec-ref %q: the ref is not present in the current index; run `pituitary search-specs --query ...` to inspect indexed spec refs or `pituitary index --rebuild` if the workspace changed",
+				ref,
+			),
+		}
 	}
+
+	preview := append([]string(nil), availableRefs...)
+	extra := 0
+	if len(preview) > 12 {
+		extra = len(preview) - 12
+		preview = preview[:12]
+	}
+
+	message := fmt.Sprintf(
+		"unknown --spec-ref %q: the ref is not present in the current index; available spec refs: %s",
+		ref,
+		strings.Join(preview, ", "),
+	)
+	if extra > 0 {
+		message += fmt.Sprintf(" (+%d more; run `pituitary search-specs --query ...` to inspect the full index)", extra)
+	}
+	message += "; run `pituitary index --rebuild` if the workspace changed"
+
+	return &NotFoundError{Message: message}
 }
 
 func newDocRefNotFoundError(ref string) *NotFoundError {

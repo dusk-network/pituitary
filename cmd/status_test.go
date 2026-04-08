@@ -75,6 +75,51 @@ func TestRunStatusReportsFixtureGuidanceForLargerCorpus(t *testing.T) {
 	}
 }
 
+func TestRunStatusCompactSuppressesVerboseOutput(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var rebuildStdout bytes.Buffer
+	var rebuildStderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &rebuildStdout, &rebuildStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, rebuildStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runStatus([]string{"--compact"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"━━◈ status",
+		"3 specs  2 docs  17 chunks",
+		`runtime.embedder is still "fixture" on 5 indexed artifact(s)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runStatus() compact output %q does not contain %q", out, want)
+		}
+	}
+	for _, unwanted := range []string{
+		"config resolution:",
+		"artifact ignore patterns:",
+		"RUNTIME CONFIG",
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("runStatus() compact output %q unexpectedly contains %q", out, unwanted)
+		}
+	}
+}
+
 func TestRunStatusJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

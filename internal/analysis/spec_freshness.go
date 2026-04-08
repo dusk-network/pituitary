@@ -110,7 +110,11 @@ func CheckSpecFreshnessContext(ctx context.Context, cfg *config.Config, request 
 	}
 	for _, ref := range specRefs {
 		if _, ok := specs[ref]; !ok {
-			return nil, newSpecRefNotFoundError(ref)
+			availableRefs, err := repo.knownSpecRefs()
+			if err != nil {
+				return nil, err
+			}
+			return nil, newSpecRefNotFoundError(ref, availableRefs)
 		}
 	}
 

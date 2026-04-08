@@ -89,6 +89,31 @@ func (r *analysisRepository) loadSelectedSpecs(refs []string) (map[string]specDo
 	return r.loadSpecs(refs)
 }
 
+func (r *analysisRepository) knownSpecRefs() ([]string, error) {
+	rows, err := r.db.QueryContext(r.ctx, `
+SELECT ref
+FROM artifacts
+WHERE kind = ?
+ORDER BY ref ASC`, "spec")
+	if err != nil {
+		return nil, fmt.Errorf("query spec refs: %w", err)
+	}
+	defer rows.Close()
+
+	refs := make([]string, 0)
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, fmt.Errorf("scan spec ref: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate spec refs: %w", err)
+	}
+	return refs, nil
+}
+
 func (r *analysisRepository) loadAllDocs() (map[string]docDocument, error) {
 	if !r.allDocsLoaded {
 		docs, err := loadIndexedDocsContext(r.ctx, r.db, nil)

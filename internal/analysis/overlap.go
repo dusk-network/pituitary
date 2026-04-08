@@ -197,7 +197,11 @@ func loadCandidate(repo *analysisRepository, request OverlapRequest, specs map[s
 		}
 		spec, ok := indexed[ref]
 		if !ok {
-			return nil, newSpecRefNotFoundError(ref)
+			availableRefs, err := repo.knownSpecRefs()
+			if err != nil {
+				return nil, err
+			}
+			return nil, newSpecRefNotFoundError(ref, availableRefs)
 		}
 		return &spec, nil
 	}

@@ -37,6 +37,7 @@ type statusResult struct {
 	Families          *index.FamilyResult        `json:"families,omitempty"`
 	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
 	Guidance          []string                   `json:"guidance,omitempty"`
+	Compact           bool                       `json:"-"`
 }
 
 type statusRuntimeConfig struct {
@@ -69,18 +70,20 @@ func runStatus(args []string, stdout, stderr io.Writer) int {
 func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("status", "pituitary [--config PATH] status [--format FORMAT] [--check-runtime SCOPE]")
+	help := newCommandHelp("status", "pituitary [--config PATH] status [--format FORMAT] [--check-runtime SCOPE] [--compact]")
 
 	var (
 		format       string
 		configPath   string
 		checkRuntime string
 		showFamilies bool
+		compact      bool
 	)
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&checkRuntime, "check-runtime", string(runtimeprobe.ScopeNone), "runtime probe scope: none, embedder, analysis, or all")
 	fs.BoolVar(&showFamilies, "show-families", false, "discover and display spec families via dependency graph clustering")
+	fs.BoolVar(&compact, "compact", false, "show a short status summary in text output")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "status", nil, cliIssue{
@@ -100,6 +103,12 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		return writeCLIError(stdout, stderr, format, "status", statusRequest{}, cliIssue{
 			Code:    "validation_error",
 			Message: err.Error(),
+		}, 2)
+	}
+	if compact && format != commandFormatText {
+		return writeCLIError(stdout, stderr, format, "status", statusRequest{}, cliIssue{
+			Code:    "validation_error",
+			Message: "--compact is only supported with text output",
 		}, 2)
 	}
 
@@ -131,7 +140,10 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 	result := response.Result
 
 	statusOut := newStatusResult(result, resolution)
-	if showFamilies && statusOut != nil && statusOut.IndexExists {
+	if statusOut != nil {
+		statusOut.Compact = compact
+	}
+	if showFamilies && !compact && statusOut != nil && statusOut.IndexExists {
 		familyResult, err := index.DiscoverFamiliesContext(ctx, result.Index.IndexPath)
 		if err != nil {
 			statusOut.Guidance = append(statusOut.Guidance,
