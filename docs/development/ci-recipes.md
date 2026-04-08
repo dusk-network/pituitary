@@ -26,7 +26,7 @@ jobs:
       pull-requests: read
       issues: write
     steps:
-      - uses: dusk-network/pituitary@v1.0.0-beta.3
+      - uses: dusk-network/pituitary@v1.0.0-beta.7
         with:
           fail-on: error
           # Set this when your repo keeps config at the root instead.
