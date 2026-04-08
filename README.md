@@ -52,9 +52,9 @@ git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 
 Pituitary starts as a drift detector. As your intent corpus grows, it becomes the consistency governance layer:
 
-**Temporal governance.** Point-in-time queries: "what governed what on March 15?" When a spec is superseded, historical governance links are preserved but excluded from current queries. Use `--at DATE` on any analysis command.
+**Temporal governance.** Point-in-time queries against the governance graph. When a spec is superseded, historical governance links are preserved but excluded from current queries. Use `--at DATE` with `check-compliance`, `check-doc-drift`, or `analyze-impact`. Timestamps are derived from index build/update time.
 
-**Confidence-weighted edges.** Governance links carry trust tiers — extracted (declared in spec), inferred (AST symbol matching), or ambiguous. Filter with `--min-confidence` to trade precision for recall.
+**Confidence-weighted edges.** Governance links carry trust tiers — extracted (declared in spec), inferred (AST symbol matching), or ambiguous. Use `--min-confidence` with `check-compliance` and `check-doc-drift` to trade precision for recall.
 
 **Deliberate deviation vs accidental drift.** When code contradicts a spec, Pituitary checks for rationale comments (`// WHY:`, `// HACK:`, decision language). Deliberate deviations get a different remediation path than unintentional drift.
 
