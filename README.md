@@ -5,8 +5,8 @@
 <h1 align="center">Pituitary</h1>
 
 <p align="center">
-  <em>Catch spec drift before it catches you.</em><br><br>
-  Solves intent drift. When your specs, docs, and decisions<br>silently contradict each other across sessions.
+  <em>Consistency governance for AI-native development.</em><br><br>
+  Catch drifts before they catch you.
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 ---
 
-*For developers and teams where human+AI produce more docs and specs than anyone can keep consistent.*
+*For developers and teams where human+AI continuously produce specs, docs, and decisions that should agree — and silently stop agreeing.*
 
 ![demo](demo.gif)
 
@@ -47,6 +47,22 @@ git diff origin/main...HEAD | pituitary check-compliance --diff-file -
 ```
 
 **Terminology drift.** The team adopted new language but old terms persist across your docs and specs.
+
+## What It Becomes
+
+Pituitary starts as a drift detector. As your intent corpus grows, it becomes the consistency governance layer:
+
+**Temporal governance.** Point-in-time queries against the governance graph. When a spec is superseded, historical governance links are preserved but excluded from current queries. Use `--at DATE` with `check-compliance`, `check-doc-drift`, or `analyze-impact`. Timestamps are derived from index build/update time.
+
+**Confidence-weighted edges.** Governance links carry trust tiers — extracted (declared in spec), inferred (AST symbol matching), or ambiguous. Use `--min-confidence` with `check-compliance` and `check-doc-drift` to trade precision for recall.
+
+**Deliberate deviation vs accidental drift.** When code contradicts a spec, Pituitary checks for rationale comments (`// WHY:`, `// HACK:`, decision language). Deliberate deviations get a different remediation path than unintentional drift.
+
+**Governance changelog.** `index --update --show-delta` reports what changed: specs added/removed, edges created/severed, governance posture shifts. The feedback loop CI needs.
+
+**Spec families.** Community detection on the dependency graph discovers natural governance clusters. Coverage gaps between families are the highest-risk ungoverned areas.
+
+**Governance protocol for AI.** The MCP server teaches your AI assistant *when* to check governance — before modifying files, before committing, after accepting specs, when writing docs — not just how.
 
 ## Quick Start
 
@@ -108,7 +124,7 @@ sudo install pituitary /usr/local/bin/
 
 ## Stop Your Agent From Building on Stale Decisions
 
-Pituitary integrates with every major AI coding assistant. Pick your tool:
+Your agent writes specs, reviews PRs, and proposes changes — but it doesn't know what's already been decided. Pituitary gives it that context. The governance protocol teaches it when to check, not just how.
 
 ### MCP Server (Claude Code, Cursor, Windsurf, or any MCP client)
 
@@ -158,7 +174,7 @@ permissions:
   issues: write
 
 steps:
-  - uses: dusk-network/pituitary@v1.0.0-beta.3
+  - uses: dusk-network/pituitary@v1.0.0-beta.7
     with:
       fail-on: error
       # Set this when your repo keeps config at the root instead.
@@ -245,7 +261,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions
 
 ## Project Status
 
-Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, compile, spec-freshness, and review workflows all ship today. Pituitary is intent governance, not code linting — it keeps your project building against what you actually decided, not against stale echoes of decisions that routine LLM cleanups missed. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
+Active development. Core analysis is functional end-to-end: overlap, drift, impact, compliance, terminology, compile, spec-freshness, and review workflows all ship today. The governance graph carries temporal validity, confidence tiers, and spec family assignments. Pituitary is consistency governance, not code linting — it keeps your project building against what you actually decided, not against stale echoes of decisions that routine LLM cleanups missed. See [docs/rfcs/0001-spec-centric-compliance-direction.md](docs/rfcs/0001-spec-centric-compliance-direction.md).
 
 See [ROADMAP.md](ROADMAP.md) for what's shipped, what's next, and where Pituitary is headed.
 
