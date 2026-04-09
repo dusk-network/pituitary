@@ -198,6 +198,29 @@ files = ["CLAUDE.md", "AGENTS.md", "ARCHITECTURE.md"]
 
 This indexes them alongside your specs so drift detection and search cover them. Note: `markdown_docs` sources participate in drift checks and semantic search, not overlap or review — for that, use `markdown_contract` or promote to a spec bundle with `pituitary canonicalize`.
 
+### Example: Indexing structured JSON intent artifacts
+
+If your repo keeps intent in JSON files such as API schemas or machine-generated policy/config records, add a JSON adapter source:
+
+```toml
+[[sources]]
+name = "api-json"
+adapter = "json"
+kind = "json_spec"
+path = "schemas"
+include = ["*.json"]
+
+[sources.options]
+ref_pointer = "/x-pituitary/ref"
+title_pointer = "/info/title"
+status_pointer = "/x-pituitary/status"
+domain_pointer = "/x-pituitary/domain"
+tags_pointer = "/x-pituitary/tags"
+applies_to_pointer = "/x-pituitary/applies_to"
+```
+
+`kind = "json_spec"` normalizes each matched JSON file into a `SpecRecord`; `kind = "json_doc"` emits `DocRecord`s instead. Pointer options use JSON Pointer syntax (`/a/b/0`). When a pointer is omitted, Pituitary falls back to a stable path-based ref, the filename as title, `draft` status for specs, the source name as the default spec domain, and the whole JSON document as the body rendered into markdown. Configured pointer values must resolve to non-empty strings or arrays; omit the pointer to use the built-in fallback instead.
+
 ## Source Kinds
 
 **`spec_bundle`**: `spec.toml` + `body.md` pairs. The structured, high-rigor format.
@@ -207,6 +230,8 @@ This indexes them alongside your specs so drift detection and search cover them.
 **`markdown_contract`**: Markdown files treated as inferred specs. Pituitary extracts metadata from `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` lines when present, or falls back to stable workspace-derived refs like `contract://rfcs/auth/session-policy` with status `draft`.
 
 **`issue`**: Optional adapter-defined kind used by the built-in GitHub source adapter. GitHub issues labeled like specs/RFCs are normalized as specs; other issues are normalized as docs.
+
+**`json_spec` / `json_doc`**: Optional adapter-defined kinds used by the built-in JSON source adapter. Each matched `.json` file is normalized into a spec or doc using JSON Pointer mappings from `sources.options`.
 
 ## Selectors
 

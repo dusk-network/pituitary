@@ -13,6 +13,18 @@ type AdapterResult struct {
 	Docs  []DocRecord
 }
 
+// Previewer enumerates the items an adapter would index without rebuilding.
+// Adapters that don't support source previews may omit this interface.
+type Previewer interface {
+	Preview(ctx context.Context, cfg SourceConfig) ([]PreviewItem, error)
+}
+
+// PreviewItem describes one source item that an adapter would index.
+type PreviewItem struct {
+	ArtifactKind string `json:"artifact_kind"`
+	Path         string `json:"path"`
+}
+
 // AdapterFactory creates an adapter instance.
 type AdapterFactory func() Adapter
 
