@@ -45,7 +45,7 @@ func TestRunExplainFileJSON(t *testing.T) {
 	if got, want := payload.Request.Path, "docs/development/testing-guide.md"; got != want {
 		t.Fatalf("request path = %q, want %q", got, want)
 	}
-	if got, want := payload.Result.Summary.Status, "not_indexed"; got != want {
+	if got, want := payload.Result.Summary.Status, "excluded"; got != want {
 		t.Fatalf("summary status = %q, want %q", got, want)
 	}
 	if got, want := payload.Result.WorkspacePath, "docs/development/testing-guide.md"; got != want {
