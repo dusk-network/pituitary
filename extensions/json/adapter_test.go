@@ -192,8 +192,49 @@ func TestAdapterRejectsMissingMappedField(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load() error = nil, want missing pointer failure")
 	}
+	if !strings.Contains(err.Error(), `json "schemas/broken.json"`) {
+		t.Fatalf("Load() error = %q, want workspace-relative path", err)
+	}
 	if !strings.Contains(err.Error(), `pointer "/status" does not exist`) {
 		t.Fatalf("Load() error = %q, want pointer detail", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("Load() error = %q, should not leak absolute workspace path", err)
+	}
+}
+
+func TestAdapterRejectsEscapingExplicitJSONFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "schemas", "rate-limit.json"), `{"title":"Rate Limit"}`)
+
+	adapter := &adapter{}
+	_, err := adapter.Preview(context.Background(), sdk.SourceConfig{
+		Name:          "json-docs",
+		Adapter:       adapterName,
+		Kind:          kindDoc,
+		Path:          "schemas",
+		WorkspaceRoot: root,
+		Files:         []string{"../rate-limit.json"},
+	})
+	if err == nil {
+		t.Fatal("Preview() error = nil, want escaping file selector failure")
+	}
+	if !strings.Contains(err.Error(), `files[0]: "../rate-limit.json" escapes the source root`) {
+		t.Fatalf("Preview() error = %q, want escaping path detail", err)
+	}
+}
+
+func TestParsePointerIndexRejectsLeadingZero(t *testing.T) {
+	t.Parallel()
+
+	_, err := parsePointerIndex("007", 8)
+	if err == nil {
+		t.Fatal("parsePointerIndex() error = nil, want leading-zero failure")
+	}
+	if !strings.Contains(err.Error(), `array index "007" has invalid leading zero`) {
+		t.Fatalf("parsePointerIndex() error = %q, want leading-zero detail", err)
 	}
 }
 

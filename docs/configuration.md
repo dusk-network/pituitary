@@ -215,12 +215,11 @@ ref_pointer = "/x-pituitary/ref"
 title_pointer = "/info/title"
 status_pointer = "/x-pituitary/status"
 domain_pointer = "/x-pituitary/domain"
-body_pointer = ""
 tags_pointer = "/x-pituitary/tags"
 applies_to_pointer = "/x-pituitary/applies_to"
 ```
 
-`kind = "json_spec"` normalizes each matched JSON file into a `SpecRecord`; `kind = "json_doc"` emits `DocRecord`s instead. Pointer options use JSON Pointer syntax (`/a/b/0`). When a pointer is omitted, Pituitary falls back to a stable path-based ref, the filename as title, `draft` status for specs, the source name as the default spec domain, and the whole JSON document as the body rendered into markdown.
+`kind = "json_spec"` normalizes each matched JSON file into a `SpecRecord`; `kind = "json_doc"` emits `DocRecord`s instead. Pointer options use JSON Pointer syntax (`/a/b/0`). When a pointer is omitted, Pituitary falls back to a stable path-based ref, the filename as title, `draft` status for specs, the source name as the default spec domain, and the whole JSON document as the body rendered into markdown. Configured pointer values must resolve to non-empty strings or arrays; omit the pointer to use the built-in fallback instead.
 
 ## Source Kinds
 

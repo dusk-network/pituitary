@@ -14,6 +14,9 @@ func init() {
 	sdk.Register("github", func() sdk.Adapter {
 		return nil
 	})
+	sdk.Register(AdapterJSON, func() sdk.Adapter {
+		return nil
+	})
 }
 
 func TestLoadResolvesWorkspaceAndSourcePaths(t *testing.T) {
@@ -480,6 +483,58 @@ files = ["../guide.md"]
 	}
 	if !strings.Contains(err.Error(), `source "docs".files[0]: "../guide.md" escapes the source root`) {
 		t.Fatalf("Load() error = %q, want invalid source-file selector detail", err)
+	}
+}
+
+func TestLoadRejectsJSONSourceWithoutPath(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "json-specs"
+adapter = "json"
+kind = "json_spec"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want missing JSON path error")
+	}
+	if !strings.Contains(err.Error(), `source "json-specs".path: value is required`) {
+		t.Fatalf("Load() error = %q, want missing JSON path detail", err)
+	}
+}
+
+func TestLoadRejectsUnsupportedJSONKind(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "schemas"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "json-specs"
+adapter = "json"
+kind = "spec"
+path = "schemas"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unsupported JSON kind error")
+	}
+	if !strings.Contains(err.Error(), `source "json-specs".kind: unsupported kind "spec" for adapter "json"`) {
+		t.Fatalf("Load() error = %q, want unsupported JSON kind detail", err)
 	}
 }
 

@@ -189,9 +189,9 @@ func explainFileInSource(workspaceRoot string, source config.Source, absolutePat
 		return explainMarkdownContractSource(workspaceRoot, explanation, source, absolutePath)
 	case config.SourceKindSpecBundle:
 		return explainSpecBundleSource(workspaceRoot, explanation, source, absolutePath)
-	case "json_spec":
+	case config.SourceKindJSONSpec:
 		return explainJSONSource(explanation, source, model.ArtifactKindSpec, explainReasonIndexedJSONSpec)
-	case "json_doc":
+	case config.SourceKindJSONDoc:
 		return explainJSONSource(explanation, source, model.ArtifactKindDoc, explainReasonIndexedJSONDoc)
 	default:
 		return SourceFileExplanation{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)

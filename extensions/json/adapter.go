@@ -12,6 +12,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dusk-network/pituitary/sdk"
@@ -230,35 +231,61 @@ func resolveSourceRoot(workspaceRoot, sourcePath string) (string, error) {
 	switch {
 	case err == nil && !info.IsDir():
 		return "", fmt.Errorf("path %q is not a directory", sourcePath)
-	case err != nil:
+	case os.IsNotExist(err):
 		return "", fmt.Errorf("path %q does not exist", sourcePath)
+	case err != nil:
+		return "", fmt.Errorf("stat path %q: %w", sourcePath, err)
 	}
 	return resolvedPath, nil
 }
 
 func validateExplicitJSONFiles(sourceRoot string, files []string) error {
 	for i, relFile := range files {
-		normalized := filepath.ToSlash(strings.TrimSpace(relFile))
-		if pathpkg.Ext(normalized) != ".json" {
-			return fmt.Errorf("files[%d]: %q must point to a JSON file", i, relFile)
+		normalized, err := normalizeExplicitJSONFilePath(relFile)
+		if err != nil {
+			return fmt.Errorf("files[%d]: %q %v", i, relFile, err)
 		}
 		resolvedFile := filepath.Join(sourceRoot, filepath.FromSlash(normalized))
 		info, err := os.Stat(resolvedFile)
 		switch {
 		case err == nil && info.IsDir():
 			return fmt.Errorf("files[%d]: %q is a directory", i, relFile)
-		case err != nil:
+		case os.IsNotExist(err):
 			return fmt.Errorf("files[%d]: %q does not exist", i, relFile)
+		case err != nil:
+			return fmt.Errorf("files[%d]: stat %q: %w", i, relFile, err)
 		}
 	}
 	return nil
 }
 
+func normalizeExplicitJSONFilePath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("must point to a JSON file")
+	}
+	if filepath.IsAbs(value) {
+		return "", fmt.Errorf("must be relative to the source root")
+	}
+
+	normalized := pathpkg.Clean(filepath.ToSlash(value))
+	if normalized == "." {
+		return "", fmt.Errorf("must point to a JSON file")
+	}
+	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+		return "", fmt.Errorf("escapes the source root")
+	}
+	if pathpkg.Ext(normalized) != ".json" {
+		return "", fmt.Errorf("must point to a JSON file")
+	}
+	return normalized, nil
+}
+
 func normalizeKind(kind string) string {
 	switch strings.TrimSpace(kind) {
-	case kindSpec, sdk.ArtifactKindSpec:
+	case kindSpec:
 		return kindSpec
-	case kindDoc, sdk.ArtifactKindDoc:
+	case kindDoc:
 		return kindDoc
 	default:
 		return ""
@@ -358,48 +385,48 @@ func loadJSONArtifact(ctx context.Context, cfg sdk.SourceConfig, options sourceO
 func buildSpecRecord(cfg sdk.SourceConfig, options sourceOptions, file selectedJSONFile, raw []byte, document any) (sdk.SpecRecord, error) {
 	title, titleSource, err := selectStringField(document, options.titlePointer, strings.TrimSuffix(filepath.Base(file.AbsolutePath), filepath.Ext(file.AbsolutePath)), "filename")
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "title_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "title_pointer", err)
 	}
 	refFallback := pathBasedRef("json-spec://", file.RelativePath, cfg.Repo, cfg.PrimaryRepoID)
 	ref, refSource, err := selectStringField(document, options.refPointer, refFallback, "path")
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "ref_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "ref_pointer", err)
 	}
 	status, statusSource, err := selectStatus(document, options.statusPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "status_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "status_pointer", err)
 	}
 	domain, domainSource, err := selectDomain(document, options.domainPointer, cfg.Name)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "domain_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "domain_pointer", err)
 	}
 	authors, err := selectStringListField(document, options.authorsPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "authors_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "authors_pointer", err)
 	}
 	tags, err := selectStringListField(document, options.tagsPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "tags_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "tags_pointer", err)
 	}
 	dependsOn, err := selectStringListField(document, options.dependsOnPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "depends_on_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "depends_on_pointer", err)
 	}
 	supersedes, err := selectStringListField(document, options.supersedesPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "supersedes_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "supersedes_pointer", err)
 	}
 	relatesTo, err := selectStringListField(document, options.relatesToPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "relates_to_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "relates_to_pointer", err)
 	}
 	appliesTo, err := selectStringListField(document, options.appliesToPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "applies_to_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "applies_to_pointer", err)
 	}
 	bodyValue, err := selectBodyValue(document, options.bodyPointer)
 	if err != nil {
-		return sdk.SpecRecord{}, fieldError(cfg.Name, file.AbsolutePath, "body_pointer", err)
+		return sdk.SpecRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "body_pointer", err)
 	}
 	bodyText, err := renderSpecBody(title, ref, status, domain, authors, tags, dependsOn, supersedes, relatesTo, appliesTo, bodyValue)
 	if err != nil {
@@ -436,16 +463,16 @@ func buildSpecRecord(cfg sdk.SourceConfig, options sourceOptions, file selectedJ
 func buildDocRecord(cfg sdk.SourceConfig, options sourceOptions, file selectedJSONFile, raw []byte, document any) (sdk.DocRecord, error) {
 	title, titleSource, err := selectStringField(document, options.titlePointer, strings.TrimSuffix(filepath.Base(file.AbsolutePath), filepath.Ext(file.AbsolutePath)), "filename")
 	if err != nil {
-		return sdk.DocRecord{}, fieldError(cfg.Name, file.AbsolutePath, "title_pointer", err)
+		return sdk.DocRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "title_pointer", err)
 	}
 	refFallback := pathBasedRef("json-doc://", file.RelativePath, cfg.Repo, cfg.PrimaryRepoID)
 	ref, refSource, err := selectStringField(document, options.refPointer, refFallback, "path")
 	if err != nil {
-		return sdk.DocRecord{}, fieldError(cfg.Name, file.AbsolutePath, "ref_pointer", err)
+		return sdk.DocRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "ref_pointer", err)
 	}
 	bodyValue, err := selectBodyValue(document, options.bodyPointer)
 	if err != nil {
-		return sdk.DocRecord{}, fieldError(cfg.Name, file.AbsolutePath, "body_pointer", err)
+		return sdk.DocRecord{}, fieldError(cfg.Name, cfg.WorkspaceRoot, file.AbsolutePath, "body_pointer", err)
 	}
 	bodyText, err := renderDocBody(title, bodyValue)
 	if err != nil {
@@ -471,8 +498,8 @@ func buildDocRecord(cfg sdk.SourceConfig, options sourceOptions, file selectedJS
 	}, nil
 }
 
-func fieldError(sourceName, path, option string, err error) error {
-	return fmt.Errorf("source %q json %q %s: %w", sourceName, filepath.ToSlash(path), option, err)
+func fieldError(sourceName, workspaceRoot, path, option string, err error) error {
+	return fmt.Errorf("source %q json %q %s: %w", sourceName, workspaceRelative(workspaceRoot, path), option, err)
 }
 
 func selectStringField(document any, pointer, fallback, fallbackSource string) (string, string, error) {
@@ -762,12 +789,12 @@ func parsePointerIndex(raw string, length int) (int, error) {
 	if raw == "" {
 		return 0, fmt.Errorf("array index must not be empty")
 	}
-	index := 0
-	for i := 0; i < len(raw); i++ {
-		if raw[i] < '0' || raw[i] > '9' {
-			return 0, fmt.Errorf("array index %q is not numeric", raw)
-		}
-		index = index*10 + int(raw[i]-'0')
+	if len(raw) > 1 && raw[0] == '0' {
+		return 0, fmt.Errorf("array index %q has invalid leading zero", raw)
+	}
+	index, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("array index %q is not numeric", raw)
 	}
 	if index < 0 || index >= length {
 		return 0, fmt.Errorf("array index %q is out of range", raw)

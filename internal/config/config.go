@@ -19,9 +19,12 @@ import (
 const (
 	CurrentSchemaVersion       = 3
 	AdapterFilesystem          = "filesystem"
+	AdapterJSON                = "json"
 	SourceKindSpecBundle       = "spec_bundle"
 	SourceKindMarkdownDocs     = "markdown_docs"
 	SourceKindMarkdownContract = "markdown_contract"
+	SourceKindJSONSpec         = "json_spec"
+	SourceKindJSONDoc          = "json_doc"
 	SourceRoleCanonical        = "canonical"
 	SourceRoleCurrentState     = "current_state"
 	SourceRoleRuntimeAuth      = "runtime_authoritative"
@@ -567,8 +570,16 @@ func validate(cfg *Config) error {
 		}
 
 		filesystemSource := source.Adapter == AdapterFilesystem
-		if strings.TrimSpace(source.Path) == "" && filesystemSource {
+		jsonSource := source.Adapter == AdapterJSON
+		if strings.TrimSpace(source.Path) == "" && (filesystemSource || jsonSource) {
 			errs.add("%s.path: value is required", label)
+		}
+		if jsonSource {
+			switch source.Kind {
+			case SourceKindJSONSpec, SourceKindJSONDoc:
+			default:
+				errs.add("%s.kind: unsupported kind %q for adapter %q", label, source.Kind, source.Adapter)
+			}
 		}
 		files := make([]string, 0, len(source.Files))
 		seenFiles := make(map[string]struct{}, len(source.Files))
@@ -584,6 +595,10 @@ func validate(cfg *Config) error {
 			}
 			if filesystemSource && (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
 				errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
+				continue
+			}
+			if jsonSource && pathpkg.Ext(normalized) != ".json" {
+				errs.add("%s.files[%d]: %q must point to a JSON file for adapter %q", label, i, value, source.Adapter)
 				continue
 			}
 			if _, exists := seenFiles[normalized]; exists {
