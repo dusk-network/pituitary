@@ -33,13 +33,17 @@ func GovernedByContext(ctx context.Context, dbPath string, path string, atDate s
 	if normalized == "" || normalized == "." {
 		return nil, fmt.Errorf("governed_by requires a non-empty file path")
 	}
-	refs := governedRefsForPath(normalized)
 
 	db, err := OpenReadOnlyContext(ctx, dbPath)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
+
+	refs, err := ResolveGovernedRefsForPathContext(ctx, db, normalized)
+	if err != nil {
+		return nil, err
+	}
 
 	hasSource := hasEdgeSourceColumn(ctx, db)
 	hasConfidence := hasEdgeConfidenceColumn(ctx, db)
@@ -132,6 +136,20 @@ WHERE a.kind = 'spec'
 	}, nil
 }
 
+// ResolveGovernedRefsForPathContext expands a workspace-relative path into the
+// applies_to refs that may govern it. This preserves the historical code/config
+// candidates and adds any indexed artifact refs normalized from the same
+// workspace path, such as doc:// refs for markdown docs.
+func ResolveGovernedRefsForPathContext(ctx context.Context, db *sql.DB, path string) ([]string, error) {
+	path = normalizePath(path)
+	refs := governedRefsForPath(path)
+	artifactRefs, err := indexedArtifactRefsForPathContext(ctx, db, path)
+	if err != nil {
+		return nil, err
+	}
+	return uniqueGovernedRefs(append(refs, artifactRefs...)), nil
+}
+
 // appendTemporalClause adds a temporal validity filter to the SQL query when
 // atDate is non-empty. It filters for edges active at the given date using:
 // valid_from <= atDate AND (valid_to IS NULL OR valid_to >= atDate).
@@ -160,6 +178,51 @@ func governedRefsForPath(path string) []string {
 	default:
 		return []string{"code://" + path, "config://" + path}
 	}
+}
+
+func indexedArtifactRefsForPathContext(ctx context.Context, db *sql.DB, path string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT ref
+FROM artifacts
+WHERE json_extract(metadata_json, '$.path') = ?
+ORDER BY ref`, path)
+	if err != nil {
+		return nil, fmt.Errorf("query indexed artifact refs: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []string
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return nil, fmt.Errorf("scan indexed artifact ref: %w", err)
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate indexed artifact refs: %w", err)
+	}
+	return refs, nil
+}
+
+func uniqueGovernedRefs(refs []string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		result = append(result, ref)
+	}
+	return result
 }
 
 func hasEdgeSourceColumn(ctx context.Context, db *sql.DB) bool {
@@ -209,5 +272,6 @@ func normalizePath(path string) string {
 	path = strings.TrimSpace(path)
 	path = strings.TrimPrefix(path, "code://")
 	path = strings.TrimPrefix(path, "config://")
+	path = strings.TrimPrefix(path, "doc://")
 	return filepath.ToSlash(filepath.Clean(path))
 }
