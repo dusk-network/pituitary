@@ -83,6 +83,7 @@ pituitary status                       # index health at a glance
 | Find stale docs | `pituitary check-doc-drift --scope all` |
 | Find stale docs implicated by a diff | `git diff origin/main...HEAD \| pituitary check-doc-drift --diff-file -` |
 | Check a PR diff against specs | `git diff origin/main...HEAD \| pituitary check-compliance --diff-file -` |
+| Debug why a file is in or out of scope | `pituitary explain-file PATH` |
 | Full spec review | `pituitary review-spec --path specs/X` |
 | Auto-fix deterministic drift | `pituitary fix --scope all --dry-run` |
 | Search specs semantically | `pituitary search-specs --query "rate limiting"` |
@@ -92,6 +93,8 @@ pituitary status                       # index health at a glance
 | Inspect command contracts | `pituitary schema review-spec --format json` |
 
 All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=json`, and redirected stdout defaults to JSON automatically. `review-spec` also supports `--format markdown` and `--format html` for shareable reports with full evidence chains.
+
+When file selection looks wrong, start with `pituitary explain-file PATH`. It is the fastest way to confirm which source matched a file, which selectors fired, and why a path was rejected before you debug drift or compliance output.
 
 One `pituitary.toml` can also span multiple repository roots. Bind a source to a named repo root with `repo = "..."`, and Pituitary carries that repo identity through search, drift, impact, status, and index output so cross-repo results stay unambiguous.
 

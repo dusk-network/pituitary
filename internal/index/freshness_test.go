@@ -101,6 +101,32 @@ func TestInspectFreshnessReportsStaleWhenSourceConfigChanges(t *testing.T) {
 	}
 }
 
+func TestInspectFreshnessSourceMismatchExplainsSourceCountDifference(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFreshnessFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Sources = cfg.Sources[:1]
+
+	status, err := InspectFreshnessContext(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if len(status.Issues) == 0 || status.Issues[0].Kind != "source_fingerprint_mismatch" {
+		t.Fatalf("freshness.issues = %+v, want source_fingerprint_mismatch", status.Issues)
+	}
+	if !strings.Contains(status.Issues[0].Message, "source list differs: expected 2 source(s), got 1") {
+		t.Fatalf("freshness issue = %+v, want source count diagnostic", status.Issues[0])
+	}
+}
+
 func TestInspectFreshnessIgnoresSourceOrderingChanges(t *testing.T) {
 	t.Parallel()
 

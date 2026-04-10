@@ -34,8 +34,8 @@ func commandRegistry() map[string]commandSpec {
 		"index":                {Description: "rebuild or validate the local Pituitary index", Formats: commandFormats(), Run: runIndexContext},
 		"status":               {Description: "show current index status", Formats: commandFormats(), Run: runStatusContext},
 		"version":              {Description: "show Pituitary and Go runtime versions", Formats: commandFormats(), Run: runVersionContext},
-		"preview-sources":      {Description: "show which files each source will index", Formats: commandFormats(), Run: runPreviewSourcesContext},
-		"explain-file":         {Description: "explain how one file is treated by configured sources", Formats: commandFormats(), Run: runExplainFileContext},
+		"preview-sources":      {Description: "preview indexed files per source and selector diagnostics", Formats: commandFormats(), Run: runPreviewSourcesContext},
+		"explain-file":         {Description: "debug why one file is in or out of scope for configured sources", Formats: commandFormats(), Run: runExplainFileContext},
 		"search-specs":         {Description: "search spec sections semantically", Formats: commandFormats(commandFormatTable), Run: runSearchSpecsContext},
 		"check-overlap":        {Description: "find overlapping specs", Formats: commandFormats(), Run: runCheckOverlapContext},
 		"compare-specs":        {Description: "compare design tradeoffs across specs", Formats: commandFormats(), Run: runCompareSpecsContext},
@@ -155,6 +155,9 @@ func printHelp(w io.Writer) {
 		fmt.Fprintf(w, "  %-16s %s\n", name, commandDescription(name))
 	}
 
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "debugging:")
+	fmt.Fprintln(w, "  when a file looks unexpectedly included or excluded, run `pituitary explain-file PATH` first")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "run `pituitary <command> --help` for command-specific usage")
 }

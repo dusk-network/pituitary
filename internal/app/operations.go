@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 )
 
 const (
@@ -222,7 +224,11 @@ func loadConfig(configPath string) (*config.Config, *Issue) {
 }
 
 func ensureFreshIndex(ctx context.Context, cfg *config.Config) *Issue {
+	started := time.Now()
 	err := index.ValidateFreshnessContext(ctx, cfg)
+	if tracker := resultmeta.TimingTrackerFromContext(ctx); tracker != nil {
+		tracker.AddIndexing(time.Since(started))
+	}
 	switch {
 	case err == nil:
 		return nil

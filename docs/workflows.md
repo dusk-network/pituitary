@@ -20,6 +20,8 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 
 The JSON result also carries `unspecified_summary`, which splits `unspecified` findings into `missing_governance_edge` versus `explicit_but_underexercised` so CI and operators do not treat those remediations as the same class of problem.
 
+Text output now also promotes the strongest per-finding guidance into a short `TOP SUGGESTIONS` block, and JSON mirrors that guidance in `result.top_suggestions`, so operators do not need to dig through every individual finding to see the best next action.
+
 ## Commands
 
 | Command | What it does |
@@ -28,6 +30,7 @@ The JSON result also carries `unspecified_summary`, which splits `unspecified` f
 | `discover --path .` | Scan a repo and propose conservative sources |
 | `migrate-config --path FILE --write` | Upgrade a legacy config to the current schema |
 | `preview-sources` | Show which files each configured source will index |
+| `preview-sources --verbose` | Add rejected candidates plus selector-match diagnostics |
 | `explain-file PATH` | Explain how one file is classified by configured sources |
 | `canonicalize --path PATH` | Promote one inferred contract into a spec bundle |
 | `index --rebuild [--full]` | Rebuild the SQLite index |
@@ -52,6 +55,8 @@ The JSON result also carries `unspecified_summary`, which splits `unspecified` f
 | `serve --config FILE` | Start MCP server over stdio |
 
 `fix` is intentionally narrow: it only applies deterministic `replace_claim` remediations that `check-doc-drift` can justify from accepted specs and exact document evidence. Use `--dry-run` first, then rerun with `--yes` when the replacements look correct. After any successful apply, run `pituitary index --rebuild`.
+
+When file selection or classification looks wrong, run `pituitary explain-file PATH` before anything else. It is the fastest way to confirm which source matched the file, which selectors fired, and whether the path was excluded on purpose.
 
 ## Diff-Driven Doc Drift
 
@@ -86,6 +91,8 @@ The result now separates:
 Use `[terminology].exclude_paths` when specific files or folders are historically frozen and should be skipped by terminology sweeps and `compile` without being removed from the wider index.
 
 Each matched term includes structured `classification`, `context`, `severity`, and `replacement` fields so CI or editor tooling can turn JSON output into warnings or errors without scraping prose.
+
+`check-compliance`, `check-doc-drift`, `check-terminology`, and `compile` also accept `--timings` with JSON output. The top-level CLI envelope then includes `total_ms`, `indexing_ms`, `embedding_ms`, `analysis_ms`, and call counts so local runs and CI can spot unexpected runtime regressions.
 
 ## Temporal Governance Queries
 

@@ -10,6 +10,7 @@ pituitary init --path . --dry-run               # preview without writing
 pituitary new --title "Rate limiting policy" --domain api  # scaffold a draft spec
 pituitary discover --path .                     # propose sources (lower-level)
 pituitary preview-sources                       # show what will be indexed
+pituitary preview-sources --verbose             # include rejected candidates + selector matches
 pituitary explain-file README.md                # why is this file in/out of scope?
 ```
 
@@ -118,6 +119,15 @@ Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact
 --show-delta      # show governance graph changes (index --update)
 --show-families   # show spec families via graph clustering (status)
 --family N        # filter results to a spec family (search-specs)
+--timings         # add total/indexing/embedder/analysis timing metadata to JSON output
+```
+
+## Debugging First
+
+```sh
+pituitary explain-file PATH                     # first stop when scope/classification looks wrong
+pituitary preview-sources --verbose             # confirm include/exclude decisions across a whole source
+pituitary check-compliance --path PATH --format json --timings   # inspect runtime call counts
 ```
 
 ## Typical Flows

@@ -401,6 +401,7 @@ func TestRenderComplianceResultIncludesTraceabilityGuidance(t *testing.T) {
 		"━━◈ check-compliance",
 		"paths: src/api/middleware/tenant_limiter.go",
 		"UNSPECIFIED: 1",
+		"TOP SUGGESTIONS: 1",
 		"traceability semantic_neighbor_without_applies_to",
 		"limiting factor accepted spec metadata is missing explicit applies_to coverage",
 		`If SPEC-042 governs src/api/middleware/tenant_limiter.go, add applies_to = ["code://src/api/middleware/tenant_limiter.go"] to that accepted spec and rebuild the index.`,

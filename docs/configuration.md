@@ -94,6 +94,8 @@ include = ["guides/*.md"]
 
 Pituitary keeps source paths repo-relative, adds `repo` to search/drift/impact/status JSON, and scopes non-primary generated doc refs as `doc://<repo>/...` so duplicate paths from sibling repos stay distinct.
 
+Important path-resolution rule: `workspace.root` and `[[workspace.repos]].root` resolve relative to the config file's base directory, not the current working directory. That matters when you keep a scratch config outside the repo, for example `/tmp/pit-fake.toml` with `root = ".."`. In that case `..` resolves relative to `/tmp`, not relative to the shell directory where you invoked `pituitary`. If the resolved root is wrong, Pituitary now reports the derived absolute path in the validation error so the cause is visible immediately.
+
 ### Runtime Profiles
 
 Runtime config also supports reusable named profiles under `[runtime.profiles.<name>]`. Select one from `[runtime.embedder]` or `[runtime.analysis]` with `profile = "..."`, then override only the fields that differ:
@@ -248,6 +250,11 @@ Selectors are evaluated relative to the configured source `path`:
 - For `markdown_docs` and `markdown_contract`, `files` entries must point to `.md` files
 
 Selectors narrow what gets indexed but do not rewrite refs.
+
+Two debugging commands are worth learning early:
+
+- `pituitary preview-sources` shows what each source would index. Use `--verbose` to list rejected candidates and the include/exclude selectors that decided them.
+- `pituitary explain-file PATH` explains one file end-to-end: matching source, selector results, and why it was included or excluded. When a file looks wrong, run this first.
 
 ## Config Resolution
 

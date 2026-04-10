@@ -7,6 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/app"
+	"github.com/dusk-network/pituitary/internal/resultmeta"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -18,10 +19,11 @@ type cliIssue struct {
 }
 
 type cliEnvelope struct {
-	Request  any        `json:"request"`
-	Result   any        `json:"result"`
-	Warnings []cliIssue `json:"warnings"`
-	Errors   []cliIssue `json:"errors"`
+	Request  any                 `json:"request"`
+	Result   any                 `json:"result"`
+	Timings  *resultmeta.Timings `json:"timings,omitempty"`
+	Warnings []cliIssue          `json:"warnings"`
+	Errors   []cliIssue          `json:"errors"`
 }
 
 func isSupportedFormat(format string) bool {
@@ -48,6 +50,10 @@ func validateCLIFormat(command, format string) error {
 }
 
 func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, result any, warnings []cliIssue) int {
+	return writeCLISuccessWithTimings(stdout, stderr, format, command, request, result, warnings, nil)
+}
+
+func writeCLISuccessWithTimings(stdout, stderr io.Writer, format, command string, request, result any, warnings []cliIssue, timings *resultmeta.Timings) int {
 	if len(warnings) == 0 {
 		warnings = cliWarningsForResult(result)
 	}
@@ -55,6 +61,7 @@ func writeCLISuccess(stdout, stderr io.Writer, format, command string, request, 
 		return writeCLIJSON(stdout, cliEnvelope{
 			Request:  request,
 			Result:   result,
+			Timings:  timings,
 			Warnings: warnings,
 			Errors:   []cliIssue{},
 		})

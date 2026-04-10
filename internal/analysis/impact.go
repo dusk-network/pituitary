@@ -174,6 +174,7 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 	// This is non-fatal enrichment — errors are swallowed so the
 	// deterministic result is always returned.
 	analyzer, _ := newQualitativeAnalyzer(cfg.Runtime.Analysis)
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 	if classifier, ok := analyzer.(impactSeverityClassifier); ok {
 		classifyImpactSeverities(ctx, classifier, candidate, result)
 		// Rebuild summary after severity is populated so severity-based

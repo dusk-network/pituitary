@@ -11,7 +11,9 @@ import (
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
-type previewSourcesRequest struct{}
+type previewSourcesRequest struct {
+	Verbose bool `json:"verbose,omitempty"`
+}
 
 func runPreviewSources(args []string, stdout, stderr io.Writer) int {
 	return runPreviewSourcesContext(context.Background(), args, stdout, stderr)
@@ -20,14 +22,16 @@ func runPreviewSources(args []string, stdout, stderr io.Writer) int {
 func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("preview-sources", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("preview-sources", "pituitary [--config PATH] preview-sources [--format FORMAT]")
+	help := newCommandHelp("preview-sources", "pituitary [--config PATH] preview-sources [--verbose] [--format FORMAT]")
 
 	var (
 		format     string
 		configPath string
+		verbose    bool
 	)
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	fs.BoolVar(&verbose, "verbose", false, "show selector-match diagnostics for previewed files")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "preview-sources", nil, cliIssue{
@@ -50,7 +54,7 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 		}, 2)
 	}
 
-	request := previewSourcesRequest{}
+	request := previewSourcesRequest{Verbose: verbose}
 
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
 	if err != nil {
@@ -68,7 +72,10 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 		}, 2)
 	}
 
-	result, err := source.PreviewFromConfigWithOptions(cfg, source.PreviewOptions{Logger: cliLoggerFromContext(ctx)})
+	result, err := source.PreviewFromConfigWithOptions(cfg, source.PreviewOptions{
+		Logger:  cliLoggerFromContext(ctx),
+		Verbose: verbose,
+	})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "preview-sources", request, cliIssue{
 			Code:    "source_error",

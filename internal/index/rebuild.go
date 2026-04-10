@@ -411,6 +411,11 @@ func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, di
 	if err := insertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
 		return nil, err
 	}
+	if manifest := sourceManifestJSON(cfg); manifest != "" {
+		if err := insertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
+			return nil, err
+		}
+	}
 
 	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (artifact_ref, section, content) VALUES (?, ?, ?)`)
 	if err != nil {

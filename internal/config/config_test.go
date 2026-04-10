@@ -182,6 +182,69 @@ path = "docs"
 	}
 }
 
+func TestLoadUnknownTerminologyPolicyFieldSuggestsNearestValidFields(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[terminology.policies]]
+exclude_paths = ["CHANGELOG.md"]
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unsupported terminology policy field failure")
+	}
+	if !strings.Contains(err.Error(), `unsupported terminology.policies field "exclude_paths"; did you mean one of:`) ||
+		!strings.Contains(err.Error(), `"preferred"`) {
+		t.Fatalf("Load() error = %q, want nearest-field suggestion", err)
+	}
+}
+
+func TestLoadSourcePathErrorExplainsWorkspaceRootResolution(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	mustMkdirAll(t, filepath.Join(root, "project", "docs"))
+	configDir := filepath.Join(root, "tmp")
+	mustMkdirAll(t, configDir)
+	configPath := filepath.Join(configDir, "pit-fake.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = ".."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want source path resolution failure")
+	}
+	if !strings.Contains(err.Error(), `workspace.root ".." resolves relative to config base`) {
+		t.Fatalf("Load() error = %q, want workspace.root resolution detail", err)
+	}
+	if !strings.Contains(err.Error(), `so source path "docs" resolves to`) {
+		t.Fatalf("Load() error = %q, want derived source path detail", err)
+	}
+}
+
 func TestLoadDefaultsBootstrapRuntimeContract(t *testing.T) {
 	t.Parallel()
 

@@ -304,6 +304,45 @@ include = ["guides/*.md"]
 	return root
 }
 
+func TestRunCheckTerminologyJSONIncludesTimings(t *testing.T) {
+	repo := writeTerminologyWorkspaceCmd(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCheckTerminology([]string{"--format", "json", "--timings"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckTerminology() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckTerminology() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Timings struct {
+			TotalMS        int64 `json:"total_ms"`
+			IndexingMS     int64 `json:"indexing_ms"`
+			EmbeddingMS    int64 `json:"embedding_ms"`
+			EmbeddingCalls int   `json:"embedding_calls"`
+		} `json:"timings"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal terminology timings payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if payload.Timings.TotalMS <= 0 || payload.Timings.IndexingMS <= 0 {
+		t.Fatalf("timings = %+v, want total/indexing timing metadata", payload.Timings)
+	}
+}
+
 func writeTerminologyExcludeWorkspaceCmd(t *testing.T) string {
 	t.Helper()
 

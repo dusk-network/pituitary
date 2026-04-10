@@ -38,7 +38,7 @@ pituitary status --check-runtime embedder
 pituitary index --rebuild
 ```
 
-For provider-backed qualitative analysis used by `compare-specs`, `check-doc-drift`, and bounded re-adjudication in `check-compliance`:
+For provider-backed qualitative analysis used by `compare-specs`, `check-doc-drift`, impact-severity enrichment in `analyze-impact`, metadata inference in `canonicalize`, and bounded re-adjudication in `check-compliance`:
 
 ```toml
 [runtime.analysis]
@@ -75,6 +75,27 @@ pituitary status --check-runtime all
 
 `check-compliance` and `check-doc-drift` also record the configured analysis runtime in their JSON `result.runtime.analysis` block, including whether the command actually consulted the model during that run.
 
+## Runtime Matrix
+
+The most common operator mistake is assuming `runtime.analysis.model` affects every semantic command. It does not. The command/runtime relationship today is:
+
+| Command | `runtime.embedder` | `runtime.analysis` |
+|---|---|---|
+| `check-compliance` | Yes, for semantic retrieval / fallback target embedding | Optional bounded adjudication |
+| `check-doc-drift` | No live provider call; uses the existing index | Optional refinement of deterministic drift items |
+| `check-terminology` | Optional semantic near-miss search when a real embedder is configured | No |
+| `compile` | Same as `check-terminology`, because it runs the terminology audit first | No |
+| `compare-specs` | No | Optional qualitative comparison refinement |
+| `analyze-impact` | No | Optional severity enrichment |
+| `canonicalize` | No | Optional metadata inference |
+
+Two consequences follow from that table:
+
+- Changing `runtime.analysis.model` will not change `check-terminology` or `compile`.
+- Changing `runtime.embedder` does not retroactively affect an existing index until you rebuild it.
+
+When you are unsure why a result changed, confirm both the command/runtime matrix and the index freshness before assuming the wrong model is being consulted.
+
 For Nomic-compatible models, Pituitary automatically applies the required `search_document:` / `search_query:` prefixes.
 
 ## Retrieval Mode Matters
@@ -96,6 +117,33 @@ When you run `pituitary index --rebuild`:
 Use `--full` to skip reuse and force a complete re-embed.
 
 Query commands validate index freshness before executing. A stale index fails fast with a rebuild hint.
+
+## JSON Timings
+
+`check-compliance`, `check-doc-drift`, `check-terminology`, and `compile` accept `--timings` with `--format json`. The CLI envelope then includes a top-level `timings` block:
+
+```json
+{
+  "request": { "...": "..." },
+  "result": { "...": "..." },
+  "timings": {
+    "total_ms": 37,
+    "indexing_ms": 6,
+    "embedding_ms": 12,
+    "analysis_ms": 9,
+    "analysis_calls": 2,
+    "embedding_calls": 1
+  },
+  "warnings": [],
+  "errors": []
+}
+```
+
+Use this to answer operational questions such as:
+
+- did the command actually call an embedder or analysis model?
+- did a runtime change increase `analysis_calls` or `embedding_calls`?
+- is time going into freshness validation/index loading versus model work?
 
 ## Output Formats
 

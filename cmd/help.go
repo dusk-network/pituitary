@@ -56,8 +56,18 @@ func printCommandHelp(w io.Writer, fs *flag.FlagSet, help commandHelp) {
 		printSharedConfigResolution(w)
 	}
 	fmt.Fprintln(w)
+	printCommandDebugTip(w, help.Name)
 	fmt.Fprintln(w, "flags:")
 	printFlagSetDefaults(w, fs)
+}
+
+func printCommandDebugTip(w io.Writer, name string) {
+	switch name {
+	case "preview-sources", "check-doc-drift", "check-compliance", "check-terminology", "compile":
+		fmt.Fprintln(w, "debug tip:")
+		fmt.Fprintln(w, "  if a file looks unexpectedly included, excluded, or misclassified, run `pituitary explain-file PATH` first")
+		fmt.Fprintln(w)
+	}
 }
 
 func printSharedConfigResolution(w io.Writer) {

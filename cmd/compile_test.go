@@ -292,3 +292,47 @@ include = ["guides/*.md"]
 `)
 	return root
 }
+
+func TestRunCompileJSONIncludesTimings(t *testing.T) {
+	repo := writeCompileWorkspaceCmd(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCompile([]string{"--scope", "all", "--dry-run", "--format", "json", "--timings"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCompile() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCompile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Timings bool `json:"timings"`
+		} `json:"request"`
+		Timings struct {
+			TotalMS        int64 `json:"total_ms"`
+			IndexingMS     int64 `json:"indexing_ms"`
+			EmbeddingCalls int   `json:"embedding_calls"`
+		} `json:"timings"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compile timings payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if !payload.Request.Timings {
+		t.Fatalf("request.timings = false, want true")
+	}
+	if payload.Timings.TotalMS <= 0 || payload.Timings.IndexingMS <= 0 {
+		t.Fatalf("timings = %+v, want total/indexing timing metadata", payload.Timings)
+	}
+}

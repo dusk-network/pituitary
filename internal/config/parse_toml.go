@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -62,24 +63,190 @@ func undecodedKeyMessage(key toml.Key) string {
 
 	switch key[0] {
 	case "workspace":
-		return fmt.Sprintf("unsupported workspace field %q", strings.Join(key[1:], "."))
+		switch {
+		case len(key) == 2:
+			return unsupportedFieldMessage("workspace", key[1], []string{
+				"root",
+				"repo_id",
+				"index_path",
+				"infer_applies_to",
+				"repos",
+			})
+		case key[1] == "repos" && len(key) == 3:
+			return unsupportedFieldMessage("workspace.repos", key[2], []string{"id", "root"})
+		default:
+			return fmt.Sprintf("unsupported workspace field %q", strings.Join(key[1:], "."))
+		}
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return fmt.Sprintf("unsupported runtime field %q", key[1])
+			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis"})
 		default:
-			return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
+			switch key[1] {
+			case "embedder", "analysis":
+				return unsupportedFieldMessage(
+					"runtime."+key[1],
+					strings.Join(key[2:], "."),
+					runtimeProviderFields(),
+				)
+			case "profiles":
+				if len(key) >= 4 {
+					return unsupportedFieldMessage(
+						"runtime.profiles."+key[2],
+						strings.Join(key[3:], "."),
+						runtimeProviderFields(),
+					)
+				}
+				return fmt.Sprintf("unsupported runtime.profiles field %q", strings.Join(key[2:], "."))
+			default:
+				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
+			}
 		}
 	case "terminology":
 		switch len(key) {
 		case 2:
-			return fmt.Sprintf("unsupported terminology field %q", key[1])
+			return unsupportedFieldMessage("terminology", key[1], []string{"exclude_paths", "policies"})
 		default:
+			if key[1] == "policies" && len(key) == 3 {
+				return unsupportedFieldMessage("terminology.policies", key[2], []string{
+					"preferred",
+					"historical_aliases",
+					"deprecated_terms",
+					"forbidden_current",
+					"docs_severity",
+					"specs_severity",
+				})
+			}
 			return fmt.Sprintf("unsupported terminology.%s field %q", key[1], strings.Join(key[2:], "."))
 		}
 	case "sources":
-		return fmt.Sprintf("unsupported sources field %q", strings.Join(key[1:], "."))
+		return unsupportedFieldMessage("sources", strings.Join(key[1:], "."), []string{
+			"name",
+			"adapter",
+			"kind",
+			"role",
+			"repo",
+			"path",
+			"files",
+			"include",
+			"exclude",
+			"options",
+		})
 	default:
 		return fmt.Sprintf("unsupported section %q", key[0])
 	}
+}
+
+func runtimeProviderFields() []string {
+	return []string{
+		"profile",
+		"provider",
+		"model",
+		"endpoint",
+		"api_key_env",
+		"timeout_ms",
+		"max_retries",
+		"max_response_tokens",
+	}
+}
+
+func unsupportedFieldMessage(scope, field string, valid []string) string {
+	message := fmt.Sprintf("unsupported %s field %q", scope, field)
+	if strings.Contains(field, ".") || len(valid) == 0 {
+		return message
+	}
+	suggestions := rankedFieldSuggestions(field, valid)
+	if len(suggestions) == 0 {
+		return message
+	}
+	return fmt.Sprintf("%s; did you mean one of: %s", message, quotedList(suggestions))
+}
+
+func rankedFieldSuggestions(field string, valid []string) []string {
+	if len(valid) == 0 {
+		return nil
+	}
+	type suggestion struct {
+		field    string
+		distance int
+	}
+	ranked := make([]suggestion, 0, len(valid))
+	for _, candidate := range valid {
+		ranked = append(ranked, suggestion{
+			field:    candidate,
+			distance: levenshteinDistance(strings.ToLower(field), strings.ToLower(candidate)),
+		})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].distance != ranked[j].distance {
+			return ranked[i].distance < ranked[j].distance
+		}
+		if len(ranked[i].field) != len(ranked[j].field) {
+			return len(ranked[i].field) < len(ranked[j].field)
+		}
+		return ranked[i].field < ranked[j].field
+	})
+
+	limit := len(ranked)
+	if limit > 6 {
+		limit = 6
+	}
+	result := make([]string, 0, limit)
+	for _, item := range ranked[:limit] {
+		result = append(result, item.field)
+	}
+	return result
+}
+
+func quotedList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return strings.Join(quoted, ", ")
+}
+
+func levenshteinDistance(left, right string) int {
+	if left == right {
+		return 0
+	}
+	if left == "" {
+		return len([]rune(right))
+	}
+	if right == "" {
+		return len([]rune(left))
+	}
+
+	leftRunes := []rune(left)
+	rightRunes := []rune(right)
+	prev := make([]int, len(rightRunes)+1)
+	curr := make([]int, len(rightRunes)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i, leftRune := range leftRunes {
+		curr[0] = i + 1
+		for j, rightRune := range rightRunes {
+			cost := 0
+			if leftRune != rightRune {
+				cost = 1
+			}
+			insertion := curr[j] + 1
+			deletion := prev[j+1] + 1
+			substitution := prev[j] + cost
+			curr[j+1] = minInt(insertion, deletion, substitution)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(rightRunes)]
+}
+
+func minInt(values ...int) int {
+	best := values[0]
+	for _, value := range values[1:] {
+		if value < best {
+			best = value
+		}
+	}
+	return best
 }

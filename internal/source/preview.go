@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -17,26 +18,41 @@ type PreviewResult struct {
 
 // SourcePreview describes one configured source and the paths it contributes.
 type SourcePreview struct {
-	Name      string        `json:"name"`
-	Adapter   string        `json:"adapter"`
-	Kind      string        `json:"kind"`
-	Path      string        `json:"path"`
-	Files     []string      `json:"files,omitempty"`
-	Include   []string      `json:"include,omitempty"`
-	Exclude   []string      `json:"exclude,omitempty"`
-	ItemCount int           `json:"item_count"`
-	Items     []PreviewItem `json:"items"`
+	Name           string                `json:"name"`
+	Adapter        string                `json:"adapter"`
+	Kind           string                `json:"kind"`
+	Path           string                `json:"path"`
+	ResolvedPath   string                `json:"resolved_path,omitempty"`
+	Files          []string              `json:"files,omitempty"`
+	Include        []string              `json:"include,omitempty"`
+	Exclude        []string              `json:"exclude,omitempty"`
+	CandidateCount int                   `json:"candidate_count,omitempty"`
+	ItemCount      int                   `json:"item_count"`
+	Items          []PreviewItem         `json:"items"`
+	RejectedItems  []PreviewRejectedItem `json:"rejected_items,omitempty"`
 }
 
 // PreviewItem describes one workspace-relative path that would be indexed.
 type PreviewItem struct {
-	ArtifactKind string `json:"artifact_kind"`
-	Path         string `json:"path"`
+	ArtifactKind   string   `json:"artifact_kind"`
+	Path           string   `json:"path"`
+	FilesMatched   []string `json:"files_matched,omitempty"`
+	IncludeMatches []string `json:"include_matches,omitempty"`
+}
+
+// PreviewRejectedItem describes one candidate path that was skipped by source selectors.
+type PreviewRejectedItem struct {
+	Path           string   `json:"path"`
+	Reason         string   `json:"reason"`
+	FilesMatched   []string `json:"files_matched,omitempty"`
+	IncludeMatches []string `json:"include_matches,omitempty"`
+	ExcludeMatches []string `json:"exclude_matches,omitempty"`
 }
 
 // PreviewOptions controls diagnostic behavior during source previews.
 type PreviewOptions struct {
-	Logger *diag.Logger
+	Logger  *diag.Logger
+	Verbose bool
 }
 
 // PreviewFromConfig enumerates source items without rebuilding the index.
@@ -52,7 +68,7 @@ func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*
 	}
 
 	for _, source := range cfg.Sources {
-		preview, err := previewSource(cfg.Workspace.RootPath, source)
+		preview, err := previewSource(cfg.Workspace.RootPath, source, options.Verbose)
 		if err != nil {
 			return nil, err
 		}
@@ -67,15 +83,16 @@ func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*
 	return result, nil
 }
 
-func previewSource(workspaceRoot string, source config.Source) (SourcePreview, error) {
+func previewSource(workspaceRoot string, source config.Source, verbose bool) (SourcePreview, error) {
 	preview := SourcePreview{
-		Name:    source.Name,
-		Adapter: source.Adapter,
-		Kind:    source.Kind,
-		Path:    source.Path,
-		Files:   append([]string(nil), source.Files...),
-		Include: append([]string(nil), source.Include...),
-		Exclude: append([]string(nil), source.Exclude...),
+		Name:         source.Name,
+		Adapter:      source.Adapter,
+		Kind:         source.Kind,
+		Path:         source.Path,
+		ResolvedPath: filepath.ToSlash(source.ResolvedPath),
+		Files:        append([]string(nil), source.Files...),
+		Include:      append([]string(nil), source.Include...),
+		Exclude:      append([]string(nil), source.Exclude...),
 	}
 
 	if source.Adapter != config.AdapterFilesystem {
@@ -96,33 +113,94 @@ func previewSource(workspaceRoot string, source config.Source) (SourcePreview, e
 			})
 		}
 	case config.SourceKindMarkdownDocs:
-		matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "doc")
+		matches, candidateCount, rejected, err := previewMarkdownPaths(workspaceRoot, source, "doc", verbose)
 		if err != nil {
 			return SourcePreview{}, err
 		}
+		preview.CandidateCount = candidateCount
 		for _, match := range matches {
 			preview.Items = append(preview.Items, PreviewItem{
-				ArtifactKind: "doc",
-				Path:         workspaceRelative(workspaceRoot, match.AbsolutePath),
+				ArtifactKind:   "doc",
+				Path:           workspaceRelative(workspaceRoot, match.AbsolutePath),
+				FilesMatched:   append([]string(nil), match.Selection.FilesMatched...),
+				IncludeMatches: append([]string(nil), match.Selection.IncludeMatches...),
 			})
 		}
+		preview.RejectedItems = rejected
 	case config.SourceKindMarkdownContract:
-		matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "contract")
+		matches, candidateCount, rejected, err := previewMarkdownPaths(workspaceRoot, source, "contract", verbose)
 		if err != nil {
 			return SourcePreview{}, err
 		}
+		preview.CandidateCount = candidateCount
 		for _, match := range matches {
 			preview.Items = append(preview.Items, PreviewItem{
-				ArtifactKind: "spec",
-				Path:         workspaceRelative(workspaceRoot, match.AbsolutePath),
+				ArtifactKind:   "spec",
+				Path:           workspaceRelative(workspaceRoot, match.AbsolutePath),
+				FilesMatched:   append([]string(nil), match.Selection.FilesMatched...),
+				IncludeMatches: append([]string(nil), match.Selection.IncludeMatches...),
 			})
 		}
+		preview.RejectedItems = rejected
 	default:
 		return SourcePreview{}, fmt.Errorf("source %q: unsupported kind %q", source.Name, source.Kind)
 	}
 
 	preview.ItemCount = len(preview.Items)
 	return preview, nil
+}
+
+type previewMarkdownPath struct {
+	selectedMarkdownPath
+	Selection sourcePathSelection
+}
+
+func previewMarkdownPaths(workspaceRoot string, source config.Source, label string, verbose bool) ([]previewMarkdownPath, int, []PreviewRejectedItem, error) {
+	matches := make([]previewMarkdownPath, 0)
+	rejected := make([]PreviewRejectedItem, 0)
+	candidateCount := 0
+	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		candidateCount++
+		relPath, err := filepath.Rel(source.ResolvedPath, path)
+		if err != nil {
+			return fmt.Errorf("source %q %s %q: resolve relative path: %w", source.Name, label, workspaceRelative(workspaceRoot, path), err)
+		}
+		relPath = filepath.ToSlash(relPath)
+		selection, err := evaluateSourcePathSelection(source, relPath)
+		if err != nil {
+			return fmt.Errorf("source %q %s %q: %w", source.Name, label, workspaceRelative(workspaceRoot, path), err)
+		}
+		if !selection.Selected {
+			if verbose {
+				rejected = append(rejected, PreviewRejectedItem{
+					Path:           workspaceRelative(workspaceRoot, path),
+					Reason:         selection.Reason,
+					FilesMatched:   append([]string(nil), selection.FilesMatched...),
+					IncludeMatches: append([]string(nil), selection.IncludeMatches...),
+					ExcludeMatches: append([]string(nil), selection.ExcludeMatches...),
+				})
+			}
+			return nil
+		}
+		matches = append(matches, previewMarkdownPath{
+			selectedMarkdownPath: selectedMarkdownPath{
+				AbsolutePath: path,
+				RelativePath: relPath,
+			},
+			Selection: selection,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	return matches, candidateCount, rejected, nil
 }
 
 func previewViaAdapter(preview SourcePreview, source config.Source) (SourcePreview, error) {
