@@ -19,11 +19,11 @@ type cliIssue struct {
 }
 
 type cliEnvelope struct {
-	Request  any        `json:"request"`
-	Result   any        `json:"result"`
+	Request  any                 `json:"request"`
+	Result   any                 `json:"result"`
 	Timings  *resultmeta.Timings `json:"timings,omitempty"`
-	Warnings []cliIssue `json:"warnings"`
-	Errors   []cliIssue `json:"errors"`
+	Warnings []cliIssue          `json:"warnings"`
+	Errors   []cliIssue          `json:"errors"`
 }
 
 func isSupportedFormat(format string) bool {

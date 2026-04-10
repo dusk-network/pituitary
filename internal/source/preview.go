@@ -18,18 +18,18 @@ type PreviewResult struct {
 
 // SourcePreview describes one configured source and the paths it contributes.
 type SourcePreview struct {
-	Name          string                `json:"name"`
-	Adapter       string                `json:"adapter"`
-	Kind          string                `json:"kind"`
-	Path          string                `json:"path"`
-	ResolvedPath  string                `json:"resolved_path,omitempty"`
-	Files         []string              `json:"files,omitempty"`
-	Include       []string              `json:"include,omitempty"`
-	Exclude       []string              `json:"exclude,omitempty"`
-	CandidateCount int                  `json:"candidate_count,omitempty"`
-	ItemCount     int                   `json:"item_count"`
-	Items         []PreviewItem         `json:"items"`
-	RejectedItems []PreviewRejectedItem `json:"rejected_items,omitempty"`
+	Name           string                `json:"name"`
+	Adapter        string                `json:"adapter"`
+	Kind           string                `json:"kind"`
+	Path           string                `json:"path"`
+	ResolvedPath   string                `json:"resolved_path,omitempty"`
+	Files          []string              `json:"files,omitempty"`
+	Include        []string              `json:"include,omitempty"`
+	Exclude        []string              `json:"exclude,omitempty"`
+	CandidateCount int                   `json:"candidate_count,omitempty"`
+	ItemCount      int                   `json:"item_count"`
+	Items          []PreviewItem         `json:"items"`
+	RejectedItems  []PreviewRejectedItem `json:"rejected_items,omitempty"`
 }
 
 // PreviewItem describes one workspace-relative path that would be indexed.
