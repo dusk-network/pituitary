@@ -140,12 +140,11 @@ type ComplianceResult struct {
 }
 
 type complianceTarget struct {
-	Path          string
-	RefCandidates []string
-	Content       string
-	Embedding     []float64
-	DuplicateKey  string
-	RemovedOnly   bool
+	Path         string
+	Content      string
+	Embedding    []float64
+	DuplicateKey string
+	RemovedOnly  bool
 }
 
 type complianceEvaluationTarget struct {
@@ -492,10 +491,9 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 		}
 
 		targets = append(targets, complianceTarget{
-			Path:          relPath,
-			RefCandidates: governedRefsForPath(relPath),
-			Content:       string(data),
-			DuplicateKey:  complianceContentDigest(string(data)),
+			Path:         relPath,
+			Content:      string(data),
+			DuplicateKey: complianceContentDigest(string(data)),
 		})
 	}
 	return targets, nil
@@ -517,11 +515,10 @@ func loadParsedDiffComplianceTargetsContext(ctx context.Context, cfg *config.Con
 			continue
 		}
 		targets = append(targets, complianceTarget{
-			Path:          item.Path,
-			RefCandidates: governedRefsForPath(item.Path),
-			Content:       content,
-			DuplicateKey:  complianceDuplicateKey(cfg.Workspace.RootPath, item.Path, content),
-			RemovedOnly:   removedOnly,
+			Path:         item.Path,
+			Content:      content,
+			DuplicateKey: complianceDuplicateKey(cfg.Workspace.RootPath, item.Path, content),
+			RemovedOnly:  removedOnly,
 		})
 	}
 	if len(targets) == 0 {
@@ -534,7 +531,11 @@ func prepareComplianceEvaluationTargetsContext(ctx context.Context, repo *analys
 	prepared := make([]complianceEvaluationTarget, 0, len(targets))
 	fallbackIndexes := make([]int, 0, len(targets))
 	for _, target := range targets {
-		explicitRefs, err := repo.specRefsForGovernedRefs(target.RefCandidates)
+		governedRefs, err := index.ResolveGovernedRefsForPathContext(ctx, repo.db, target.Path)
+		if err != nil {
+			return nil, err
+		}
+		explicitRefs, err := repo.specRefsForGovernedRefs(governedRefs)
 		if err != nil {
 			return nil, err
 		}
@@ -740,14 +741,6 @@ func resolveWorkspaceFilePath(rootPath, rawPath string) (string, string, error) 
 
 func normalizeCompliancePath(path string) string {
 	return pathpkg.Clean(filepath.ToSlash(stringsTrimSpace(path)))
-}
-
-func governedRefsForPath(path string) []string {
-	path = normalizeCompliancePath(path)
-	return uniqueStrings([]string{
-		"code://" + path,
-		"config://" + path,
-	})
 }
 
 func parseDiffTargets(diffText string) ([]parsedDiffTarget, error) {

@@ -86,6 +86,106 @@ func buildLimiter() {}
 	}
 }
 
+func TestRunCheckComplianceDocAppliesToUsesIndexedDocRef(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "specs/rate-limit-v2/spec.toml", `
+id = "SPEC-042"
+title = "Per-Tenant Rate Limiting for Public API Endpoints"
+status = "accepted"
+domain = "api"
+authors = ["emanuele"]
+tags = ["rate-limiting", "api", "multi-tenant", "security"]
+body = "body.md"
+
+supersedes = ["SPEC-008"]
+applies_to = [
+  "code://src/api/middleware/ratelimiter.go",
+  "config://src/api/config/limits.yaml",
+  "doc://guides/reference-adapter",
+]
+`)
+	writeComplianceSourceFile(t, repo, "docs/guides/reference-adapter.md", `
+# Reference Adapter
+
+## Requirements
+
+Apply limits per tenant rather than per API key.
+Enforce a default limit of 200 requests per minute.
+Allow tenant-specific overrides through configuration.
+
+## Design
+
+Use a sliding-window limiter.
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "docs/guides/reference-adapter.md",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			RelevantSpecs []struct {
+				SpecRef string   `json:"spec_ref"`
+				Basis   []string `json:"basis"`
+			} `json:"relevant_specs"`
+			Compliant []struct {
+				Path    string `json:"path"`
+				SpecRef string `json:"spec_ref"`
+			} `json:"compliant"`
+			Conflicts   []any `json:"conflicts"`
+			Unspecified []any `json:"unspecified"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compliance payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Compliant) == 0 {
+		t.Fatalf("result.compliant = %+v, want compliant findings", payload.Result.Compliant)
+	}
+	if len(payload.Result.Conflicts) != 0 {
+		t.Fatalf("result.conflicts = %+v, want none", payload.Result.Conflicts)
+	}
+	if len(payload.Result.Unspecified) != 0 {
+		t.Fatalf("result.unspecified = %+v, want none", payload.Result.Unspecified)
+	}
+
+	var relevantBasis []string
+	found := false
+	for _, item := range payload.Result.RelevantSpecs {
+		if item.SpecRef == "SPEC-042" {
+			relevantBasis = append([]string(nil), item.Basis...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("relevant_specs = %+v, want SPEC-042", payload.Result.RelevantSpecs)
+	}
+	if len(relevantBasis) != 1 || relevantBasis[0] != "applies_to" {
+		t.Fatalf("SPEC-042 basis = %v, want [applies_to]", relevantBasis)
+	}
+	if payload.Result.Compliant[0].Path != "docs/guides/reference-adapter.md" || payload.Result.Compliant[0].SpecRef != "SPEC-042" {
+		t.Fatalf("top compliant finding = %+v, want explicit doc applies_to match", payload.Result.Compliant[0])
+	}
+}
+
 func TestRunCheckCompliancePathJSONConflict(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", `
