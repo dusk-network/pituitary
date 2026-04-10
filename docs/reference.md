@@ -19,6 +19,7 @@ For quick command lookup, start with the [cheatsheet](cheatsheet.md).
 - New user evaluating Pituitary on an existing repo:
   - [docs/install.md](install.md)
   - [docs/cheatsheet.md](cheatsheet.md)
+  - Run `pituitary explain-file PATH` first when scope or source matching looks wrong
 - Repo owner wiring Pituitary into CI:
   - [docs/workflows.md](workflows.md)
   - [docs/development/ci-recipes.md](development/ci-recipes.md)

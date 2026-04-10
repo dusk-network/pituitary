@@ -232,6 +232,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	if err != nil {
 		return nil, err
 	}
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 	analysisRuntime := newAnalysisRuntimeUsage(cfg.Runtime.Analysis)
 
 	var (

@@ -31,7 +31,7 @@ func runCheckCompliance(args []string, stdout, stderr io.Writer) int {
 func runCheckComplianceContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-compliance", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-compliance", "pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|- | --request-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("check-compliance", "pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|- | --request-file PATH|-) [--format FORMAT] [--timings]")
 
 	var (
 		paths       compliancePathList
@@ -40,6 +40,7 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 		format      string
 		configPath  string
 		atDate      string
+		timings     bool
 	)
 	fs.Var(&paths, "path", "workspace-relative or absolute file path; repeat to check multiple files")
 	fs.StringVar(&diffFile, "diff-file", "", "path to a unified diff file, or - for stdin")
@@ -47,6 +48,7 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
+	fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 
 	var minConfidence string
 	fs.StringVar(&minConfidence, "min-confidence", "", "minimum confidence tier: extracted, inferred, or ambiguous")
@@ -135,12 +137,14 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 	if trimmedConf := strings.TrimSpace(minConfidence); trimmedConf != "" {
 		request.MinConfidence = trimmedConf
 	}
+	ctx, tracker, started := withCommandTimings(ctx, timings && format == commandFormatJSON)
+
 	operation := app.CheckCompliance(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-compliance", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
-	return writeCLISuccess(stdout, stderr, format, "check-compliance", operation.Request, operation.Result, nil)
+	return writeCLISuccessWithTimings(stdout, stderr, format, "check-compliance", operation.Request, operation.Result, nil, snapshotCommandTimings(tracker, started))
 }
 
 func complianceRequestFromFlags(workspaceRoot string, paths []string, diffFile string) (analysis.ComplianceRequest, error) {

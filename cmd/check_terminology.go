@@ -30,7 +30,7 @@ func runCheckTerminology(args []string, stdout, stderr io.Writer) int {
 func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-terminology", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT]")
+	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT] [--timings]")
 
 	var (
 		terms          stringList
@@ -41,6 +41,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		requestFile    string
 		format         string
 		configPath     string
+		timings        bool
 	)
 	fs.Var(&terms, "term", "displaced or governed term to audit; repeat to narrow a configured policy set or supply ad hoc terms")
 	fs.Var(&canonicalTerms, "canonical-term", "replacement or canonical term; repeat to supply multiple terms")
@@ -50,6 +51,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 	fs.StringVar(&requestFile, "request-file", "", "path to terminology audit request JSON, or - for stdin")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "check-terminology", nil, cliIssue{
@@ -130,12 +132,14 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 		}
 	}
 
+	ctx, tracker, started := withCommandTimings(ctx, timings && format == commandFormatJSON)
+
 	operation := app.CheckTerminology(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-terminology", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
-	return writeCLISuccess(stdout, stderr, format, "check-terminology", operation.Request, operation.Result, nil)
+	return writeCLISuccessWithTimings(stdout, stderr, format, "check-terminology", operation.Request, operation.Result, nil, snapshotCommandTimings(tracker, started))
 }
 
 func countNonEmptyStrings(values []string) int {

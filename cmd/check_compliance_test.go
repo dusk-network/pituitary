@@ -494,6 +494,102 @@ plinth ember quartz
 	}
 }
 
+func TestRunCheckComplianceJSONIncludesTopSuggestionsAndTimings(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", `
+package middleware
+
+func buildLimiter() {}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "src/api/middleware/ratelimiter.go",
+			"--format", "json",
+			"--timings",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			TopSuggestions []string `json:"top_suggestions"`
+		} `json:"result"`
+		Timings struct {
+			TotalMS    int64 `json:"total_ms"`
+			IndexingMS int64 `json:"indexing_ms"`
+		} `json:"timings"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compliance timings payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.TopSuggestions) == 0 || !strings.Contains(payload.Result.TopSuggestions[0], "already governs") {
+		t.Fatalf("top_suggestions = %+v, want surfaced compliance guidance", payload.Result.TopSuggestions)
+	}
+	if payload.Timings.TotalMS <= 0 {
+		t.Fatalf("timings.total_ms = %d, want > 0", payload.Timings.TotalMS)
+	}
+	if payload.Timings.IndexingMS <= 0 {
+		t.Fatalf("timings.indexing_ms = %d, want > 0", payload.Timings.IndexingMS)
+	}
+}
+
+func TestRunCheckComplianceJSONTimingsIncludeEmbeddingCalls(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "notes/ungoverned.txt", `
+zxqv aurora lattice
+plinth ember quartz
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "notes/ungoverned.txt",
+			"--format", "json",
+			"--timings",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Timings struct {
+			EmbeddingMS    int64 `json:"embedding_ms"`
+			EmbeddingCalls int   `json:"embedding_calls"`
+		} `json:"timings"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal compliance embedding timings payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if payload.Timings.EmbeddingMS <= 0 || payload.Timings.EmbeddingCalls <= 0 {
+		t.Fatalf("timings = %+v, want semantic lookup embedding timings", payload.Timings)
+	}
+}
+
 func TestRunCheckComplianceDiffFromStdinJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

@@ -53,6 +53,7 @@ func ReviewSpecContext(ctx context.Context, cfg *config.Config, request ReviewRe
 	if err != nil {
 		return nil, err
 	}
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 
 	candidate, err := loadCandidate(repo, overlapRequest, nil)
 	if err != nil {

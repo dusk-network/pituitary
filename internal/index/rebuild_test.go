@@ -55,9 +55,16 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 5)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 6)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
+	var sourceManifest string
+	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'source_manifest'`).Scan(&sourceManifest); err != nil {
+		t.Fatalf("query source_manifest: %v", err)
+	}
+	if strings.TrimSpace(sourceManifest) == "" {
+		t.Fatal("metadata.source_manifest = empty, want manifest detail")
+	}
 	assertSections(t, db, "SPEC-042", []string{
 		"Overview",
 		"Requirements",

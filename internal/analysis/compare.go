@@ -87,6 +87,7 @@ func CompareSpecsContext(ctx context.Context, cfg *config.Config, request Compar
 	if err != nil {
 		return nil, err
 	}
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 
 	var candidate *specDocument
 	orderedRefs := append([]string{}, refs...)

@@ -47,6 +47,7 @@ func semanticTerminologyNearMisses(ctx context.Context, cfg *config.Config, repo
 	if err != nil {
 		return nil, fmt.Errorf("resolve embedder for semantic terminology: %w", err)
 	}
+	embedder = embedderWithTimings(ctx, embedder)
 
 	// Build embedding queries from governed terms: "term: <preferred> (replaces: <displaced>)"
 	// Sort keys for deterministic selection when truncating at the max limit.

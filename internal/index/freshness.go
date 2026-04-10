@@ -38,6 +38,32 @@ type FreshnessStatus struct {
 	Issues    []FreshnessIssue `json:"issues,omitempty"`
 }
 
+type sourceManifest struct {
+	WorkspaceRepoID string                 `json:"workspace_repo_id,omitempty"`
+	Repos           []sourceManifestRepo   `json:"repos,omitempty"`
+	Sources         []sourceManifestSource `json:"sources,omitempty"`
+}
+
+type sourceManifestRepo struct {
+	ID           string `json:"id"`
+	Root         string `json:"root"`
+	ResolvedRoot string `json:"resolved_root,omitempty"`
+}
+
+type sourceManifestSource struct {
+	Name         string   `json:"name"`
+	Adapter      string   `json:"adapter"`
+	Kind         string   `json:"kind"`
+	Repo         string   `json:"repo,omitempty"`
+	ResolvedRepo string   `json:"resolved_repo,omitempty"`
+	RepoRoot     string   `json:"repo_root,omitempty"`
+	Path         string   `json:"path"`
+	ResolvedPath string   `json:"resolved_path,omitempty"`
+	Files        []string `json:"files,omitempty"`
+	Include      []string `json:"include,omitempty"`
+	Exclude      []string `json:"exclude,omitempty"`
+}
+
 // StaleIndexError reports that the configured index is present but not safe to reuse.
 type StaleIndexError struct {
 	Status *FreshnessStatus
@@ -112,6 +138,7 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		"schema_version",
 		"embedder_fingerprint",
 		"source_fingerprint",
+		"source_manifest",
 		"content_fingerprint",
 	)
 	if err != nil {
@@ -157,9 +184,13 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 			Message: "index metadata is missing source_fingerprint",
 		})
 	case stored != currentSourceFingerprint:
+		message := fmt.Sprintf("index source fingerprint %q does not match current configured source fingerprint %q", stored, currentSourceFingerprint)
+		if diagnostic := sourceMismatchDiagnostic(strings.TrimSpace(metadata["source_manifest"]), cfg); diagnostic != "" {
+			message += "; " + diagnostic
+		}
 		issues = append(issues, FreshnessIssue{
 			Kind:    "source_fingerprint_mismatch",
-			Message: fmt.Sprintf("index source fingerprint %q does not match current configured source fingerprint %q", stored, currentSourceFingerprint),
+			Message: message,
 			Indexed: stored,
 			Current: currentSourceFingerprint,
 		})
@@ -309,6 +340,120 @@ func sourceFingerprint(cfg *config.Config) string {
 	}
 	sort.Strings(parts)
 	return fingerprint(parts)
+}
+
+func sourceManifestJSON(cfg *config.Config) string {
+	manifest := sourceManifestForConfig(cfg)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func sourceManifestForConfig(cfg *config.Config) sourceManifest {
+	manifest := sourceManifest{
+		WorkspaceRepoID: config.PrimaryRepoID(cfg),
+		Repos:           make([]sourceManifestRepo, 0, len(cfg.Workspace.Repos)),
+		Sources:         make([]sourceManifestSource, 0, len(cfg.Sources)),
+	}
+	for _, repo := range cfg.Workspace.Repos {
+		manifest.Repos = append(manifest.Repos, sourceManifestRepo{
+			ID:           strings.TrimSpace(repo.ID),
+			Root:         filepath.ToSlash(strings.TrimSpace(repo.Root)),
+			ResolvedRoot: filepath.ToSlash(strings.TrimSpace(repo.RootPath)),
+		})
+	}
+	sort.Slice(manifest.Repos, func(i, j int) bool {
+		return manifest.Repos[i].ID < manifest.Repos[j].ID
+	})
+	for _, src := range cfg.Sources {
+		files := append([]string(nil), src.Files...)
+		include := append([]string(nil), src.Include...)
+		exclude := append([]string(nil), src.Exclude...)
+		sort.Strings(files)
+		sort.Strings(include)
+		sort.Strings(exclude)
+		manifest.Sources = append(manifest.Sources, sourceManifestSource{
+			Name:         src.Name,
+			Adapter:      src.Adapter,
+			Kind:         src.Kind,
+			Repo:         src.Repo,
+			ResolvedRepo: src.ResolvedRepo,
+			RepoRoot:     filepath.ToSlash(src.RepoRootPath),
+			Path:         filepath.ToSlash(src.Path),
+			ResolvedPath: filepath.ToSlash(src.ResolvedPath),
+			Files:        files,
+			Include:      include,
+			Exclude:      exclude,
+		})
+	}
+	sort.Slice(manifest.Sources, func(i, j int) bool {
+		return manifest.Sources[i].Name < manifest.Sources[j].Name
+	})
+	return manifest
+}
+
+func sourceMismatchDiagnostic(storedJSON string, cfg *config.Config) string {
+	if strings.TrimSpace(storedJSON) == "" || cfg == nil {
+		return ""
+	}
+
+	var stored sourceManifest
+	if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
+		return ""
+	}
+	current := sourceManifestForConfig(cfg)
+
+	if len(stored.Sources) != len(current.Sources) {
+		return fmt.Sprintf("source list differs: expected %d source(s), got %d", len(stored.Sources), len(current.Sources))
+	}
+	if len(stored.Repos) != len(current.Repos) {
+		return fmt.Sprintf("workspace repo list differs: expected %d repo root(s), got %d", len(stored.Repos), len(current.Repos))
+	}
+
+	storedByName := make(map[string]sourceManifestSource, len(stored.Sources))
+	for _, src := range stored.Sources {
+		storedByName[src.Name] = src
+	}
+	for _, src := range current.Sources {
+		previous, ok := storedByName[src.Name]
+		if !ok {
+			return fmt.Sprintf("source names differ: indexed sources [%s], current sources [%s]", manifestSourceNames(stored.Sources), manifestSourceNames(current.Sources))
+		}
+		if previous.Adapter != src.Adapter {
+			return fmt.Sprintf("source %q adapter changed: indexed %q, current %q", src.Name, previous.Adapter, src.Adapter)
+		}
+		if previous.Kind != src.Kind {
+			return fmt.Sprintf("source %q kind changed: indexed %q, current %q", src.Name, previous.Kind, src.Kind)
+		}
+		if previous.Path != src.Path {
+			return fmt.Sprintf("source %q path changed: indexed %q, current %q", src.Name, previous.Path, src.Path)
+		}
+		if previous.RepoRoot != src.RepoRoot {
+			return fmt.Sprintf("source %q root changed: indexed %q, current %q", src.Name, previous.RepoRoot, src.RepoRoot)
+		}
+		if strings.Join(previous.Files, ",") != strings.Join(src.Files, ",") {
+			return fmt.Sprintf("source %q files selector changed: indexed [%s], current [%s]", src.Name, strings.Join(previous.Files, ", "), strings.Join(src.Files, ", "))
+		}
+		if strings.Join(previous.Include, ",") != strings.Join(src.Include, ",") {
+			return fmt.Sprintf("source %q include selector changed: indexed [%s], current [%s]", src.Name, strings.Join(previous.Include, ", "), strings.Join(src.Include, ", "))
+		}
+		if strings.Join(previous.Exclude, ",") != strings.Join(src.Exclude, ",") {
+			return fmt.Sprintf("source %q exclude selector changed: indexed [%s], current [%s]", src.Name, strings.Join(previous.Exclude, ", "), strings.Join(src.Exclude, ", "))
+		}
+	}
+
+	return ""
+}
+
+func manifestSourceNames(sources []sourceManifestSource) string {
+	names := make([]string, 0, len(sources))
+	for _, src := range sources {
+		names = append(names, src.Name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func readMetadataContext(ctx context.Context, db *sql.DB, keys ...string) (map[string]string, error) {

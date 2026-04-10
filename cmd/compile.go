@@ -11,9 +11,10 @@ import (
 )
 
 type compileCLIRequest struct {
-	Scope  string `json:"scope,omitempty"`
-	DryRun bool   `json:"dry_run,omitempty"`
-	Yes    bool   `json:"yes,omitempty"`
+	Scope   string `json:"scope,omitempty"`
+	DryRun  bool   `json:"dry_run,omitempty"`
+	Yes     bool   `json:"yes,omitempty"`
+	Timings bool   `json:"timings,omitempty"`
 }
 
 func runCompile(args []string, stdout, stderr io.Writer) int {
@@ -23,7 +24,7 @@ func runCompile(args []string, stdout, stderr io.Writer) int {
 func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("compile", "pituitary [--config PATH] compile --scope SCOPE [--dry-run] [--yes] [--format FORMAT]")
+	help := newCommandHelp("compile", "pituitary [--config PATH] compile --scope SCOPE [--dry-run] [--yes] [--format FORMAT] [--timings]")
 
 	var (
 		scope      string
@@ -31,12 +32,14 @@ func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Wri
 		yes        bool
 		format     string
 		configPath string
+		timings    bool
 	)
 	fs.StringVar(&scope, "scope", "", "target scope: accepted spec ref or all")
 	fs.BoolVar(&dryRun, "dry-run", false, "plan deterministic edits without writing files")
 	fs.BoolVar(&yes, "yes", false, "apply all planned edits without prompting")
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 
 	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
 		return writeCLIError(stdout, stderr, format, "compile", nil, cliIssue{
@@ -54,9 +57,10 @@ func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	request := compileCLIRequest{
-		Scope:  strings.TrimSpace(scope),
-		DryRun: dryRun,
-		Yes:    yes,
+		Scope:   strings.TrimSpace(scope),
+		DryRun:  dryRun,
+		Yes:     yes,
+		Timings: timings,
 	}
 	if err := validateCLIFormat("compile", format); err != nil {
 		return writeCLIError(stdout, stderr, format, "compile", request, cliIssue{
@@ -93,6 +97,8 @@ func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Wri
 		apply = false
 	}
 
+	ctx, tracker, started := withCommandTimings(ctx, timings && format == commandFormatJSON)
+
 	response := app.CompileTerminology(ctx, resolvedConfigPath, app.CompileRequest{
 		Scope: request.Scope,
 		Apply: apply,
@@ -108,5 +114,5 @@ func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Wri
 		response.Result.Guidance = append(response.Result.Guidance, "Showing planned edits (dry-run). Re-run with --yes to apply.")
 	}
 
-	return writeCLISuccess(stdout, stderr, format, "compile", request, response.Result, nil)
+	return writeCLISuccessWithTimings(stdout, stderr, format, "compile", request, response.Result, nil, snapshotCommandTimings(tracker, started))
 }

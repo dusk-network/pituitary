@@ -30,7 +30,7 @@ func runCheckDocDrift(args []string, stdout, stderr io.Writer) int {
 func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check-doc-drift", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-doc-drift", "pituitary [--config PATH] check-doc-drift ([--doc-ref REF | --path PATH]... | [--scope all] | [--diff-file PATH|-]) [--request-file PATH|-] [--format FORMAT]")
+	help := newCommandHelp("check-doc-drift", "pituitary [--config PATH] check-doc-drift ([--doc-ref REF | --path PATH]... | [--scope all] | [--diff-file PATH|-]) [--request-file PATH|-] [--format FORMAT] [--timings]")
 
 	var (
 		docRefs     docRefList
@@ -41,6 +41,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 		format      string
 		configPath  string
 		atDate      string
+		timings     bool
 	)
 	fs.Var(&docRefs, "doc-ref", "target doc ref; repeat to supply doc_refs")
 	fs.Var(&docPaths, "path", "workspace-relative or absolute path to an indexed doc; repeat to supply paths")
@@ -50,6 +51,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 	fs.StringVar(&configPath, "config", "", "path to workspace config")
 	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
+	fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 
 	var minConfidence string
 	fs.StringVar(&minConfidence, "min-confidence", "", "minimum confidence tier: extracted, inferred, or ambiguous")
@@ -146,12 +148,14 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 	if trimmedConf := strings.TrimSpace(minConfidence); trimmedConf != "" {
 		request.MinConfidence = trimmedConf
 	}
+	ctx, tracker, started := withCommandTimings(ctx, timings && format == commandFormatJSON)
+
 	operation := app.CheckDocDrift(ctx, resolvedConfigPath, request)
 	if operation.Issue != nil {
 		return writeCLIError(stdout, stderr, format, "check-doc-drift", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
 	}
 
-	return writeCLISuccess(stdout, stderr, format, "check-doc-drift", operation.Request, operation.Result, nil)
+	return writeCLISuccessWithTimings(stdout, stderr, format, "check-doc-drift", operation.Request, operation.Result, nil, snapshotCommandTimings(tracker, started))
 }
 
 func docDriftRequestFromFlags(workspaceRoot string, docRefs []string, scope, diffFile string) (analysis.DocDriftRequest, error) {

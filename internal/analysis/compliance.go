@@ -134,6 +134,7 @@ type ComplianceResult struct {
 	Conflicts          []ComplianceFinding           `json:"conflicts"`
 	Unspecified        []ComplianceFinding           `json:"unspecified"`
 	UnspecifiedSummary *ComplianceUnspecifiedSummary `json:"unspecified_summary,omitempty"`
+	TopSuggestions     []string                      `json:"top_suggestions,omitempty"`
 	Runtime            *CommandRuntime               `json:"runtime,omitempty"`
 	ContentTrust       *resultmeta.ContentTrust      `json:"content_trust,omitempty"`
 }
@@ -292,7 +293,9 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	if err != nil {
 		return nil, err
 	}
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 	if adjudicator, ok := analyzer.(complianceAdjudicator); ok && len(adjudicationCandidates) > 0 {
+		adjudicator = complianceAdjudicatorWithTimings(ctx, adjudicator)
 		if result.Runtime != nil && result.Runtime.Analysis != nil {
 			result.Runtime.Analysis.Used = true
 		}
@@ -320,6 +323,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	sortComplianceFindings(result.Conflicts)
 	sortComplianceFindings(result.Unspecified)
 	result.UnspecifiedSummary = buildComplianceUnspecifiedSummary(result.Unspecified)
+	result.TopSuggestions = buildComplianceTopSuggestions(result)
 	return result, nil
 }
 
@@ -690,6 +694,7 @@ func embedComplianceFallbackTargetsContext(ctx context.Context, cfg *config.Conf
 	if err != nil {
 		return err
 	}
+	embedder = embedderWithTimings(ctx, embedder)
 
 	texts := make([]string, 0, len(indexes))
 	for _, idx := range indexes {
@@ -1248,6 +1253,40 @@ func buildComplianceUnspecifiedSummary(findings []ComplianceFinding) *Compliance
 		summary.MissingGovernanceEdge++
 	}
 	return summary
+}
+
+func buildComplianceTopSuggestions(result *ComplianceResult) []string {
+	if result == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	suggestions := make([]string, 0, 3)
+	appendSuggestions := func(findings []ComplianceFinding) {
+		for _, finding := range findings {
+			suggestion := strings.TrimSpace(finding.Suggestion)
+			if suggestion == "" {
+				continue
+			}
+			if _, ok := seen[suggestion]; ok {
+				continue
+			}
+			seen[suggestion] = struct{}{}
+			suggestions = append(suggestions, suggestion)
+			if len(suggestions) == 3 {
+				return
+			}
+		}
+	}
+
+	appendSuggestions(result.Conflicts)
+	if len(suggestions) < 3 {
+		appendSuggestions(result.Unspecified)
+	}
+	if len(suggestions) < 3 {
+		appendSuggestions(result.Compliant)
+	}
+	return suggestions
 }
 
 func complianceRequestsPerMinuteConflict(statement, content string) (string, string, bool) {

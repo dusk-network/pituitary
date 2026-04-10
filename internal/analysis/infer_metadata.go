@@ -173,6 +173,7 @@ func InferSpecMetadataWithSpecs(ctx context.Context, cfg *config.Config, title, 
 	if err != nil {
 		return nil, err
 	}
+	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 	inferrer, ok := analyzer.(metadataInferrer)
 	if !ok {
 		return nil, nil

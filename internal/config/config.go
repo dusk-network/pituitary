@@ -485,9 +485,17 @@ func validate(cfg *Config) error {
 		info, err := os.Stat(cfg.Workspace.RootPath)
 		switch {
 		case err == nil && !info.IsDir():
-			errs.add("workspace.root: %q is not a directory", cfg.Workspace.Root)
+			errs.add(
+				"workspace.root: %q is not a directory (%s)",
+				cfg.Workspace.Root,
+				pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
+			)
 		case err != nil:
-			errs.add("workspace.root: %q does not exist", cfg.Workspace.Root)
+			errs.add(
+				"workspace.root: %q does not exist (%s)",
+				cfg.Workspace.Root,
+				pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
+			)
 		}
 	}
 
@@ -521,9 +529,19 @@ func validate(cfg *Config) error {
 		info, err := os.Stat(repo.RootPath)
 		switch {
 		case err == nil && !info.IsDir():
-			errs.add("%s.root: %q is not a directory", label, repo.Root)
+			errs.add(
+				"%s.root: %q is not a directory (%s)",
+				label,
+				repo.Root,
+				pathResolutionDetail(label+".root", repo.Root, cfg.ConfigDir, repo.RootPath),
+			)
 		case err != nil:
-			errs.add("%s.root: %q does not exist", label, repo.Root)
+			errs.add(
+				"%s.root: %q does not exist (%s)",
+				label,
+				repo.Root,
+				pathResolutionDetail(label+".root", repo.Root, cfg.ConfigDir, repo.RootPath),
+			)
 		}
 	}
 
@@ -659,18 +677,40 @@ func validate(cfg *Config) error {
 			info, err := os.Stat(source.ResolvedPath)
 			switch {
 			case err == nil && !info.IsDir():
-				errs.add("%s.path: %q is not a directory", label, source.Path)
+				errs.add(
+					"%s.path: %q is not a directory (%s)",
+					label,
+					source.Path,
+					sourcePathResolutionDetail(cfg, source, repoRootPath),
+				)
 			case err != nil:
-				errs.add("%s.path: %q does not exist", label, source.Path)
+				errs.add(
+					"%s.path: %q does not exist (%s)",
+					label,
+					source.Path,
+					sourcePathResolutionDetail(cfg, source, repoRootPath),
+				)
 			}
 			for i, relFile := range source.Files {
 				resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
 				info, err := os.Stat(resolvedFile)
 				switch {
 				case err == nil && info.IsDir():
-					errs.add("%s.files[%d]: %q is a directory", label, i, relFile)
+					errs.add(
+						"%s.files[%d]: %q is a directory (%s)",
+						label,
+						i,
+						relFile,
+						pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
+					)
 				case err != nil:
-					errs.add("%s.files[%d]: %q does not exist", label, i, relFile)
+					errs.add(
+						"%s.files[%d]: %q does not exist (%s)",
+						label,
+						i,
+						relFile,
+						pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
+					)
 				}
 			}
 		}
@@ -1121,6 +1161,48 @@ func resolvePath(base, value string) string {
 		return filepath.Clean(value)
 	}
 	return filepath.Clean(filepath.Join(base, value))
+}
+
+func pathResolutionDetail(label, raw, base, resolved string) string {
+	return fmt.Sprintf(
+		"%s %q resolves relative to %q as %q",
+		label,
+		raw,
+		filepath.ToSlash(filepath.Clean(base)),
+		filepath.ToSlash(filepath.Clean(resolved)),
+	)
+}
+
+func sourcePathResolutionDetail(cfg *Config, source *Source, repoRootPath string) string {
+	if source == nil {
+		return ""
+	}
+	scope := "workspace.root"
+	rootRaw := cfg.Workspace.Root
+	if source.Repo != "" {
+		scope = "workspace.repos[" + source.Repo + "].root"
+		if root, ok := lookupWorkspaceRepoRootRaw(cfg.Workspace, source.Repo); ok {
+			rootRaw = root
+		}
+	}
+	return fmt.Sprintf(
+		"%s %q resolves relative to config base %q as %q, so source path %q resolves to %q",
+		scope,
+		rootRaw,
+		filepath.ToSlash(filepath.Clean(cfg.ConfigDir)),
+		filepath.ToSlash(filepath.Clean(repoRootPath)),
+		source.Path,
+		filepath.ToSlash(filepath.Clean(source.ResolvedPath)),
+	)
+}
+
+func lookupWorkspaceRepoRootRaw(workspace Workspace, repoID string) (string, bool) {
+	for _, repo := range workspace.Repos {
+		if repo.ID == repoID {
+			return repo.Root, true
+		}
+	}
+	return "", false
 }
 
 func stripComment(line string) string {

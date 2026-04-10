@@ -344,6 +344,11 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
 		return nil, err
 	}
+	if manifest := sourceManifestJSON(cfg); manifest != "" {
+		if err := upsertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
+			return nil, err
+		}
+	}
 	result.ContentFingerprint = contentFingerprint(records)
 	if err := upsertMetadataContext(ctx, tx, "content_fingerprint", result.ContentFingerprint); err != nil {
 		return nil, err
