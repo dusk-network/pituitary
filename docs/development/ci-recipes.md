@@ -26,7 +26,7 @@ jobs:
       pull-requests: read
       issues: write
     steps:
-      - uses: dusk-network/pituitary@v1.0.0-beta.7
+      - uses: dusk-network/pituitary@v1.0.0-beta.8
         with:
           fail-on: error
           # Set this when your repo keeps config at the root instead.
@@ -56,7 +56,7 @@ jobs:
   pituitary:
     runs-on: ubuntu-latest
     env:
-      PITUITARY_VERSION: v1.0.0-beta.3
+      PITUITARY_VERSION: v1.0.0-beta.8
     steps:
       - name: Check out repository
         uses: actions/checkout@v5

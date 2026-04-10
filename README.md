@@ -174,7 +174,7 @@ permissions:
   issues: write
 
 steps:
-  - uses: dusk-network/pituitary@v1.0.0-beta.7
+  - uses: dusk-network/pituitary@v1.0.0-beta.8
     with:
       fail-on: error
       # Set this when your repo keeps config at the root instead.
