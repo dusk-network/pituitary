@@ -103,6 +103,9 @@ func TestCompareSpecsUsesAnalysisProviderWhenEnabled(t *testing.T) {
 		if got, want := request.Model, "pituitary-analysis"; got != want {
 			t.Fatalf("request.model = %q, want %q", got, want)
 		}
+		if got, want := request.MaxTokens, 1024; got != want {
+			t.Fatalf("request.max_tokens = %d, want %d", got, want)
+		}
 		if len(request.Messages) != 2 {
 			t.Fatalf("messages = %d, want 2", len(request.Messages))
 		}
@@ -113,6 +116,15 @@ func TestCompareSpecsUsesAnalysisProviderWhenEnabled(t *testing.T) {
 		}
 		if got, want := prompt.OrderedRefs, []string{"SPEC-008", "SPEC-042"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 			t.Fatalf("ordered_refs = %v, want %v", got, want)
+		}
+		if len(prompt.Specs) != 2 {
+			t.Fatalf("spec prompts = %+v, want two prompts", prompt.Specs)
+		}
+		if got, want := prompt.Specs[0].Sections[0].Heading, "Requirements"; got != want {
+			t.Fatalf("first prompt section heading = %q, want %q", got, want)
+		}
+		if got, want := prompt.Specs[1].Sections[0].Heading, "Requirements"; got != want {
+			t.Fatalf("second prompt section heading = %q, want %q", got, want)
 		}
 
 		return `{

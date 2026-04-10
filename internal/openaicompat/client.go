@@ -20,14 +20,15 @@ import (
 const responseSizeLimit = 4 << 20
 
 type Client struct {
-	Runtime    string
-	Provider   string
-	Model      string
-	Endpoint   string
-	Token      string
-	TimeoutMS  int
-	MaxRetries int
-	HTTPClient *http.Client
+	Runtime           string
+	Provider          string
+	Model             string
+	Endpoint          string
+	Token             string
+	TimeoutMS         int
+	MaxRetries        int
+	MaxResponseTokens int
+	HTTPClient        *http.Client
 }
 
 type EmbeddingsRequest struct {
@@ -49,6 +50,7 @@ type ChatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
+	MaxTokens   int           `json:"max_tokens,omitempty"`
 }
 
 type ChatMessage struct {
@@ -93,14 +95,15 @@ func NewClient(provider config.RuntimeProvider, runtime string) (*Client, error)
 	}
 
 	return &Client{
-		Runtime:    strings.TrimSpace(runtime),
-		Provider:   config.RuntimeProviderOpenAI,
-		Model:      strings.TrimSpace(provider.Model),
-		Endpoint:   endpoint,
-		Token:      token,
-		TimeoutMS:  provider.TimeoutMS,
-		MaxRetries: provider.MaxRetries,
-		HTTPClient: httpClient,
+		Runtime:           strings.TrimSpace(runtime),
+		Provider:          config.RuntimeProviderOpenAI,
+		Model:             strings.TrimSpace(provider.Model),
+		Endpoint:          endpoint,
+		Token:             token,
+		TimeoutMS:         provider.TimeoutMS,
+		MaxRetries:        provider.MaxRetries,
+		MaxResponseTokens: provider.MaxResponseTokens,
+		HTTPClient:        httpClient,
 	}, nil
 }
 
@@ -132,11 +135,12 @@ func (c *Client) Embeddings(ctx context.Context, input []string) (*EmbeddingsRes
 	})
 }
 
-func (c *Client) ChatCompletionText(ctx context.Context, messages []ChatMessage, temperature float64) (string, error) {
+func (c *Client) ChatCompletionText(ctx context.Context, messages []ChatMessage, temperature float64, maxTokens int) (string, error) {
 	body, err := json.Marshal(ChatRequest{
 		Model:       c.Model,
 		Messages:    messages,
 		Temperature: temperature,
+		MaxTokens:   maxTokens,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode %s request: %w", c.Runtime, err)

@@ -1,0 +1,21 @@
+{
+  "id": "analyze-impact-rate-limit",
+  "operation": "analyze-impact-severity",
+  "description": "Trace the downstream docs, refs, and dependent specs touched by accepting SPEC-042.",
+  "request": {
+    "spec_ref": "SPEC-042",
+    "change_type": "accepted"
+  },
+  "expectations": {
+    "must_include_spec_refs": [
+      "SPEC-055"
+    ],
+    "must_include_doc_refs": [
+      "doc://guides/api-rate-limits"
+    ],
+    "must_include_affected_refs": [
+      "code://src/api/middleware/ratelimiter.go"
+    ],
+    "require_structured_evidence": true
+  }
+}

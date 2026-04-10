@@ -69,7 +69,7 @@ func (p *openAICompatibleAnalysisProvider) InferMetadata(ctx context.Context, re
 	}
 
 	var response MetadataInferenceResult
-	if err := p.completeJSON(ctx, openAICompatibleInferMetadataSystemPrompt, payload, &response); err != nil {
+	if err := p.completeJSON(ctx, payload.Command, openAICompatibleInferMetadataSystemPrompt, payload, &response); err != nil {
 		return nil, err
 	}
 	normalizeMetadataInference(&response)

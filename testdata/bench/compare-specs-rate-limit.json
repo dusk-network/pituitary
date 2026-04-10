@@ -1,0 +1,21 @@
+{
+  "id": "compare-specs-rate-limit",
+  "operation": "compare-specs",
+  "description": "Compare the legacy API-key rate-limit spec against the accepted tenant-scoped successor.",
+  "request": {
+    "spec_refs": [
+      "SPEC-008",
+      "SPEC-042"
+    ]
+  },
+  "expectations": {
+    "must_include_spec_refs": [
+      "SPEC-008",
+      "SPEC-042"
+    ],
+    "compatibility_level": "superseding",
+    "recommendation_contains": [
+      "SPEC-042"
+    ]
+  }
+}

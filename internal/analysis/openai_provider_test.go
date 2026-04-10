@@ -111,11 +111,14 @@ func TestCompleteJSONSendsExplicitTemperatureZero(t *testing.T) {
 	provider := rawProvider.(*openAICompatibleAnalysisProvider)
 
 	var response map[string]any
-	if err := provider.completeJSON(context.Background(), "system", map[string]string{"ping": "pong"}, &response); err != nil {
+	if err := provider.completeJSON(context.Background(), "compare-specs", "system", map[string]string{"ping": "pong"}, &response); err != nil {
 		t.Fatalf("completeJSON() error = %v", err)
 	}
 	if got, ok := captured["temperature"]; !ok || got.(float64) != 0 {
 		t.Fatalf("temperature field = %#v, want explicit 0", captured["temperature"])
+	}
+	if got, ok := captured["max_tokens"]; !ok || int(got.(float64)) != 1024 {
+		t.Fatalf("max_tokens field = %#v, want 1024", captured["max_tokens"])
 	}
 }
 
@@ -129,6 +132,9 @@ func TestProbeProviderContextUsesLightweightJSONProbe(t *testing.T) {
 		}
 		if len(request.Messages) != 2 {
 			t.Fatalf("messages = %+v, want system and user prompt", request.Messages)
+		}
+		if got, want := request.MaxTokens, 64; got != want {
+			t.Fatalf("request.max_tokens = %d, want %d", got, want)
 		}
 		if !strings.Contains(request.Messages[0].Content, "runtime probe") {
 			t.Fatalf("system prompt = %q, want runtime probe guidance", request.Messages[0].Content)
@@ -186,7 +192,7 @@ func TestOpenAICompatibleAnalysisProviderParsesStringErrorBodies(t *testing.T) {
 	provider := rawProvider.(*openAICompatibleAnalysisProvider)
 
 	var response map[string]any
-	err = provider.completeJSON(context.Background(), "system", map[string]string{"ping": "pong"}, &response)
+	err = provider.completeJSON(context.Background(), "compare-specs", "system", map[string]string{"ping": "pong"}, &response)
 	if err == nil {
 		t.Fatal("completeJSON() error = nil, want dependency-unavailable failure")
 	}
@@ -239,7 +245,7 @@ func TestOpenAICompatibleAnalysisProviderClassifiesSchemaMismatchDiagnostics(t *
 	provider := rawProvider.(*openAICompatibleAnalysisProvider)
 
 	var response map[string]any
-	err = provider.completeJSON(context.Background(), "system", map[string]string{"ping": "pong"}, &response)
+	err = provider.completeJSON(context.Background(), "compare-specs", "system", map[string]string{"ping": "pong"}, &response)
 	if err == nil {
 		t.Fatal("completeJSON() error = nil, want dependency-unavailable failure")
 	}
@@ -252,5 +258,92 @@ func TestOpenAICompatibleAnalysisProviderClassifiesSchemaMismatchDiagnostics(t *
 	}
 	if got, want := details["request_type"], "analysis"; got != want {
 		t.Fatalf("details.request_type = %#v, want %q", got, want)
+	}
+}
+
+func TestCompleteJSONUsesConfiguredMaxResponseTokensOverride(t *testing.T) {
+	t.Parallel()
+
+	var captured openAICompatibleChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": `{"ok":true}`}},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	rawProvider, err := newOpenAICompatibleAnalysisProvider(config.RuntimeProvider{
+		Provider:          config.RuntimeProviderOpenAI,
+		Model:             "pituitary-analysis",
+		Endpoint:          server.URL,
+		TimeoutMS:         1000,
+		MaxRetries:        0,
+		MaxResponseTokens: 333,
+	})
+	if err != nil {
+		t.Fatalf("newOpenAICompatibleAnalysisProvider() error = %v", err)
+	}
+	provider := rawProvider.(*openAICompatibleAnalysisProvider)
+
+	var response map[string]any
+	if err := provider.completeJSON(context.Background(), "check-doc-drift", "system", map[string]string{"ping": "pong"}, &response); err != nil {
+		t.Fatalf("completeJSON() error = %v", err)
+	}
+	if got, want := captured.MaxTokens, 333; got != want {
+		t.Fatalf("request.max_tokens = %d, want %d", got, want)
+	}
+}
+
+func TestAnalysisSectionsFromEmbeddedRanksByCounterpartRelevance(t *testing.T) {
+	t.Parallel()
+
+	got := analysisSectionsFromEmbedded(
+		[]embeddedSection{
+			{Heading: "Overview", Content: "low", Embedding: []float64{1, 0}},
+			{Heading: "Requirements", Content: "high", Embedding: []float64{0, 1}},
+			{Heading: "Design Decisions", Content: "mid", Embedding: []float64{0.6, 0.8}},
+			{Heading: "Appendix", Content: "also-mid", Embedding: []float64{0.5, 0.5}},
+			{Heading: "History", Content: "trimmed by limit", Embedding: []float64{0.4, 0.4}},
+		},
+		[]embeddedSection{
+			{Heading: "Counterpart", Content: "target", Embedding: []float64{0, 1}},
+		},
+	)
+
+	if got, want := len(got), analysisPromptSectionLimit; got != want {
+		t.Fatalf("len(sections) = %d, want %d", got, want)
+	}
+	if got[0].Heading != "Requirements" || got[1].Heading != "Design Decisions" || got[2].Heading != "Appendix" {
+		t.Fatalf("ordered headings = %+v, want relevance-ranked sections", got)
+	}
+}
+
+func TestAnalysisSectionsFromEmbeddedFallsBackToOriginalOrderWithoutComparableCounterparts(t *testing.T) {
+	t.Parallel()
+
+	got := analysisSectionsFromEmbedded(
+		[]embeddedSection{
+			{Heading: "Overview", Content: "first", Embedding: []float64{1, 0}},
+			{Heading: "Requirements", Content: "second", Embedding: []float64{0, 1}},
+			{Heading: "Design Decisions", Content: "third", Embedding: []float64{0.6, 0.8}},
+		},
+		[]embeddedSection{
+			{Heading: "Counterpart", Content: "missing embedding"},
+		},
+	)
+
+	if len(got) != 3 {
+		t.Fatalf("len(sections) = %d, want 3", len(got))
+	}
+	if got[0].Heading != "Overview" || got[1].Heading != "Requirements" || got[2].Heading != "Design Decisions" {
+		t.Fatalf("ordered headings = %+v, want original order fallback", got)
 	}
 }

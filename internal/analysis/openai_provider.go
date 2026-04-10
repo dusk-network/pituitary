@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/openaicompat"
+	"github.com/dusk-network/pituitary/internal/ranking"
 )
 
 type qualitativeAnalyzer interface {
@@ -74,7 +75,7 @@ const (
 	openAICompatibleProbeSystemPrompt    = "You are Pituitary's runtime probe. Return only one JSON object with key ok set to true."
 	openAICompatibleCompareSystemPrompt  = "You are Pituitary's compare-specs adjudicator. Use only the provided spec evidence. Return only one JSON object with keys shared_scope, differences, tradeoffs, compatibility, and recommendation. Preserve spec refs exactly. Keep every difference items array concise and limited to concrete design choices from the provided specs."
 	openAICompatibleDocDriftSystemPrompt = "You are Pituitary's doc-drift adjudicator. Use only the provided deterministic findings and cited spec/doc evidence. Return only one JSON object with keys findings and suggestions. Do not invent new finding codes or spec refs. Findings must correspond to the provided deterministic findings, and suggestions must stay actionable and bounded to the same contradictions."
-	analysisPromptSectionLimit           = 6
+	analysisPromptSectionLimit           = 4
 	analysisPromptSectionContentLimit    = 500
 	openAICompatibleAnalysisRuntime      = "runtime.analysis"
 )
@@ -121,7 +122,7 @@ func (p *openAICompatibleAnalysisProvider) Probe(ctx context.Context) error {
 	var response struct {
 		OK bool `json:"ok"`
 	}
-	if err := p.completeJSON(ctx, openAICompatibleProbeSystemPrompt, map[string]any{
+	if err := p.completeJSON(ctx, "runtime-probe", openAICompatibleProbeSystemPrompt, map[string]any{
 		"command": "runtime-probe",
 	}, &response); err != nil {
 		return err
@@ -136,12 +137,12 @@ func (p *openAICompatibleAnalysisProvider) Compare(ctx context.Context, orderedR
 	payload := compareAnalysisPrompt{
 		Command:     "compare-specs",
 		OrderedRefs: append([]string(nil), orderedRefs...),
-		Specs:       analysisSpecsFromMap(specs, orderedRefs),
+		Specs:       analysisSpecsForComparison(specs, orderedRefs),
 		Baseline:    base,
 	}
 
 	var provided Comparison
-	if err := p.completeJSON(ctx, openAICompatibleCompareSystemPrompt, payload, &provided); err != nil {
+	if err := p.completeJSON(ctx, payload.Command, openAICompatibleCompareSystemPrompt, payload, &provided); err != nil {
 		return Comparison{}, err
 	}
 	return normalizeProvidedComparison(base, provided, orderedRefs, specs), nil
@@ -150,8 +151,8 @@ func (p *openAICompatibleAnalysisProvider) Compare(ctx context.Context, orderedR
 func (p *openAICompatibleAnalysisProvider) RefineDocDrift(ctx context.Context, doc docDocument, specs map[string]specDocument, item DriftItem, remediation *DocRemediationItem) (*DriftItem, *DocRemediationItem, error) {
 	prompt := docDriftAnalysisPrompt{
 		Command:               "check-doc-drift",
-		Doc:                   analysisDocFromDocument(doc),
-		RelevantSpecs:         analysisSpecsFromSlice(specs),
+		Doc:                   analysisDocFromDocument(doc, flattenedSectionsFromSpecs(specs)),
+		RelevantSpecs:         analysisSpecsForDocDrift(specs, doc),
 		DeterministicFindings: append([]DriftFinding(nil), item.Findings...),
 	}
 	if remediation != nil {
@@ -159,7 +160,7 @@ func (p *openAICompatibleAnalysisProvider) RefineDocDrift(ctx context.Context, d
 	}
 
 	var provided docDriftAnalysisResponse
-	if err := p.completeJSON(ctx, openAICompatibleDocDriftSystemPrompt, prompt, &provided); err != nil {
+	if err := p.completeJSON(ctx, prompt.Command, openAICompatibleDocDriftSystemPrompt, prompt, &provided); err != nil {
 		return nil, nil, err
 	}
 
@@ -174,7 +175,7 @@ func (p *openAICompatibleAnalysisProvider) RefineDocDrift(ctx context.Context, d
 	return &refinedItem, refinedRemediation, nil
 }
 
-func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, systemPrompt string, input any, target any) error {
+func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, command string, systemPrompt string, input any, target any) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -184,7 +185,7 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, sys
 		return fmt.Errorf("encode runtime.analysis prompt: %w", err)
 	}
 
-	responseBody, err := p.requestChatCompletion(ctx, []openaicompat.ChatMessage{
+	responseBody, err := p.requestChatCompletion(ctx, command, []openaicompat.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: string(body)},
 	})
@@ -198,8 +199,8 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, sys
 	return nil
 }
 
-func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, messages []openaicompat.ChatMessage) (string, error) {
-	text, err := p.client.ChatCompletionText(ctx, messages, 0)
+func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, command string, messages []openaicompat.ChatMessage) (string, error) {
+	text, err := p.client.ChatCompletionText(ctx, messages, 0, analysisResponseTokenLimit(command, p.client.MaxResponseTokens))
 	if err != nil {
 		return "", err
 	}
@@ -242,28 +243,54 @@ func (p *openAICompatibleAnalysisProvider) dependencyError(failureClass, format 
 	return openaicompat.NewDependencyUnavailableWithDetails(details, format, args...)
 }
 
-func analysisSpecsFromMap(specs map[string]specDocument, orderedRefs []string) []analysisSpecPrompt {
+func analysisSpecsFromMap(specs map[string]specDocument, orderedRefs []string, sectionSelector func(specDocument) []analysisSectionPrompt) []analysisSpecPrompt {
 	result := make([]analysisSpecPrompt, 0, len(orderedRefs))
 	for _, ref := range orderedRefs {
 		spec, ok := specs[ref]
 		if !ok {
 			continue
 		}
-		result = append(result, analysisSpecFromDocument(spec))
+		result = append(result, analysisSpecFromDocument(spec, sectionSelector(spec)))
 	}
 	return result
 }
 
-func analysisSpecsFromSlice(specs map[string]specDocument) []analysisSpecPrompt {
+func analysisSpecsFromSlice(specs map[string]specDocument, sectionSelector func(specDocument) []analysisSectionPrompt) []analysisSpecPrompt {
 	refs := make([]string, 0, len(specs))
 	for ref := range specs {
 		refs = append(refs, ref)
 	}
 	sort.Strings(refs)
-	return analysisSpecsFromMap(specs, refs)
+	return analysisSpecsFromMap(specs, refs, sectionSelector)
 }
 
-func analysisSpecFromDocument(spec specDocument) analysisSpecPrompt {
+func analysisSpecsForComparison(specs map[string]specDocument, orderedRefs []string) []analysisSpecPrompt {
+	counterparts := make(map[string][]embeddedSection, len(orderedRefs))
+	for _, ref := range orderedRefs {
+		for _, otherRef := range orderedRefs {
+			if otherRef == ref {
+				continue
+			}
+			counterparts[ref] = append(counterparts[ref], specs[otherRef].Sections...)
+		}
+	}
+	return analysisSpecsFromMap(specs, orderedRefs, func(spec specDocument) []analysisSectionPrompt {
+		return analysisSectionsFromEmbedded(spec.Sections, counterparts[spec.Record.Ref])
+	})
+}
+
+func analysisSpecsForDocDrift(specs map[string]specDocument, doc docDocument) []analysisSpecPrompt {
+	return analysisSpecsFromSlice(specs, func(spec specDocument) []analysisSectionPrompt {
+		return analysisSectionsFromEmbedded(spec.Sections, doc.Sections)
+	})
+}
+
+func analysisSpecFromDocument(spec specDocument, sections ...[]analysisSectionPrompt) analysisSpecPrompt {
+	selectedSections := analysisSectionsFromEmbedded(spec.Sections)
+	if len(sections) > 0 {
+		selectedSections = sections[0]
+	}
+
 	relations := make([]analysisRelationPrompt, 0, len(spec.Record.Relations))
 	for _, relation := range spec.Record.Relations {
 		relations = append(relations, analysisRelationPrompt{
@@ -278,35 +305,125 @@ func analysisSpecFromDocument(spec specDocument) analysisSpecPrompt {
 		Domain:    spec.Record.Domain,
 		AppliesTo: append([]string(nil), spec.Record.AppliesTo...),
 		Relations: relations,
-		Sections:  analysisSectionsFromEmbedded(spec.Sections),
+		Sections:  selectedSections,
 	}
 }
 
-func analysisDocFromDocument(doc docDocument) analysisDocPrompt {
+func analysisDocFromDocument(doc docDocument, counterpartSections []embeddedSection) analysisDocPrompt {
 	return analysisDocPrompt{
 		Ref:       doc.Record.Ref,
 		Title:     doc.Record.Title,
 		SourceRef: doc.Record.SourceRef,
-		Sections:  analysisSectionsFromEmbedded(doc.Sections),
+		Sections:  analysisSectionsFromEmbedded(doc.Sections, counterpartSections),
 	}
 }
 
-func analysisSectionsFromEmbedded(sections []embeddedSection) []analysisSectionPrompt {
-	result := make([]analysisSectionPrompt, 0, minInt(len(sections), analysisPromptSectionLimit))
-	for _, section := range sections {
-		if len(result) == analysisPromptSectionLimit {
-			break
-		}
+func flattenedSectionsFromSpecs(specs map[string]specDocument) []embeddedSection {
+	refs := make([]string, 0, len(specs))
+	for ref := range specs {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+
+	sections := make([]embeddedSection, 0)
+	for _, ref := range refs {
+		sections = append(sections, specs[ref].Sections...)
+	}
+	return sections
+}
+
+type scoredAnalysisSection struct {
+	section    embeddedSection
+	score      float64
+	index      int
+	comparable bool
+}
+
+func analysisSectionsFromEmbedded(sections []embeddedSection, counterpartSections ...[]embeddedSection) []analysisSectionPrompt {
+	var counterparts []embeddedSection
+	if len(counterpartSections) > 0 {
+		counterparts = counterpartSections[0]
+	}
+
+	scored := make([]scoredAnalysisSection, 0, len(sections))
+	anyComparable := false
+	for index, section := range sections {
 		content := strings.TrimSpace(section.Content)
 		if content == "" {
 			continue
 		}
+		score, comparable := analysisSectionRelevance(section, counterparts)
+		anyComparable = anyComparable || comparable
+		scored = append(scored, scoredAnalysisSection{
+			section:    section,
+			score:      score,
+			index:      index,
+			comparable: comparable,
+		})
+	}
+	if anyComparable {
+		sort.SliceStable(scored, func(i, j int) bool {
+			switch {
+			case scored[i].score != scored[j].score:
+				return scored[i].score > scored[j].score
+			case scored[i].comparable != scored[j].comparable:
+				return scored[i].comparable
+			default:
+				return scored[i].index < scored[j].index
+			}
+		})
+	}
+	if len(scored) > analysisPromptSectionLimit {
+		scored = scored[:analysisPromptSectionLimit]
+	}
+
+	result := make([]analysisSectionPrompt, 0, len(scored))
+	for _, candidate := range scored {
 		result = append(result, analysisSectionPrompt{
-			Heading: strings.TrimSpace(section.Heading),
-			Content: truncateForAnalysisPrompt(content, analysisPromptSectionContentLimit),
+			Heading: strings.TrimSpace(candidate.section.Heading),
+			Content: truncateForAnalysisPrompt(strings.TrimSpace(candidate.section.Content), analysisPromptSectionContentLimit),
 		})
 	}
 	return result
+}
+
+func analysisSectionRelevance(section embeddedSection, counterpartSections []embeddedSection) (float64, bool) {
+	if len(section.Embedding) == 0 {
+		return 0, false
+	}
+
+	var (
+		bestScore float64
+		found     bool
+	)
+	for _, counterpart := range counterpartSections {
+		if len(counterpart.Embedding) == 0 {
+			continue
+		}
+		score := cosineSimilarity(section.Embedding, counterpart.Embedding)
+		score = ranking.AdjustHistoricalSectionScore(score, section.Heading, false)
+		if !found || score > bestScore {
+			bestScore = score
+			found = true
+		}
+	}
+	return bestScore, found
+}
+
+func analysisResponseTokenLimit(command string, configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	switch strings.TrimSpace(command) {
+	case "check-doc-drift", "check-compliance-adjudicate":
+		return 2048
+	case "compare-specs", "analyze-impact-severity":
+		return 1024
+	case "runtime-probe":
+		return 64
+	default:
+		return 1024
+	}
 }
 
 func truncateForAnalysisPrompt(text string, limit int) string {

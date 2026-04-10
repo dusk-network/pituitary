@@ -117,6 +117,9 @@ func writeRuntimeProviderConfig(builder *strings.Builder, provider RuntimeProvid
 	if base == nil || provider.MaxRetries != base.MaxRetries {
 		fmt.Fprintf(builder, "max_retries = %d\n", provider.MaxRetries)
 	}
+	if base == nil || provider.MaxResponseTokens != base.MaxResponseTokens {
+		fmt.Fprintf(builder, "max_response_tokens = %d\n", provider.MaxResponseTokens)
+	}
 }
 
 func writeQuotedArray(builder *strings.Builder, key string, values []string) {

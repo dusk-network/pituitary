@@ -61,7 +61,7 @@ func (p *openAICompatibleAnalysisProvider) ClassifyImpactSeverity(ctx context.Co
 	}
 
 	var response impactSeverityResponse
-	if err := p.completeJSON(ctx, openAICompatibleImpactSeveritySystemPrompt, payload, &response); err != nil {
+	if err := p.completeJSON(ctx, payload.Command, openAICompatibleImpactSeveritySystemPrompt, payload, &response); err != nil {
 		return nil, err
 	}
 	response.Classifications = normalizeImpactClassifications(response.Classifications, request.Items)

@@ -313,6 +313,9 @@ func TestCheckDocDriftUsesAnalysisProviderWhenEnabled(t *testing.T) {
 
 	configureOpenAIAnalysisProvider(t, cfg, func(t *testing.T, request openAICompatibleChatRequest) string {
 		t.Helper()
+		if got, want := request.MaxTokens, 2048; got != want {
+			t.Fatalf("request.max_tokens = %d, want %d", got, want)
+		}
 		var prompt docDriftAnalysisPrompt
 		if err := json.Unmarshal([]byte(request.Messages[1].Content), &prompt); err != nil {
 			t.Fatalf("unmarshal prompt: %v", err)

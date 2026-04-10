@@ -241,6 +241,7 @@ model = "nomic-embed-text-v1.5"
 profile = "local-lm-studio"
 model = "qwen3.5-35b"
 timeout_ms = 120000
+max_response_tokens = 2048
 
 [[sources]]
 name = "specs"
@@ -281,6 +282,9 @@ path = "specs"
 	}
 	if got, want := cfg.Runtime.Analysis.TimeoutMS, 120000; got != want {
 		t.Fatalf("runtime.analysis.timeout_ms = %d, want %d", got, want)
+	}
+	if got, want := cfg.Runtime.Analysis.MaxResponseTokens, 2048; got != want {
+		t.Fatalf("runtime.analysis.max_response_tokens = %d, want %d", got, want)
 	}
 }
 
@@ -1272,12 +1276,13 @@ func TestRenderRoundTripsRuntimeProfiles(t *testing.T) {
 				MaxRetries: 1,
 			},
 			Analysis: RuntimeProvider{
-				Profile:    "local-lm-studio",
-				Provider:   RuntimeProviderOpenAI,
-				Model:      "qwen3.5-35b",
-				Endpoint:   "http://127.0.0.1:1234/v1",
-				TimeoutMS:  120000,
-				MaxRetries: 1,
+				Profile:           "local-lm-studio",
+				Provider:          RuntimeProviderOpenAI,
+				Model:             "qwen3.5-35b",
+				Endpoint:          "http://127.0.0.1:1234/v1",
+				TimeoutMS:         120000,
+				MaxRetries:        1,
+				MaxResponseTokens: 2048,
 			},
 		},
 		Sources: []Source{
@@ -1313,6 +1318,9 @@ func TestRenderRoundTripsRuntimeProfiles(t *testing.T) {
 	}
 	if got, want := loaded.Runtime.Analysis.TimeoutMS, 120000; got != want {
 		t.Fatalf("loaded runtime.analysis.timeout_ms = %d, want %d", got, want)
+	}
+	if got, want := loaded.Runtime.Analysis.MaxResponseTokens, 2048; got != want {
+		t.Fatalf("loaded runtime.analysis.max_response_tokens = %d, want %d", got, want)
 	}
 }
 
