@@ -54,6 +54,21 @@ func buildLimiter() {}
 			} `json:"compliant"`
 			Conflicts   []any `json:"conflicts"`
 			Unspecified []any `json:"unspecified"`
+			Relations   []struct {
+				Path       string `json:"path"`
+				Type       string `json:"type"`
+				State      string `json:"state"`
+				DeclaredBy string `json:"declared_by"`
+			} `json:"relations"`
+			RelationSummary struct {
+				Total               int `json:"total"`
+				Verified            int `json:"verified"`
+				Drifted             int `json:"drifted"`
+				UnverifiableInScope int `json:"unverifiable_in_scope"`
+			} `json:"relation_summary"`
+			Discovery struct {
+				FilesWithZeroRelations []any `json:"files_with_zero_relations"`
+			} `json:"discovery"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -80,6 +95,24 @@ func buildLimiter() {}
 	}
 	if len(payload.Result.Unspecified) != 0 {
 		t.Fatalf("result.unspecified = %+v, want none", payload.Result.Unspecified)
+	}
+	if got, want := payload.Result.RelationSummary.Total, len(payload.Result.RelevantSpecs); got != want {
+		t.Fatalf("relation_summary.total = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.RelationSummary.Verified, payload.Result.RelationSummary.Total; got != want {
+		t.Fatalf("relation_summary.verified = %d, want %d", got, want)
+	}
+	if payload.Result.RelationSummary.Drifted != 0 || payload.Result.RelationSummary.UnverifiableInScope != 0 {
+		t.Fatalf("relation_summary = %+v, want only verified relations", payload.Result.RelationSummary)
+	}
+	if len(payload.Result.Relations) != payload.Result.RelationSummary.Total {
+		t.Fatalf("relations = %+v, want one entry per explicit governing relation", payload.Result.Relations)
+	}
+	if len(payload.Result.Discovery.FilesWithZeroRelations) != 0 {
+		t.Fatalf("discovery = %+v, want no zero-relation files", payload.Result.Discovery)
+	}
+	if payload.Result.Relations[0].Path == "" || payload.Result.Relations[0].DeclaredBy == "" || payload.Result.Relations[0].State != "verified" {
+		t.Fatalf("top relation = %+v, want verified explicit relation metadata", payload.Result.Relations[0])
 	}
 	if payload.Result.Compliant[0].SpecRef == "" || payload.Result.Compliant[0].SectionHeading == "" {
 		t.Fatalf("top compliant finding = %+v, want spec ref and section heading", payload.Result.Compliant[0])
@@ -147,6 +180,14 @@ Use a sliding-window limiter.
 			} `json:"compliant"`
 			Conflicts   []any `json:"conflicts"`
 			Unspecified []any `json:"unspecified"`
+			Relations   []struct {
+				Type      string `json:"type"`
+				State     string `json:"state"`
+				Endpoints []struct {
+					NodeKind string `json:"node_kind"`
+					Ref      string `json:"ref"`
+				} `json:"endpoints"`
+			} `json:"relations"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -183,6 +224,15 @@ Use a sliding-window limiter.
 	}
 	if payload.Result.Compliant[0].Path != "docs/guides/reference-adapter.md" || payload.Result.Compliant[0].SpecRef != "SPEC-042" {
 		t.Fatalf("top compliant finding = %+v, want explicit doc applies_to match", payload.Result.Compliant[0])
+	}
+	if len(payload.Result.Relations) == 0 {
+		t.Fatalf("relations = %+v, want explicit doc relation", payload.Result.Relations)
+	}
+	if payload.Result.Relations[0].Type != "doc_reflects_spec" || payload.Result.Relations[0].State != "verified" {
+		t.Fatalf("top relation = %+v, want verified doc_reflects_spec", payload.Result.Relations[0])
+	}
+	if len(payload.Result.Relations[0].Endpoints) != 2 || payload.Result.Relations[0].Endpoints[1].Ref != "doc://guides/reference-adapter" {
+		t.Fatalf("top relation endpoints = %+v, want indexed doc ref endpoint", payload.Result.Relations[0].Endpoints)
 	}
 }
 
@@ -224,6 +274,11 @@ func buildLimiter() {}
 				Expected       string `json:"expected"`
 				Observed       string `json:"observed"`
 			} `json:"conflicts"`
+			Relations []struct {
+				Path       string `json:"path"`
+				State      string `json:"state"`
+				DeclaredBy string `json:"declared_by"`
+			} `json:"relations"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -247,6 +302,16 @@ func buildLimiter() {}
 	}
 	if payload.Result.Conflicts[0].Code == "" {
 		t.Fatalf("top conflict = %+v, want stable code", payload.Result.Conflicts[0])
+	}
+	foundDrifted := false
+	for _, relation := range payload.Result.Relations {
+		if relation.Path == "src/api/middleware/ratelimiter.go" && relation.DeclaredBy == "SPEC-042#applies_to" && relation.State == "drifted" {
+			foundDrifted = true
+			break
+		}
+	}
+	if !foundDrifted {
+		t.Fatalf("relations = %+v, want drifted relation for SPEC-042", payload.Result.Relations)
 	}
 }
 
@@ -286,6 +351,17 @@ plinth ember quartz
 				LimitingFactor string `json:"limiting_factor"`
 				Suggestion     string `json:"suggestion"`
 			} `json:"unspecified"`
+			Relations       []any `json:"relations"`
+			RelationSummary struct {
+				Total int `json:"total"`
+			} `json:"relation_summary"`
+			Discovery struct {
+				FilesWithZeroRelations []struct {
+					Path         string `json:"path"`
+					Code         string `json:"code"`
+					Traceability string `json:"traceability"`
+				} `json:"files_with_zero_relations"`
+			} `json:"discovery"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -315,6 +391,15 @@ plinth ember quartz
 	}
 	if !strings.Contains(payload.Result.Unspecified[0].Suggestion, `applies_to = ["code://notes/ungoverned.txt"]`) {
 		t.Fatalf("unspecified finding = %+v, want applies_to suggestion", payload.Result.Unspecified[0])
+	}
+	if len(payload.Result.Relations) != 0 || payload.Result.RelationSummary.Total != 0 {
+		t.Fatalf("relations = %+v summary=%+v, want no explicit relations", payload.Result.Relations, payload.Result.RelationSummary)
+	}
+	if len(payload.Result.Discovery.FilesWithZeroRelations) != 1 {
+		t.Fatalf("discovery = %+v, want one zero-relation discovery item", payload.Result.Discovery)
+	}
+	if payload.Result.Discovery.FilesWithZeroRelations[0].Path != "notes/ungoverned.txt" || payload.Result.Discovery.FilesWithZeroRelations[0].Code != "weak_traceability" {
+		t.Fatalf("discovery item = %+v, want ungoverned weak_traceability path", payload.Result.Discovery.FilesWithZeroRelations[0])
 	}
 }
 
@@ -505,6 +590,20 @@ func buildLimiter() {}
 				LimitingFactor string `json:"limiting_factor"`
 				Suggestion     string `json:"suggestion"`
 			} `json:"unspecified"`
+			Relations []struct {
+				State      string `json:"state"`
+				DeclaredBy string `json:"declared_by"`
+				Code       string `json:"code"`
+			} `json:"relations"`
+			RelationSummary struct {
+				Total               int `json:"total"`
+				Verified            int `json:"verified"`
+				Drifted             int `json:"drifted"`
+				UnverifiableInScope int `json:"unverifiable_in_scope"`
+			} `json:"relation_summary"`
+			Discovery struct {
+				FilesWithZeroRelations []any `json:"files_with_zero_relations"`
+			} `json:"discovery"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -530,6 +629,21 @@ func buildLimiter() {}
 		if !strings.Contains(item.Suggestion, "already governs") {
 			t.Fatalf("unspecified finding = %+v, want explicit guidance", item)
 		}
+	}
+	if got, want := payload.Result.RelationSummary.Total, len(payload.Result.Relations); got != want {
+		t.Fatalf("relation_summary.total = %d, want %d", got, want)
+	}
+	if payload.Result.RelationSummary.Verified != 0 || payload.Result.RelationSummary.Drifted != 0 {
+		t.Fatalf("relation_summary = %+v, want only unverifiable relations", payload.Result.RelationSummary)
+	}
+	if payload.Result.RelationSummary.UnverifiableInScope != len(payload.Result.Relations) {
+		t.Fatalf("relation_summary = %+v relations=%+v, want all relations unverifiable_in_scope", payload.Result.RelationSummary, payload.Result.Relations)
+	}
+	if len(payload.Result.Discovery.FilesWithZeroRelations) != 0 {
+		t.Fatalf("discovery = %+v, want no zero-relation discovery items", payload.Result.Discovery)
+	}
+	if len(payload.Result.Relations) == 0 || payload.Result.Relations[0].State != "unverifiable_in_scope" {
+		t.Fatalf("relations = %+v, want explicit relations marked unverifiable_in_scope", payload.Result.Relations)
 	}
 }
 
@@ -574,6 +688,21 @@ plinth ember quartz
 				MissingGovernanceEdge     int `json:"missing_governance_edge"`
 				ExplicitButUnderexercised int `json:"explicit_but_underexercised"`
 			} `json:"unspecified_summary"`
+			Relations []struct {
+				State string `json:"state"`
+				Path  string `json:"path"`
+			} `json:"relations"`
+			RelationSummary struct {
+				Total               int `json:"total"`
+				Verified            int `json:"verified"`
+				Drifted             int `json:"drifted"`
+				UnverifiableInScope int `json:"unverifiable_in_scope"`
+			} `json:"relation_summary"`
+			Discovery struct {
+				FilesWithZeroRelations []struct {
+					Path string `json:"path"`
+				} `json:"files_with_zero_relations"`
+			} `json:"discovery"`
 		} `json:"result"`
 		Errors []cliIssue `json:"errors"`
 	}
@@ -591,6 +720,18 @@ plinth ember quartz
 	}
 	if got, want := payload.Result.UnspecifiedSummary.ExplicitButUnderexercised, 2; got != want {
 		t.Fatalf("explicit_but_underexercised = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.RelationSummary.Total, len(payload.Result.Relations); got != want {
+		t.Fatalf("relation_summary.total = %d, want %d", got, want)
+	}
+	if payload.Result.RelationSummary.UnverifiableInScope != len(payload.Result.Relations) {
+		t.Fatalf("relation_summary = %+v, want all explicit relations marked unverifiable_in_scope", payload.Result.RelationSummary)
+	}
+	if payload.Result.RelationSummary.Verified != 0 || payload.Result.RelationSummary.Drifted != 0 {
+		t.Fatalf("relation_summary = %+v, want no verified or drifted relations in this mixed test", payload.Result.RelationSummary)
+	}
+	if len(payload.Result.Discovery.FilesWithZeroRelations) != 1 || payload.Result.Discovery.FilesWithZeroRelations[0].Path != "notes/ungoverned.txt" {
+		t.Fatalf("discovery = %+v, want notes/ungoverned.txt only", payload.Result.Discovery)
 	}
 }
 
