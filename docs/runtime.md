@@ -45,9 +45,14 @@ For provider-backed qualitative analysis used by `compare-specs` and `check-doc-
 profile = "local-lm-studio"
 model = "your-analysis-model"
 timeout_ms = 120000
+max_response_tokens = 2048
 ```
 
 Retrieval stays deterministic. The analysis model only touches narrowly shortlisted context.
+
+Set `runtime.analysis.max_response_tokens` when you want one explicit cap on chat-completion output across Pituitary's qualitative analysis requests. If you omit it, Pituitary keeps bounded per-command defaults instead, so runtime probes stay tiny while `compare-specs`, impact severity checks, doc-drift refinement, and compliance adjudication get slightly larger response budgets.
+
+For `compare-specs` and `check-doc-drift`, Pituitary selects section-level evidence by relevance to the counterpart spec or document instead of taking the first sections by position. That keeps the prompt bundle small while preferring semantically related sections.
 
 When choosing `runtime.analysis`, optimize for bounded semantic adjudication rather than open-ended chat:
 
@@ -141,7 +146,7 @@ Typical client config:
 }
 ```
 
-The MCP server exposes:
+The MCP server exposes 13 tools:
 
 - `search_specs`
 - `check_overlap`
@@ -149,5 +154,12 @@ The MCP server exposes:
 - `analyze_impact`
 - `check_doc_drift`
 - `review_spec`
+- `check_compliance`
+- `check_terminology`
+- `governed_by`
+- `compile_preview`
+- `fix_preview`
+- `status`
+- `explain_file`
 
 `index --rebuild` remains CLI-only by design.

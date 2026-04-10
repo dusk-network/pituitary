@@ -4,7 +4,7 @@ interface:
   default_prompt: "Use $pituitary-cli to inspect this repository with Pituitary and return a JSON-grounded result."
 
 metadata:
-  version: "1.0.0-beta.7"
+  version: "1.0.0-beta.8"
   source: "https://github.com/dusk-network/pituitary"
   license: "MIT"
   categories:
