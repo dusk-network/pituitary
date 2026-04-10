@@ -188,6 +188,52 @@ func TestRunCheckTerminologyWithRequestFileJSON(t *testing.T) {
 	}
 }
 
+func TestRunCheckTerminologyHonorsExcludePaths(t *testing.T) {
+	repo := writeTerminologyExcludeWorkspaceCmd(t)
+	indexStdout := bytes.Buffer{}
+	indexStderr := bytes.Buffer{}
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &indexStdout, &indexStderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, indexStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode = withWorkingDir(t, repo, func() int {
+		return runCheckTerminology([]string{"--scope", "docs", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckTerminology() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckTerminology() stderr = %q, want empty", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Findings []struct {
+				Ref       string `json:"ref"`
+				SourceRef string `json:"source_ref"`
+			} `json:"findings"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal excluded terminology payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Findings) != 1 {
+		t.Fatalf("findings = %+v, want only the non-excluded doc", payload.Result.Findings)
+	}
+	if got, want := payload.Result.Findings[0].SourceRef, "file://docs/guides/repo-kernel.md"; got != want {
+		t.Fatalf("source_ref = %q, want %q", got, want)
+	}
+}
+
 func writeTerminologyWorkspaceCmd(t *testing.T) string {
 	t.Helper()
 
@@ -254,6 +300,69 @@ adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
 include = ["guides/*.md"]
+`)
+	return root
+}
+
+func writeTerminologyExcludeWorkspaceCmd(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	mustWriteFileCmd(t, root+"/specs/kernel-locality/spec.toml", `
+id = "SPEC-LOCALITY"
+title = "Kernel Locality Contract"
+status = "accepted"
+domain = "kernel"
+body = "body.md"
+`)
+	mustWriteFileCmd(t, root+"/specs/kernel-locality/body.md", `
+# Kernel Locality Contract
+
+The runtime is locality-centric and treats repository adapters as optional extensions.
+`)
+	mustWriteFileCmd(t, root+"/docs/guides/repo-kernel.md", `
+# Repo Kernel Guide
+
+Repository storage is the default operator model.
+`)
+	mustWriteFileCmd(t, root+"/CHANGELOG.md", `
+# Changelog
+
+- Repository storage became the default operator model in v0.6.2.
+`)
+	mustWriteIndexFixture(t, root, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[terminology]
+exclude_paths = ["CHANGELOG.md"]
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+forbidden_current = ["repository"]
+docs_severity = "error"
+specs_severity = "warning"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "."
+files = ["CHANGELOG.md", "docs/guides/repo-kernel.md"]
 `)
 	return root
 }

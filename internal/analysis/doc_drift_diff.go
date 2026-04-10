@@ -64,7 +64,7 @@ func resolveDiffDocDriftContext(ctx context.Context, repo *analysisRepository, c
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	targets, err := loadParsedDiffComplianceTargetsContext(ctx, parsed)
+	targets, err := loadParsedDiffComplianceTargetsContext(ctx, cfg, parsed)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

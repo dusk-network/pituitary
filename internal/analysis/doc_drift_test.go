@@ -393,6 +393,15 @@ func TestCheckDocDriftUsesAnalysisProviderWhenEnabled(t *testing.T) {
 	if got, want := suggestion.SuggestedEdit.Note, "Point readers at state.db as the canonical store and downgrade work_queue.json to optional cache status."; got != want {
 		t.Fatalf("suggested_edit.note = %q, want %q", got, want)
 	}
+	if result.Runtime == nil || result.Runtime.Analysis == nil {
+		t.Fatalf("runtime = %+v, want analysis provenance", result.Runtime)
+	}
+	if !result.Runtime.Analysis.Used {
+		t.Fatalf("runtime.analysis.used = false, want true")
+	}
+	if got, want := result.Runtime.Analysis.Model, "pituitary-analysis"; got != want {
+		t.Fatalf("runtime.analysis.model = %q, want %q", got, want)
+	}
 }
 
 func TestCheckDocDriftSurfacesPossibleDriftForConceptualNearMatch(t *testing.T) {

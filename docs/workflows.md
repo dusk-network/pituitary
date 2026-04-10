@@ -18,6 +18,8 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 - `spec_metadata_gap`: missing `applies_to`; tighten governance in the spec
 - `code_evidence_gap`: governance is explicit, but the code does not expose enough literal evidence
 
+The JSON result also carries `unspecified_summary`, which splits `unspecified` findings into `missing_governance_edge` versus `explicit_but_underexercised` so CI and operators do not treat those remediations as the same class of problem.
+
 ## Commands
 
 | Command | What it does |
@@ -80,6 +82,8 @@ The result now separates:
 
 - `findings`: actionable current-state violations
 - `tolerated`: historical or compatibility-only uses that are still indexed for context
+
+Use `[terminology].exclude_paths` when specific files or folders are historically frozen and should be skipped by terminology sweeps and `compile` without being removed from the wider index.
 
 Each matched term includes structured `classification`, `context`, `severity`, and `replacement` fields so CI or editor tooling can turn JSON output into warnings or errors without scraping prose.
 

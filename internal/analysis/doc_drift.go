@@ -171,6 +171,7 @@ type DocDriftResult struct {
 	Assessments     []DocDriftAssessment     `json:"assessments,omitempty"`
 	SpecInferences  []SpecInference          `json:"spec_inferences,omitempty"`
 	Remediation     *DocRemediationResult    `json:"remediation"`
+	Runtime         *CommandRuntime          `json:"runtime,omitempty"`
 	Warnings        []Warning                `json:"warnings,omitempty"`
 	ContentTrust    *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
@@ -231,6 +232,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	if err != nil {
 		return nil, err
 	}
+	analysisRuntime := newAnalysisRuntimeUsage(cfg.Runtime.Analysis)
 
 	var (
 		selectedDocs    map[string]docDocument
@@ -267,7 +269,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 		}
 	}
 
-	result, err := buildDocDriftResult(ctx, analyzer, scope, selectedDocs, specs, repo.loadAllSpecs)
+	result, err := buildDocDriftResult(ctx, analyzer, analysisRuntime, scope, selectedDocs, specs, repo.loadAllSpecs)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +279,7 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	return result, nil
 }
 
-func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) (*DocDriftResult, error) {
+func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, analysisRuntime *RuntimeUsage, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) (*DocDriftResult, error) {
 	driftItems := make([]DriftItem, 0, len(selectedDocs))
 	assessments := make([]DocDriftAssessment, 0, len(selectedDocs))
 	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
@@ -378,6 +380,10 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 	refined := make([]refinedResult, len(pending))
 
 	if len(pending) > 0 {
+		if analysisRuntime != nil && analyzer != nil {
+			analysisRuntime.Used = true
+		}
+
 		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(ctx)
 		g.SetLimit(adjudicationConcurrency)
@@ -443,6 +449,11 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 	}
 	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
 
+	var runtime *CommandRuntime
+	if analysisRuntime != nil {
+		runtime = &CommandRuntime{Analysis: analysisRuntime}
+	}
+
 	return &DocDriftResult{
 		Scope:          scope,
 		DriftItems:     driftItems,
@@ -451,6 +462,7 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, scop
 		Remediation: &DocRemediationResult{
 			Items: remediationItems,
 		},
+		Runtime:      runtime,
 		Warnings:     buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
 		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}, nil

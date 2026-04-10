@@ -38,7 +38,7 @@ pituitary status --check-runtime embedder
 pituitary index --rebuild
 ```
 
-For provider-backed qualitative analysis used by `compare-specs` and `check-doc-drift`:
+For provider-backed qualitative analysis used by `compare-specs`, `check-doc-drift`, and bounded re-adjudication in `check-compliance`:
 
 ```toml
 [runtime.analysis]
@@ -52,7 +52,7 @@ Retrieval stays deterministic. The analysis model only touches narrowly shortlis
 
 Set `runtime.analysis.max_response_tokens` when you want one explicit cap on chat-completion output across Pituitary's qualitative analysis requests. If you omit it, Pituitary keeps bounded per-command defaults instead, so runtime probes stay tiny while `compare-specs`, impact severity checks, doc-drift refinement, and compliance adjudication get slightly larger response budgets.
 
-For `compare-specs` and `check-doc-drift`, Pituitary selects section-level evidence by relevance to the counterpart spec or document instead of taking the first sections by position. That keeps the prompt bundle small while preferring semantically related sections.
+For `compare-specs` and `check-doc-drift`, Pituitary selects section-level evidence by relevance to the counterpart spec or document instead of taking the first sections by position. `check-doc-drift` still starts from deterministic drift items; the analysis runtime only refines those shortlisted findings, so different models can legitimately emit the same structural result.
 
 When choosing `runtime.analysis`, optimize for bounded semantic adjudication rather than open-ended chat:
 
@@ -72,6 +72,8 @@ pituitary status --check-runtime all
 ```
 
 `pituitary status` reports the resolved runtime config for `runtime.embedder` and `runtime.analysis`, including the active profile name when one is selected. `pituitary status --check-runtime ...` uses those resolved values for the live probe and echoes the same profile / provider / model / endpoint / timeout assumptions in the probe output.
+
+`check-compliance` and `check-doc-drift` also record the configured analysis runtime in their JSON `result.runtime.analysis` block, including whether the command actually consulted the model during that run.
 
 For Nomic-compatible models, Pituitary automatically applies the required `search_document:` / `search_query:` prefixes.
 

@@ -95,7 +95,7 @@ All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=
 
 One `pituitary.toml` can also span multiple repository roots. Bind a source to a named repo root with `repo = "..."`, and Pituitary carries that repo identity through search, drift, impact, status, and index output so cross-repo results stay unambiguous.
 
-For terminology migrations, you can keep running ad hoc audits with `--term` / `--canonical-term`, or declare reusable `[[terminology.policies]]` in config and run `pituitary check-terminology` directly. Results now separate actionable current-state violations from tolerated historical uses and include replacement suggestions in both text and JSON output.
+For terminology migrations, you can keep running ad hoc audits with `--term` / `--canonical-term`, or declare reusable `[[terminology.policies]]` in config and run `pituitary check-terminology` directly. Results now separate actionable current-state violations from tolerated historical uses, support terminology-only `exclude_paths` for historical containers such as `CHANGELOG.md`, and include replacement suggestions in both text and JSON output.
 
 `analyze-impact`, `check-doc-drift`, and `review-spec` now emit section-level evidence chains in JSON: source refs on both sides of the match, a `classification`, a `link_reason`, and likely edit targets or suggested bullets. That gives agents enough structure to explain the next manual edit without scraping prose or auto-editing speculative changes.
 
@@ -251,7 +251,7 @@ pituitary index --rebuild
 
 `pituitary status` now shows the active runtime profile plus the resolved provider, model, endpoint, timeout, and retry settings for both embedder and analysis. `--check-runtime` probes those resolved settings directly.
 
-Retrieval remains deterministic. The analysis model only sees narrowly shortlisted context for `compare-specs` and `check-doc-drift`. Any OpenAI-compatible embedding or analysis API works. See [runtime docs](docs/runtime.md) for full setup.
+Retrieval remains deterministic. The analysis model only sees narrowly shortlisted context for `compare-specs`, `check-doc-drift`, and bounded re-adjudication in `check-compliance`, and those result envelopes now record the configured analysis runtime plus whether it was consulted during the run. Any OpenAI-compatible embedding or analysis API works. See [runtime docs](docs/runtime.md) for full setup.
 
 </details>
 
