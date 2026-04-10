@@ -182,6 +182,47 @@ func TestRunCompileRequiresScopeFlag(t *testing.T) {
 	}
 }
 
+func TestRunCompileHonorsTerminologyExcludePaths(t *testing.T) {
+	repo := writeTerminologyExcludeWorkspaceCmd(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runCompile([]string{"--scope", "docs", "--dry-run", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCompile() exit code = %d, want 0\nstdout: %s\nstderr: %s", exitCode, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCompile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Files []struct {
+				Path string `json:"path"`
+			} `json:"files"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v\nraw: %s", err, stdout.String())
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.Files) != 1 {
+		t.Fatalf("result.files = %+v, want only the non-excluded doc", payload.Result.Files)
+	}
+	if got := payload.Result.Files[0].Path; !strings.HasSuffix(got, "/docs/guides/repo-kernel.md") {
+		t.Fatalf("planned path = %q, want repo-kernel suffix", got)
+	}
+}
+
 func writeCompileWorkspaceCmd(t *testing.T) string {
 	t.Helper()
 

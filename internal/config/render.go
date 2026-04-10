@@ -48,6 +48,11 @@ func Render(cfg *Config) (string, error) {
 		writeRuntimeProviderConfig(&builder, cfg.Runtime.Analysis, runtimeProfileBase(cfg.Runtime.Profiles, cfg.Runtime.Analysis.Profile))
 	}
 
+	if len(cfg.Terminology.ExcludePaths) > 0 {
+		builder.WriteString("\n[terminology]\n")
+		writeQuotedArray(&builder, "exclude_paths", cfg.Terminology.ExcludePaths)
+	}
+
 	for _, policy := range cfg.Terminology.Policies {
 		builder.WriteString("\n[[terminology.policies]]\n")
 		fmt.Fprintf(&builder, "preferred = %s\n", strconv.Quote(policy.Preferred))

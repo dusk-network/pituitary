@@ -117,7 +117,8 @@ type RuntimeProvider struct {
 }
 
 type Terminology struct {
-	Policies []TerminologyPolicy
+	ExcludePaths []string
+	Policies     []TerminologyPolicy
 }
 
 type TerminologyPolicy struct {
@@ -170,7 +171,8 @@ type rawSource struct {
 }
 
 type rawTerminology struct {
-	Policies []rawTerminologyPolicy `toml:"policies"`
+	ExcludePaths []string               `toml:"exclude_paths"`
+	Policies     []rawTerminologyPolicy `toml:"policies"`
 }
 
 type rawTerminologyPolicy struct {
@@ -297,7 +299,8 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
 		},
 		Terminology: Terminology{
-			Policies: make([]TerminologyPolicy, 0, len(raw.Terminology.Policies)),
+			ExcludePaths: uniqueStringList(raw.Terminology.ExcludePaths),
+			Policies:     make([]TerminologyPolicy, 0, len(raw.Terminology.Policies)),
 		},
 		Sources: make([]Source, 0, len(raw.Sources)),
 	}
@@ -691,6 +694,16 @@ func validateTerminology(terminology *Terminology) error {
 	var errs validationErrors
 	seenPreferred := make(map[string]string, len(terminology.Policies))
 	seenGoverned := make(map[string]string)
+	terminology.ExcludePaths = uniqueStringList(terminology.ExcludePaths)
+	for i, pattern := range terminology.ExcludePaths {
+		if strings.TrimSpace(pattern) == "" {
+			errs.add("terminology.exclude_paths[%d]: patterns must not be empty", i)
+			continue
+		}
+		if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
+			errs.add("terminology.exclude_paths[%d]: invalid pattern %q: %v", i, pattern, err)
+		}
+	}
 	for i := range terminology.Policies {
 		policy := &terminology.Policies[i]
 		label := fmt.Sprintf("terminology.policies[%d]", i)

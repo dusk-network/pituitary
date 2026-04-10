@@ -1377,6 +1377,40 @@ path = "specs"
 	}
 }
 
+func TestLoadTerminologyExcludePaths(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[terminology]
+exclude_paths = ["CHANGELOG.md", "docs/archive/*.md"]
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Terminology.ExcludePaths, []string{"CHANGELOG.md", "docs/archive/*.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("exclude_paths = %#v, want %#v", got, want)
+	}
+}
+
 func TestLoadRejectsInvalidTerminologySeverity(t *testing.T) {
 	t.Parallel()
 
@@ -1424,6 +1458,7 @@ func TestRenderRoundTripsTerminologyPolicies(t *testing.T) {
 			IndexPath: ".pituitary/pituitary.db",
 		},
 		Terminology: Terminology{
+			ExcludePaths: []string{"CHANGELOG.md", "docs/archive/*.md"},
 			Policies: []TerminologyPolicy{
 				{
 					Preferred:         "locality",
@@ -1459,6 +1494,9 @@ func TestRenderRoundTripsTerminologyPolicies(t *testing.T) {
 	}
 	if got, want := len(loaded.Terminology.Policies), 1; got != want {
 		t.Fatalf("len(loaded terminology policies) = %d, want %d", got, want)
+	}
+	if got, want := loaded.Terminology.ExcludePaths, []string{"CHANGELOG.md", "docs/archive/*.md"}; !equalStringSlices(got, want) {
+		t.Fatalf("loaded exclude_paths = %#v, want %#v", got, want)
 	}
 	policy := loaded.Terminology.Policies[0]
 	if got, want := policy.Preferred, "locality"; got != want {

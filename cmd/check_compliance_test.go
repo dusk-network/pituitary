@@ -433,6 +433,67 @@ func buildLimiter() {}
 	}
 }
 
+func TestRunCheckComplianceJSONIncludesUnspecifiedSummaryBreakout(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", `
+package middleware
+
+func buildLimiter() {}
+`)
+	writeComplianceSourceFile(t, repo, "notes/ungoverned.txt", `
+zxqv aurora lattice
+plinth ember quartz
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--path", "src/api/middleware/ratelimiter.go",
+			"--path", "notes/ungoverned.txt",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Unspecified []struct {
+				Path         string `json:"path"`
+				Traceability string `json:"traceability"`
+			} `json:"unspecified"`
+			UnspecifiedSummary struct {
+				Total                     int `json:"total"`
+				MissingGovernanceEdge     int `json:"missing_governance_edge"`
+				ExplicitButUnderexercised int `json:"explicit_but_underexercised"`
+			} `json:"unspecified_summary"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal unspecified-summary payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if got, want := payload.Result.UnspecifiedSummary.Total, len(payload.Result.Unspecified); got != want {
+		t.Fatalf("unspecified_summary.total = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.UnspecifiedSummary.MissingGovernanceEdge, 1; got != want {
+		t.Fatalf("missing_governance_edge = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.UnspecifiedSummary.ExplicitButUnderexercised, 2; got != want {
+		t.Fatalf("explicit_but_underexercised = %d, want %d", got, want)
+	}
+}
+
 func TestRunCheckComplianceDiffFromStdinJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 
@@ -586,6 +647,108 @@ index 1111111..0000000
 		if item.LimitingFactor != "code_evidence_gap" {
 			t.Fatalf("unspecified finding = %+v, want code_evidence_gap limiting factor", item)
 		}
+	}
+}
+
+func TestRunCheckComplianceCollapsesDuplicateMirrorTargets(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+	content := `
+package middleware
+
+// Apply limits per tenant rather than per API key.
+// Enforce a default limit of 200 requests per minute.
+// Allow short bursts above the steady-state tenant limit.
+// Use a sliding-window limiter and tenant-specific overrides.
+func buildLimiter() {}
+`
+	writeComplianceSourceFile(t, repo, "src/api/middleware/ratelimiter.go", content)
+	writeComplianceSourceFile(t, repo, ".claude/skills/ratelimiter.go", content)
+	writeComplianceSourceFile(t, repo, ".gemini/skills/ratelimiter.go", content)
+
+	oldStdin := cliStdin
+	cliStdin = strings.NewReader(strings.TrimSpace(`
+diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go
+index 0000000..1111111 100644
+--- a/src/api/middleware/ratelimiter.go
++++ b/src/api/middleware/ratelimiter.go
+@@ -0,0 +1,7 @@
++package middleware
++
++// Apply limits per tenant rather than per API key.
++// Enforce a default limit of 200 requests per minute.
++// Allow short bursts above the steady-state tenant limit.
++// Use a sliding-window limiter and tenant-specific overrides.
++func buildLimiter() {}
+diff --git a/.claude/skills/ratelimiter.go b/.claude/skills/ratelimiter.go
+index 0000000..1111111 100644
+--- a/.claude/skills/ratelimiter.go
++++ b/.claude/skills/ratelimiter.go
+@@ -0,0 +1,7 @@
++package middleware
++
++// Apply limits per tenant rather than per API key.
++// Enforce a default limit of 200 requests per minute.
++// Allow short bursts above the steady-state tenant limit.
++// Use a sliding-window limiter and tenant-specific overrides.
++func buildLimiter() {}
+diff --git a/.gemini/skills/ratelimiter.go b/.gemini/skills/ratelimiter.go
+index 0000000..1111111 100644
+--- a/.gemini/skills/ratelimiter.go
++++ b/.gemini/skills/ratelimiter.go
+@@ -0,0 +1,7 @@
++package middleware
++
++// Apply limits per tenant rather than per API key.
++// Enforce a default limit of 200 requests per minute.
++// Allow short bursts above the steady-state tenant limit.
++// Use a sliding-window limiter and tenant-specific overrides.
++func buildLimiter() {}
+`))
+	t.Cleanup(func() {
+		cliStdin = oldStdin
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		rebuildSearchWorkspaceIndex(t)
+		return runCheckCompliance([]string{
+			"--diff-file", "-",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCheckCompliance(--diff-file -) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCheckCompliance(--diff-file -) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Paths     []string `json:"paths"`
+			Compliant []struct {
+				Path string `json:"path"`
+			} `json:"compliant"`
+			Unspecified []any `json:"unspecified"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal duplicate-target payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if got, want := len(payload.Result.Paths), 3; got != want {
+		t.Fatalf("len(result.paths) = %d, want %d", got, want)
+	}
+	if len(payload.Result.Compliant) == 0 {
+		t.Fatalf("result.compliant = %+v, want compliant findings for the canonical target", payload.Result.Compliant)
+	}
+	if len(payload.Result.Unspecified) != 0 {
+		t.Fatalf("result.unspecified = %+v, want duplicate mirror findings collapsed", payload.Result.Unspecified)
 	}
 }
 

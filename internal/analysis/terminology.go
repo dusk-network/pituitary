@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"fmt"
+	pathpkg "path"
 	"regexp"
 	"sort"
 	"strings"
@@ -182,6 +183,7 @@ func CheckTerminologyContext(ctx context.Context, cfg *config.Config, request Te
 	if err != nil {
 		return nil, err
 	}
+	artifacts = filterTerminologyArtifactsByExcludePaths(artifacts, cfg.Terminology.ExcludePaths)
 
 	anchors, evidenceSections, warnings, err := loadTerminologyAnchors(repo, normalized.TerminologyAuditRequest, anchor)
 	if err != nil {
@@ -345,6 +347,42 @@ func loadTerminologyArtifacts(repo *analysisRepository, request TerminologyAudit
 		}
 	})
 	return artifacts, nil
+}
+
+func filterTerminologyArtifactsByExcludePaths(artifacts []terminologyArtifact, patterns []string) []terminologyArtifact {
+	if len(artifacts) == 0 || len(patterns) == 0 {
+		return artifacts
+	}
+
+	filtered := make([]terminologyArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if terminologyArtifactExcluded(artifact, patterns) {
+			continue
+		}
+		filtered = append(filtered, artifact)
+	}
+	return filtered
+}
+
+func terminologyArtifactExcluded(artifact terminologyArtifact, patterns []string) bool {
+	sourcePath := strings.TrimSpace(strings.TrimPrefix(artifact.SourceRef, "file://"))
+	if sourcePath == "" {
+		return false
+	}
+
+	candidates := []string{pathpkg.Clean(sourcePath)}
+	if repoID := strings.TrimSpace(artifact.Metadata["repo_id"]); repoID != "" {
+		candidates = append(candidates, repoID+":"+pathpkg.Clean(sourcePath))
+	}
+	for _, pattern := range patterns {
+		for _, candidate := range candidates {
+			ok, err := pathpkg.Match(pattern, candidate)
+			if err == nil && ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func terminologyArtifactsFromDocs(docs map[string]docDocument) []terminologyArtifact {

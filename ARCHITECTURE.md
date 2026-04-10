@@ -64,7 +64,7 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 - Database-backed source adapters
 - Incremental index updates
 - Stored code-summary embeddings
-- Provider-backed code-compliance adjudication beyond the shipped deterministic CLI slice
+- Broad provider-backed code-compliance adjudication beyond the shipped deterministic CLI slice; only bounded re-adjudication of deterministic findings is in scope
 
 ### Also shipped in this repo during v1
 
@@ -408,7 +408,7 @@ Step 6: Atomic Swap
 - The current runtime supports two embedder providers: `fixture` and `openai_compatible`.
 - The current runtime supports two analysis providers: `disabled` and `openai_compatible`.
 - Retrieval, indexing, and candidate shortlisting remain deterministic even when provider-backed analysis is enabled.
-- Provider-backed analysis currently applies only to bounded adjudication steps in `compare-specs` and `check-doc-drift`; `review-spec` inherits those refined results.
+- Provider-backed analysis currently applies only to bounded adjudication steps in `compare-specs`, `check-doc-drift`, and `check-compliance`; `review-spec` inherits those refined results.
 - Tests and CI should use the deterministic fixture embedder and require no live model credentials.
 - Unsupported runtime providers should fail during config validation with clear, intentional errors.
 - Provider-backed embeddings and bounded provider-backed analysis are both now part of the runtime contract.
@@ -616,6 +616,7 @@ CLI exit codes should stay simple:
   - Result: `{ "spec_ref": "SPEC-042", "change_type": "accepted", "affected_specs": [...], "affected_refs": [...], "affected_docs": [{ "ref": "doc://guides/api-rate-limits", "score": 0.0, "classification": "semantic_neighbor" | "governed_surface_neighbor", "reasons": ["..."], "evidence": { "spec_ref": "SPEC-042", "spec_source_ref": "file://specs/...", "spec_section": "...", "doc_source_ref": "file://docs/...", "doc_section": "...", "link_reason": "..." }, "suggested_targets": [{ "source_ref": "file://docs/...", "section": "...", "excerpt": "...", "reason": "...", "suggested_bullets": ["..."] }] }] }`
 - `check_terminology` (`pituitary check-terminology`)
   - Request: `{ "terms": ["repo", "workflow"], "canonical_terms": ["locality", "continuity"], "spec_ref": "SPEC-LOCALITY", "scope": "all" | "docs" | "specs" }` or `{ "spec_ref": "SPEC-LOCALITY" }` when config-backed `[[terminology.policies]]` should supply the governed terms
+  - Config may also declare `[terminology].exclude_paths` to skip historically frozen files from terminology sweeps and `compile` without removing them from indexing
   - Result: `{ "scope": { "mode": "workspace" | "spec_ref", "artifact_kinds": ["doc", "spec"], "spec_ref": "SPEC-LOCALITY" }, "terms": [...], "canonical_terms": [...], "anchor_specs": [...], "findings": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [{ "section": "...", "terms": [...], "matches": [{ "term": "repo", "classification": "historical_alias", "context": "current_state" | "historical", "severity": "warning" | "error" | "ignore", "replacement": "locality", "tolerated": false }], "excerpt": "...", "assessment": "...", "evidence": { "spec_ref": "SPEC-LOCALITY", "section": "...", "score": 0.0 } | null }] }], "tolerated": [{ "ref": "...", "kind": "doc" | "spec", "terms": [...], "sections": [...] }] }`
 - `check_doc_drift` (`pituitary check-doc-drift`)
   - Request: exactly one of `{ "doc_ref": "doc://guides/api-rate-limits" }`, `{ "doc_refs": ["doc://guides/api-rate-limits"] }`, `{ "scope": "all" }`, or `{ "diff_text": "..." }`; the CLI also accepts `--diff-file PATH|-` and resolves that into the same diff-backed request shape
@@ -741,6 +742,8 @@ Output:
   compliant[]
   conflicts[]
   unspecified[]
+  unspecified_summary
+  runtime.analysis
 ```
 
 #### Tool: `check_doc_drift`
@@ -759,6 +762,7 @@ Output:
   implicated_specs[]
   implicated_docs[]
   drift_items[]
+  runtime.analysis
 ```
 
 Exactly one selector must be present in v1: `doc_ref`, `doc_refs`, `scope`, or `diff_text`. The only valid `scope` value is `"all"`. The CLI additionally supports `--diff-file PATH|-` so git diffs can be piped in directly without manually embedding them in JSON.

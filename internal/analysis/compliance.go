@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	pathpkg "path"
@@ -127,12 +128,14 @@ type ComplianceFinding struct {
 
 // ComplianceResult is the structured compliance output.
 type ComplianceResult struct {
-	Paths         []string                 `json:"paths"`
-	RelevantSpecs []ComplianceRelevantSpec `json:"relevant_specs,omitempty"`
-	Compliant     []ComplianceFinding      `json:"compliant"`
-	Conflicts     []ComplianceFinding      `json:"conflicts"`
-	Unspecified   []ComplianceFinding      `json:"unspecified"`
-	ContentTrust  *resultmeta.ContentTrust `json:"content_trust,omitempty"`
+	Paths              []string                      `json:"paths"`
+	RelevantSpecs      []ComplianceRelevantSpec      `json:"relevant_specs,omitempty"`
+	Compliant          []ComplianceFinding           `json:"compliant"`
+	Conflicts          []ComplianceFinding           `json:"conflicts"`
+	Unspecified        []ComplianceFinding           `json:"unspecified"`
+	UnspecifiedSummary *ComplianceUnspecifiedSummary `json:"unspecified_summary,omitempty"`
+	Runtime            *CommandRuntime               `json:"runtime,omitempty"`
+	ContentTrust       *resultmeta.ContentTrust      `json:"content_trust,omitempty"`
 }
 
 type complianceTarget struct {
@@ -140,6 +143,7 @@ type complianceTarget struct {
 	RefCandidates []string
 	Content       string
 	Embedding     []float64
+	DuplicateKey  string
 	RemovedOnly   bool
 }
 
@@ -164,6 +168,15 @@ type parsedDiffTarget struct {
 	Added   []string
 	Context []string
 	Removed []string
+}
+
+// ComplianceUnspecifiedSummary breaks unspecified findings into actionable
+// categories so consumers can distinguish missing governance from already-
+// governed-but-underexercised surfaces.
+type ComplianceUnspecifiedSummary struct {
+	Total                     int `json:"total"`
+	MissingGovernanceEdge     int `json:"missing_governance_edge"`
+	ExplicitButUnderexercised int `json:"explicit_but_underexercised"`
 }
 
 type complianceAdjudicationCandidate struct {
@@ -203,12 +216,20 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	if err != nil {
 		return nil, err
 	}
+	evaluationTargets = collapseComplianceDuplicateEvaluationTargets(evaluationTargets)
+
+	analysisRuntime := newAnalysisRuntimeUsage(cfg.Runtime.Analysis)
+	var runtime *CommandRuntime
+	if analysisRuntime != nil {
+		runtime = &CommandRuntime{Analysis: analysisRuntime}
+	}
 
 	result := &ComplianceResult{
 		Paths:        complianceTargetPaths(targets),
 		Compliant:    []ComplianceFinding{},
 		Conflicts:    []ComplianceFinding{},
 		Unspecified:  []ComplianceFinding{},
+		Runtime:      runtime,
 		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}
 	relevant := map[string]*complianceRelevantAccumulator{}
@@ -272,6 +293,9 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 		return nil, err
 	}
 	if adjudicator, ok := analyzer.(complianceAdjudicator); ok && len(adjudicationCandidates) > 0 {
+		if result.Runtime != nil && result.Runtime.Analysis != nil {
+			result.Runtime.Analysis.Used = true
+		}
 		adjFindings, err := runComplianceAdjudication(ctx, adjudicator, repo, adjudicationCandidates, result)
 		if err != nil {
 			return nil, err
@@ -295,6 +319,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	sortComplianceFindings(result.Compliant)
 	sortComplianceFindings(result.Conflicts)
 	sortComplianceFindings(result.Unspecified)
+	result.UnspecifiedSummary = buildComplianceUnspecifiedSummary(result.Unspecified)
 	return result, nil
 }
 
@@ -436,7 +461,7 @@ func loadComplianceTargetsContext(ctx context.Context, cfg *config.Config, reque
 	if len(request.Paths) > 0 {
 		return loadPathComplianceTargetsContext(ctx, cfg, request.Paths)
 	}
-	return loadDiffComplianceTargetsContext(ctx, request.DiffText)
+	return loadDiffComplianceTargetsContext(ctx, cfg, request.DiffText)
 }
 
 func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, paths []string) ([]complianceTarget, error) {
@@ -466,20 +491,21 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			Path:          relPath,
 			RefCandidates: governedRefsForPath(relPath),
 			Content:       string(data),
+			DuplicateKey:  complianceContentDigest(string(data)),
 		})
 	}
 	return targets, nil
 }
 
-func loadDiffComplianceTargetsContext(ctx context.Context, diffText string) ([]complianceTarget, error) {
+func loadDiffComplianceTargetsContext(ctx context.Context, cfg *config.Config, diffText string) ([]complianceTarget, error) {
 	parsed, err := parseDiffTargets(diffText)
 	if err != nil {
 		return nil, err
 	}
-	return loadParsedDiffComplianceTargetsContext(ctx, parsed)
+	return loadParsedDiffComplianceTargetsContext(ctx, cfg, parsed)
 }
 
-func loadParsedDiffComplianceTargetsContext(ctx context.Context, parsed []parsedDiffTarget) ([]complianceTarget, error) {
+func loadParsedDiffComplianceTargetsContext(ctx context.Context, cfg *config.Config, parsed []parsedDiffTarget) ([]complianceTarget, error) {
 	targets := make([]complianceTarget, 0, len(parsed))
 	for _, item := range parsed {
 		content, removedOnly := parsedDiffTargetContent(item)
@@ -490,6 +516,7 @@ func loadParsedDiffComplianceTargetsContext(ctx context.Context, parsed []parsed
 			Path:          item.Path,
 			RefCandidates: governedRefsForPath(item.Path),
 			Content:       content,
+			DuplicateKey:  complianceDuplicateKey(cfg.Workspace.RootPath, item.Path, content),
 			RemovedOnly:   removedOnly,
 		})
 	}
@@ -522,6 +549,140 @@ func prepareComplianceEvaluationTargetsContext(ctx context.Context, repo *analys
 		return nil, err
 	}
 	return prepared, nil
+}
+
+func collapseComplianceDuplicateEvaluationTargets(targets []complianceEvaluationTarget) []complianceEvaluationTarget {
+	if len(targets) < 2 {
+		return targets
+	}
+
+	groups := make(map[string][]int)
+	for i, item := range targets {
+		key := stringsTrimSpace(item.Target.DuplicateKey)
+		if key == "" || item.Target.RemovedOnly {
+			continue
+		}
+		groups[key] = append(groups[key], i)
+	}
+	if len(groups) == 0 {
+		return targets
+	}
+
+	keep := make([]bool, len(targets))
+	for i := range keep {
+		keep[i] = true
+	}
+
+	for _, indexes := range groups {
+		if len(indexes) < 2 {
+			continue
+		}
+		rep, ok := complianceDuplicateRepresentativeIndex(targets, indexes)
+		if !ok {
+			continue
+		}
+		for _, idx := range indexes {
+			if idx != rep {
+				keep[idx] = false
+			}
+		}
+	}
+
+	result := make([]complianceEvaluationTarget, 0, len(targets))
+	for i, item := range targets {
+		if keep[i] {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func complianceDuplicateRepresentativeIndex(targets []complianceEvaluationTarget, indexes []int) (int, bool) {
+	explicitSignatures := map[string]struct{}{}
+	explicitIndexes := make([]int, 0, len(indexes))
+	for _, idx := range indexes {
+		signature := complianceExplicitRefSignature(targets[idx].ExplicitRefs)
+		if signature == "" {
+			continue
+		}
+		explicitSignatures[signature] = struct{}{}
+		explicitIndexes = append(explicitIndexes, idx)
+	}
+	if len(explicitSignatures) > 1 {
+		return 0, false
+	}
+
+	candidates := indexes
+	if len(explicitIndexes) > 0 {
+		candidates = explicitIndexes
+	}
+	best := candidates[0]
+	for _, idx := range candidates[1:] {
+		if complianceRepresentativePathLess(targets[idx].Target.Path, targets[best].Target.Path) {
+			best = idx
+		}
+	}
+	return best, true
+}
+
+func complianceExplicitRefSignature(refs []string) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), refs...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, "\x00")
+}
+
+func complianceRepresentativePathLess(left, right string) bool {
+	leftHidden, leftDepth := compliancePathPreference(left)
+	rightHidden, rightDepth := compliancePathPreference(right)
+	switch {
+	case leftHidden != rightHidden:
+		return leftHidden < rightHidden
+	case leftDepth != rightDepth:
+		return leftDepth < rightDepth
+	case len(left) != len(right):
+		return len(left) < len(right)
+	default:
+		return left < right
+	}
+}
+
+func compliancePathPreference(path string) (hiddenSegments int, depth int) {
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "" {
+			continue
+		}
+		depth++
+		if strings.HasPrefix(segment, ".") {
+			hiddenSegments++
+		}
+	}
+	return hiddenSegments, depth
+}
+
+func complianceDuplicateKey(workspaceRoot, relPath, fallbackContent string) string {
+	if workspaceRoot != "" && relPath != "" {
+		_, absPath, err := resolveWorkspaceFilePath(workspaceRoot, relPath)
+		if err == nil {
+			if data, readErr := os.ReadFile(absPath); readErr == nil {
+				return complianceContentDigest(string(data))
+			}
+		}
+	}
+	if stringsTrimSpace(fallbackContent) == "" {
+		return ""
+	}
+	return complianceContentDigest(fallbackContent)
+}
+
+func complianceContentDigest(content string) string {
+	if content == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x", sum[:])
 }
 
 func embedComplianceFallbackTargetsContext(ctx context.Context, cfg *config.Config, targets []complianceEvaluationTarget, indexes []int) error {
@@ -1071,6 +1232,22 @@ func primaryGovernedRefForPath(path string) string {
 	default:
 		return "code://" + normalizeCompliancePath(path)
 	}
+}
+
+func buildComplianceUnspecifiedSummary(findings []ComplianceFinding) *ComplianceUnspecifiedSummary {
+	if len(findings) == 0 {
+		return nil
+	}
+
+	summary := &ComplianceUnspecifiedSummary{Total: len(findings)}
+	for _, finding := range findings {
+		if finding.Traceability == "explicit_applies_to" {
+			summary.ExplicitButUnderexercised++
+			continue
+		}
+		summary.MissingGovernanceEdge++
+	}
+	return summary
 }
 
 func complianceRequestsPerMinuteConflict(statement, content string) (string, string, bool) {

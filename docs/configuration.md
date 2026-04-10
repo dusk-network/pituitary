@@ -122,6 +122,9 @@ timeout_ms = 120000
 `check-terminology` can also load reusable policy from config instead of requiring `--term` flags every time:
 
 ```toml
+[terminology]
+exclude_paths = ["CHANGELOG.md", "docs/archive/*.md"]
+
 [[terminology.policies]]
 preferred = "locality"
 historical_aliases = ["repo"]
@@ -148,6 +151,8 @@ Severity is configured per artifact scope:
 - `specs_severity`: `ignore`, `warning`, or `error`
 
 When `pituitary check-terminology` runs without `--term`, Pituitary audits every governed term from `[[terminology.policies]]`, infers `canonical_terms` from the configured `preferred` values, and emits structured `classification`, `context`, `severity`, `replacement`, and `tolerated` fields in JSON output.
+
+Use `[terminology].exclude_paths` when you want terminology sweeps and `compile` to skip historically frozen containers such as `CHANGELOG.md`, release notes, or archive folders without dropping those files from indexing, drift, or compliance.
 
 ### Example: Optional GitHub issues source
 
