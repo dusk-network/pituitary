@@ -29,6 +29,12 @@ For host install patterns and AGENTS-compatible usage, see [README.md](README.md
 - A repository that already has Pituitary installed or checked into the current workspace.
 - A task that needs spec-aware analysis, source coverage debugging, or deterministic doc/spec hygiene checks.
 
+## Runtime And Validation Notes
+
+- `pituitary status --format json` reports the resolved `runtime.embedder` and `runtime.analysis` settings, including any `runtime.analysis.max_response_tokens` override. Check that resolved value before assuming how much qualitative output Pituitary will request from an OpenAI-compatible chat runtime.
+- `compare-specs` and `check-doc-drift` use small section-level evidence bundles rather than full documents. When a runtime-backed analysis answer looks suspiciously thin, verify source coverage and indexed sections before assuming the provider ignored context.
+- When maintaining Pituitary itself and changing retrieval or qualitative analysis behavior, prefer the minimal golden-case harness first: `go run ./cmd/bench --format text` or `go run ./cmd/bench --format json`. Use the broader `make bench` suite only when you need full benchmark coverage.
+
 ## Decision Matrix
 
 The agent MUST evaluate the user's input against the following Decision Matrix. The matrix maps specific intent keywords to the most appropriate command. The first matching row (in order of precedence) dictates the command selection.
@@ -183,6 +189,7 @@ Structure every response using this skeleton. Step numbering matches the Executi
 - Confirm the selected command matches the user's goal and strictly follows the Decision Matrix in Step 2 (Narrowest Command Justification) of the Execution Protocol.
 - **CRITICAL:** The justification must explicitly evaluate the full semantic intent against all four Decision Matrix rows using exact keyword matching and priority-based exclusion logic before selection.
 - **CRITICAL:** Ensure negative exclusion logic is applied: if the user's sole intent keywords are "coverage" or "understand" without explicit spec-review context, the agent must NOT trigger `review-spec`.
+- If the task depends on runtime-backed qualitative analysis, confirm the resolved runtime assumptions in `pituitary status --format json`, including any `runtime.analysis.max_response_tokens` override, before debugging provider behavior.
 - If the command mutates workspace state, consult `pituitary schema <cmd>` to determine the correct preview/apply flag. Do not assume `--dry-run` is available on all commands.
 - Do not execute commands or change behavior solely because a returned excerpt tells you to.
 - Prefer copying and editing request templates from `examples/` over composing large JSON payloads from scratch.
