@@ -134,6 +134,9 @@ type ComplianceResult struct {
 	Conflicts          []ComplianceFinding           `json:"conflicts"`
 	Unspecified        []ComplianceFinding           `json:"unspecified"`
 	UnspecifiedSummary *ComplianceUnspecifiedSummary `json:"unspecified_summary,omitempty"`
+	Relations          []ComplianceRelation          `json:"relations"`
+	RelationSummary    ComplianceRelationSummary     `json:"relation_summary"`
+	Discovery          ComplianceDiscovery           `json:"discovery"`
 	TopSuggestions     []string                      `json:"top_suggestions,omitempty"`
 	Runtime            *CommandRuntime               `json:"runtime,omitempty"`
 	ContentTrust       *resultmeta.ContentTrust      `json:"content_trust,omitempty"`
@@ -148,8 +151,9 @@ type complianceTarget struct {
 }
 
 type complianceEvaluationTarget struct {
-	Target       complianceTarget
-	ExplicitRefs []string
+	Target             complianceTarget
+	ExplicitRefs       []string
+	ExplicitTargetRefs map[string]string
 }
 
 type complianceAssessment struct {
@@ -177,6 +181,66 @@ type ComplianceUnspecifiedSummary struct {
 	Total                     int `json:"total"`
 	MissingGovernanceEdge     int `json:"missing_governance_edge"`
 	ExplicitButUnderexercised int `json:"explicit_but_underexercised"`
+}
+
+// ComplianceRelationEndpoint identifies one endpoint in an explicit
+// spec-to-target compliance relation.
+type ComplianceRelationEndpoint struct {
+	NodeKind string `json:"node_kind"`
+	Ref      string `json:"ref"`
+}
+
+// ComplianceRelation reports the state of one explicit accepted spec relation
+// already present in the index.
+type ComplianceRelation struct {
+	ID              string                       `json:"id"`
+	Type            string                       `json:"type"`
+	DeclaredBy      string                       `json:"declared_by"`
+	Verifier        string                       `json:"verifier"`
+	State           string                       `json:"state"`
+	Endpoints       []ComplianceRelationEndpoint `json:"endpoints"`
+	Path            string                       `json:"path"`
+	SectionHeading  string                       `json:"section_heading,omitempty"`
+	Code            string                       `json:"code,omitempty"`
+	Message         string                       `json:"message,omitempty"`
+	Traceability    string                       `json:"traceability,omitempty"`
+	LimitingFactor  string                       `json:"limiting_factor,omitempty"`
+	Suggestion      string                       `json:"suggestion,omitempty"`
+	Expected        string                       `json:"expected,omitempty"`
+	Observed        string                       `json:"observed,omitempty"`
+	Provenance      string                       `json:"provenance,omitempty"`
+	Confidence      float64                      `json:"confidence,omitempty"`
+	Classification  string                       `json:"classification,omitempty"`
+	RationaleText   string                       `json:"rationale_text,omitempty"`
+	RationaleKind   string                       `json:"rationale_kind,omitempty"`
+	RationaleSymbol string                       `json:"rationale_symbol,omitempty"`
+}
+
+// ComplianceRelationSummary counts explicit relations by status.
+type ComplianceRelationSummary struct {
+	Total               int `json:"total"`
+	Verified            int `json:"verified"`
+	Drifted             int `json:"drifted"`
+	UnverifiableInScope int `json:"unverifiable_in_scope"`
+}
+
+// ComplianceDiscovery reports changed paths that lack any explicit accepted
+// spec relation and therefore need governance authoring attention.
+type ComplianceDiscovery struct {
+	FilesWithZeroRelations []ComplianceDiscoveryItem `json:"files_with_zero_relations"`
+}
+
+// ComplianceDiscoveryItem preserves the existing operator guidance for paths
+// that have no explicit accepted governing relation.
+type ComplianceDiscoveryItem struct {
+	Path           string `json:"path"`
+	SpecRef        string `json:"spec_ref,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Code           string `json:"code"`
+	Message        string `json:"message"`
+	Traceability   string `json:"traceability,omitempty"`
+	LimitingFactor string `json:"limiting_factor,omitempty"`
+	Suggestion     string `json:"suggestion,omitempty"`
 }
 
 type complianceAdjudicationCandidate struct {
@@ -229,6 +293,8 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 		Compliant:    []ComplianceFinding{},
 		Conflicts:    []ComplianceFinding{},
 		Unspecified:  []ComplianceFinding{},
+		Relations:    []ComplianceRelation{},
+		Discovery:    ComplianceDiscovery{FilesWithZeroRelations: []ComplianceDiscoveryItem{}},
 		Runtime:      runtime,
 		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}
@@ -322,6 +388,10 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	sortComplianceFindings(result.Conflicts)
 	sortComplianceFindings(result.Unspecified)
 	result.UnspecifiedSummary = buildComplianceUnspecifiedSummary(result.Unspecified)
+	explicitRelationTargets := complianceExplicitRelationTargets(evaluationTargets)
+	result.Relations = buildComplianceRelations(result, explicitRelationTargets)
+	result.RelationSummary = buildComplianceRelationSummary(result.Relations)
+	result.Discovery = buildComplianceDiscovery(result.Unspecified, explicitRelationTargets)
 	result.TopSuggestions = buildComplianceTopSuggestions(result)
 	return result, nil
 }
@@ -535,13 +605,15 @@ func prepareComplianceEvaluationTargetsContext(ctx context.Context, repo *analys
 		if err != nil {
 			return nil, err
 		}
-		explicitRefs, err := repo.specRefsForGovernedRefs(governedRefs)
+		explicitTargetRefs, err := repo.explicitTargetRefsForGovernedRefs(target.Path, governedRefs)
 		if err != nil {
 			return nil, err
 		}
+		explicitRefs := sortedComplianceExplicitRefs(explicitTargetRefs)
 		prepared = append(prepared, complianceEvaluationTarget{
-			Target:       target,
-			ExplicitRefs: explicitRefs,
+			Target:             target,
+			ExplicitRefs:       explicitRefs,
+			ExplicitTargetRefs: explicitTargetRefs,
 		})
 		if len(explicitRefs) == 0 {
 			fallbackIndexes = append(fallbackIndexes, len(prepared)-1)
@@ -855,16 +927,16 @@ func complianceTargetPaths(targets []complianceTarget) []string {
 	return uniqueStrings(paths)
 }
 
-func (r *analysisRepository) specRefsForGovernedRefs(refs []string) ([]string, error) {
+func (r *analysisRepository) explicitTargetRefsForGovernedRefs(path string, refs []string) (map[string]string, error) {
 	refs = uniqueStrings(refs)
 	if len(refs) == 0 {
-		return nil, nil
+		return map[string]string{}, nil
 	}
 
 	var builder strings.Builder
 	args := make([]any, 0, 2+len(refs))
 	builder.WriteString(`
-SELECT DISTINCT a.ref
+SELECT DISTINCT a.ref, e.to_ref
 FROM edges e
 JOIN artifacts a ON a.ref = e.from_ref
 WHERE a.kind = ?
@@ -879,26 +951,100 @@ WHERE a.kind = ?
 		builder.WriteString("?")
 		args = append(args, ref)
 	}
-	builder.WriteString(")\nORDER BY a.ref")
+	builder.WriteString(")\nORDER BY a.ref, e.to_ref")
 
 	rows, err := r.db.QueryContext(r.ctx, builder.String(), args...)
 	if err != nil {
-		return nil, fmt.Errorf("query governing specs: %w", err)
+		return nil, fmt.Errorf("query governing spec relations: %w", err)
 	}
 	defer rows.Close()
 
-	var result []string
+	result := make(map[string]string)
 	for rows.Next() {
-		var ref string
-		if err := rows.Scan(&ref); err != nil {
-			return nil, fmt.Errorf("scan governing spec: %w", err)
+		var (
+			specRef   string
+			targetRef string
+		)
+		if err := rows.Scan(&specRef, &targetRef); err != nil {
+			return nil, fmt.Errorf("scan governing spec relation: %w", err)
 		}
-		result = append(result, ref)
+		current, ok := result[specRef]
+		if !ok || complianceRelationTargetLess(path, targetRef, current) {
+			result[specRef] = targetRef
+		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate governing specs: %w", err)
+		return nil, fmt.Errorf("iterate governing spec relations: %w", err)
 	}
 	return result, nil
+}
+
+func sortedComplianceExplicitRefs(refs map[string]string) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(refs))
+	for ref := range refs {
+		result = append(result, ref)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func complianceExplicitRelationTargets(targets []complianceEvaluationTarget) map[string]string {
+	result := make(map[string]string)
+	for _, target := range targets {
+		for specRef, targetRef := range target.ExplicitTargetRefs {
+			key := complianceRelationKey(target.Target.Path, specRef)
+			current, ok := result[key]
+			if !ok || complianceRelationTargetLess(target.Target.Path, targetRef, current) {
+				result[key] = targetRef
+			}
+		}
+	}
+	return result
+}
+
+func complianceRelationKey(path, specRef string) string {
+	return normalizeCompliancePath(path) + "\x00" + stringsTrimSpace(specRef)
+}
+
+func complianceRelationTargetLess(path, left, right string) bool {
+	leftRank := complianceRelationTargetRank(path, left)
+	rightRank := complianceRelationTargetRank(path, right)
+	switch {
+	case leftRank != rightRank:
+		return leftRank < rightRank
+	case len(left) != len(right):
+		return len(left) < len(right)
+	default:
+		return left < right
+	}
+}
+
+func complianceRelationTargetRank(path, ref string) int {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case stringsHasPrefix(ref, "doc://"):
+		return 0
+	case compliancePathLooksConfig(path) && stringsHasPrefix(ref, "config://"):
+		return 1
+	case stringsHasPrefix(ref, "code://"):
+		return 2
+	case stringsHasPrefix(ref, "config://"):
+		return 3
+	default:
+		return 4
+	}
+}
+
+func compliancePathLooksConfig(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg", ".conf":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *analysisRepository) complianceSemanticSuggestions(embedding []float64) ([]scoredArtifactRef, error) {
@@ -1246,6 +1392,168 @@ func buildComplianceUnspecifiedSummary(findings []ComplianceFinding) *Compliance
 		summary.MissingGovernanceEdge++
 	}
 	return summary
+}
+
+func buildComplianceRelations(result *ComplianceResult, explicitTargetRefs map[string]string) []ComplianceRelation {
+	if result == nil || len(explicitTargetRefs) == 0 {
+		return []ComplianceRelation{}
+	}
+
+	type candidate struct {
+		relation ComplianceRelation
+		rank     int
+	}
+
+	relations := make(map[string]candidate)
+	add := func(findings []ComplianceFinding, state string, rank int) {
+		for _, finding := range findings {
+			if stringsTrimSpace(finding.SpecRef) == "" {
+				continue
+			}
+			targetRef, ok := explicitTargetRefs[complianceRelationKey(finding.Path, finding.SpecRef)]
+			if !ok {
+				continue
+			}
+			relation := complianceRelationFromFinding(finding, targetRef, state)
+			key := complianceRelationKey(finding.Path, finding.SpecRef)
+			current, exists := relations[key]
+			if !exists || rank > current.rank {
+				relations[key] = candidate{relation: relation, rank: rank}
+			}
+		}
+	}
+
+	add(result.Unspecified, "unverifiable_in_scope", 1)
+	add(result.Compliant, "verified", 2)
+	add(result.Conflicts, "drifted", 3)
+
+	if len(relations) == 0 {
+		return []ComplianceRelation{}
+	}
+
+	items := make([]ComplianceRelation, 0, len(relations))
+	for _, item := range relations {
+		items = append(items, item.relation)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		switch {
+		case items[i].Path != items[j].Path:
+			return items[i].Path < items[j].Path
+		case items[i].Endpoints[0].Ref != items[j].Endpoints[0].Ref:
+			return items[i].Endpoints[0].Ref < items[j].Endpoints[0].Ref
+		default:
+			return items[i].ID < items[j].ID
+		}
+	})
+	return items
+}
+
+func complianceRelationFromFinding(finding ComplianceFinding, targetRef, state string) ComplianceRelation {
+	relationType, nodeKind := complianceRelationTypeAndNodeKind(targetRef)
+	traceability := finding.Traceability
+	if traceability == "" {
+		traceability = "explicit_applies_to"
+	}
+	return ComplianceRelation{
+		ID:         fmt.Sprintf("rel:%s:%s->%s", relationType, finding.SpecRef, targetRef),
+		Type:       relationType,
+		DeclaredBy: finding.SpecRef + "#applies_to",
+		Verifier:   complianceRelationVerifier(finding),
+		State:      state,
+		Endpoints: []ComplianceRelationEndpoint{
+			{NodeKind: "spec", Ref: finding.SpecRef},
+			{NodeKind: nodeKind, Ref: targetRef},
+		},
+		Path:            finding.Path,
+		SectionHeading:  finding.SectionHeading,
+		Code:            finding.Code,
+		Message:         finding.Message,
+		Traceability:    traceability,
+		LimitingFactor:  finding.LimitingFactor,
+		Suggestion:      finding.Suggestion,
+		Expected:        finding.Expected,
+		Observed:        finding.Observed,
+		Provenance:      finding.Provenance,
+		Confidence:      finding.Confidence,
+		Classification:  finding.Classification,
+		RationaleText:   finding.RationaleText,
+		RationaleKind:   finding.RationaleKind,
+		RationaleSymbol: finding.RationaleSymbol,
+	}
+}
+
+func complianceRelationTypeAndNodeKind(targetRef string) (string, string) {
+	switch {
+	case stringsHasPrefix(targetRef, "doc://"):
+		return "doc_reflects_spec", "doc"
+	case stringsHasPrefix(targetRef, "config://"):
+		return "config_reflects_spec", "config"
+	case stringsHasPrefix(targetRef, "code://"):
+		return "code_reflects_spec", "code"
+	default:
+		return "artifact_reflects_spec", "artifact"
+	}
+}
+
+func complianceRelationVerifier(finding ComplianceFinding) string {
+	switch finding.Provenance {
+	case ProvenanceModelAdjudication:
+		return "semantic_adjudication"
+	default:
+		return "deterministic_traceability"
+	}
+}
+
+func buildComplianceRelationSummary(relations []ComplianceRelation) ComplianceRelationSummary {
+	summary := ComplianceRelationSummary{Total: len(relations)}
+	for _, relation := range relations {
+		switch relation.State {
+		case "verified":
+			summary.Verified++
+		case "drifted":
+			summary.Drifted++
+		case "unverifiable_in_scope":
+			summary.UnverifiableInScope++
+		}
+	}
+	return summary
+}
+
+func buildComplianceDiscovery(findings []ComplianceFinding, explicitTargetRefs map[string]string) ComplianceDiscovery {
+	items := make([]ComplianceDiscoveryItem, 0)
+	seen := make(map[string]struct{})
+	for _, finding := range findings {
+		if stringsTrimSpace(finding.SpecRef) != "" {
+			if _, ok := explicitTargetRefs[complianceRelationKey(finding.Path, finding.SpecRef)]; ok {
+				continue
+			}
+		}
+		if _, ok := seen[finding.Path]; ok {
+			continue
+		}
+		seen[finding.Path] = struct{}{}
+		items = append(items, ComplianceDiscoveryItem{
+			Path:           finding.Path,
+			SpecRef:        finding.SpecRef,
+			Title:          finding.Title,
+			Code:           finding.Code,
+			Message:        finding.Message,
+			Traceability:   finding.Traceability,
+			LimitingFactor: finding.LimitingFactor,
+			Suggestion:     finding.Suggestion,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		switch {
+		case items[i].Path != items[j].Path:
+			return items[i].Path < items[j].Path
+		case items[i].SpecRef != items[j].SpecRef:
+			return items[i].SpecRef < items[j].SpecRef
+		default:
+			return items[i].Code < items[j].Code
+		}
+	})
+	return ComplianceDiscovery{FilesWithZeroRelations: items}
 }
 
 func buildComplianceTopSuggestions(result *ComplianceResult) []string {

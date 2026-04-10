@@ -109,6 +109,46 @@ func TestRunSchemaCommandJSON(t *testing.T) {
 	}
 }
 
+func TestRunSchemaCheckComplianceIncludesRelationOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runSchema([]string{"check-compliance", "--format", "json"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runSchema(check-compliance) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSchema(check-compliance) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Name         string         `json:"name"`
+			OutputSchema map[string]any `json:"output_schema"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal check-compliance schema payload: %v", err)
+	}
+	if payload.Result.Name != "check-compliance" {
+		t.Fatalf("result.name = %q, want check-compliance", payload.Result.Name)
+	}
+	outputProps, _ := payload.Result.OutputSchema["properties"].(map[string]any)
+	if _, ok := outputProps["relations"]; !ok {
+		t.Fatalf("output schema properties = %#v, want relations", outputProps)
+	}
+	if _, ok := outputProps["relation_summary"]; !ok {
+		t.Fatalf("output schema properties = %#v, want relation_summary", outputProps)
+	}
+	if _, ok := outputProps["discovery"]; !ok {
+		t.Fatalf("output schema properties = %#v, want discovery", outputProps)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunVersionUsesPituitaryFormatEnv(t *testing.T) {
 	t.Setenv(formatEnvVar, "json")
 

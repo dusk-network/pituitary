@@ -20,6 +20,14 @@ When a changed path has no explicit governance, findings include a `limiting_fac
 
 The JSON result also carries `unspecified_summary`, which splits `unspecified` findings into `missing_governance_edge` versus `explicit_but_underexercised` so CI and operators do not treat those remediations as the same class of problem.
 
+For additive machine-readable status, `check-compliance --format json` also emits:
+
+- `result.relations[]` for explicit accepted spec-to-target relations already present in the index
+- `result.relation_summary` counting `verified`, `drifted`, and `unverifiable_in_scope`
+- `result.discovery.files_with_zero_relations[]` for changed paths that still lack any explicit accepted relation
+
+That keeps explicit relation failure separate from governance discovery without changing the legacy `compliant / conflicts / unspecified` shape.
+
 Text output now also promotes the strongest per-finding guidance into a short `TOP SUGGESTIONS` block, and JSON mirrors that guidance in `result.top_suggestions`, so operators do not need to dig through every individual finding to see the best next action.
 
 ## Commands
