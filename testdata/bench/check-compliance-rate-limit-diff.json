@@ -1,0 +1,20 @@
+{
+  "id": "check-compliance-rate-limit-diff",
+  "operation": "check-compliance",
+  "description": "A tenant-scoped limiter diff should comply with the accepted rate-limit and burst-handling specs.",
+  "request": {
+    "diff_text": "diff --git a/src/api/middleware/ratelimiter.go b/src/api/middleware/ratelimiter.go\n--- a/src/api/middleware/ratelimiter.go\n+++ b/src/api/middleware/ratelimiter.go\n@@ -0,0 +1,6 @@\n+package middleware\n+\n+// Apply limits per tenant rather than per API key.\n+// Enforce a default limit of 200 requests per minute.\n+// Allow short bursts above the steady-state tenant limit.\n+// Use a sliding-window limiter and tenant-specific overrides.\n"
+  },
+  "expectations": {
+    "must_include_paths": [
+      "src/api/middleware/ratelimiter.go"
+    ],
+    "must_include_spec_refs": [
+      "SPEC-042",
+      "SPEC-055"
+    ],
+    "minimum_compliant_findings": 1,
+    "maximum_conflict_findings": 0,
+    "require_structured_evidence": true
+  }
+}

@@ -164,11 +164,14 @@ Benchmarks live in:
 
 - `internal/index/benchmark_test.go`
 - `internal/analysis/benchmark_test.go`
+- `testdata/bench/` plus `go run ./cmd/bench` for the minimal golden-case harness
 
 Run them with:
 
 ```sh
 make bench
+go run ./cmd/bench --format text
+go run ./cmd/bench --format json
 ```
 
 Use these when a change affects:

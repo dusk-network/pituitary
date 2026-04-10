@@ -98,20 +98,22 @@ type Runtime struct {
 
 // RuntimeProvider describes one configured runtime dependency.
 type RuntimeProvider struct {
-	Profile    string
-	Provider   string
-	Model      string
-	Endpoint   string
-	APIKeyEnv  string
-	TimeoutMS  int
-	MaxRetries int
+	Profile           string
+	Provider          string
+	Model             string
+	Endpoint          string
+	APIKeyEnv         string
+	TimeoutMS         int
+	MaxRetries        int
+	MaxResponseTokens int
 
-	providerSet   bool
-	modelSet      bool
-	endpointSet   bool
-	apiKeyEnvSet  bool
-	timeoutMSSet  bool
-	maxRetriesSet bool
+	providerSet          bool
+	modelSet             bool
+	endpointSet          bool
+	apiKeyEnvSet         bool
+	timeoutMSSet         bool
+	maxRetriesSet        bool
+	maxResponseTokensSet bool
 }
 
 type Terminology struct {
@@ -181,13 +183,14 @@ type rawTerminologyPolicy struct {
 }
 
 type rawRuntimeProvider struct {
-	Profile    string `toml:"profile"`
-	Provider   string `toml:"provider"`
-	Model      string `toml:"model"`
-	Endpoint   string `toml:"endpoint"`
-	APIKeyEnv  string `toml:"api_key_env"`
-	TimeoutMS  *int   `toml:"timeout_ms"`
-	MaxRetries *int   `toml:"max_retries"`
+	Profile           string `toml:"profile"`
+	Provider          string `toml:"provider"`
+	Model             string `toml:"model"`
+	Endpoint          string `toml:"endpoint"`
+	APIKeyEnv         string `toml:"api_key_env"`
+	TimeoutMS         *int   `toml:"timeout_ms"`
+	MaxRetries        *int   `toml:"max_retries"`
+	MaxResponseTokens *int   `toml:"max_response_tokens"`
 }
 
 type validationErrors struct {
@@ -923,6 +926,9 @@ func validateRuntime(runtime *Runtime) error {
 	if runtime.Embedder.MaxRetries < 0 {
 		errs.add("runtime.embedder.max_retries: must be >= 0")
 	}
+	if runtime.Embedder.MaxResponseTokens < 0 {
+		errs.add("runtime.embedder.max_response_tokens: must be >= 0")
+	}
 
 	runtime.Analysis = resolveRuntimeProvider(runtime.Analysis, runtime.Profiles, RuntimeProviderDisabled)
 	if profile := strings.TrimSpace(runtime.Analysis.Profile); profile != "" {
@@ -968,24 +974,29 @@ func validateRuntime(runtime *Runtime) error {
 	if runtime.Analysis.MaxRetries < 0 {
 		errs.add("runtime.analysis.max_retries: must be >= 0")
 	}
+	if runtime.Analysis.MaxResponseTokens < 0 {
+		errs.add("runtime.analysis.max_response_tokens: must be >= 0")
+	}
 	return errs.err()
 }
 
 func buildRuntimeProvider(raw rawRuntimeProvider, defaultProvider string) RuntimeProvider {
 	return RuntimeProvider{
-		Profile:       strings.TrimSpace(raw.Profile),
-		Provider:      defaultString(strings.TrimSpace(raw.Provider), defaultProvider),
-		Model:         strings.TrimSpace(raw.Model),
-		Endpoint:      strings.TrimSpace(raw.Endpoint),
-		APIKeyEnv:     strings.TrimSpace(raw.APIKeyEnv),
-		TimeoutMS:     defaultOptionalInt(raw.TimeoutMS, 1000),
-		MaxRetries:    defaultOptionalInt(raw.MaxRetries, 0),
-		providerSet:   strings.TrimSpace(raw.Provider) != "",
-		modelSet:      strings.TrimSpace(raw.Model) != "",
-		endpointSet:   strings.TrimSpace(raw.Endpoint) != "",
-		apiKeyEnvSet:  strings.TrimSpace(raw.APIKeyEnv) != "",
-		timeoutMSSet:  raw.TimeoutMS != nil,
-		maxRetriesSet: raw.MaxRetries != nil,
+		Profile:              strings.TrimSpace(raw.Profile),
+		Provider:             defaultString(strings.TrimSpace(raw.Provider), defaultProvider),
+		Model:                strings.TrimSpace(raw.Model),
+		Endpoint:             strings.TrimSpace(raw.Endpoint),
+		APIKeyEnv:            strings.TrimSpace(raw.APIKeyEnv),
+		TimeoutMS:            defaultOptionalInt(raw.TimeoutMS, 1000),
+		MaxRetries:           defaultOptionalInt(raw.MaxRetries, 0),
+		MaxResponseTokens:    defaultOptionalInt(raw.MaxResponseTokens, 0),
+		providerSet:          strings.TrimSpace(raw.Provider) != "",
+		modelSet:             strings.TrimSpace(raw.Model) != "",
+		endpointSet:          strings.TrimSpace(raw.Endpoint) != "",
+		apiKeyEnvSet:         strings.TrimSpace(raw.APIKeyEnv) != "",
+		timeoutMSSet:         raw.TimeoutMS != nil,
+		maxRetriesSet:        raw.MaxRetries != nil,
+		maxResponseTokensSet: raw.MaxResponseTokens != nil,
 	}
 }
 
@@ -1003,6 +1014,7 @@ func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]Runtim
 	apiKeyEnvResolved := provider.apiKeyEnvSet
 	timeoutResolved := provider.timeoutMSSet
 	maxRetriesResolved := provider.maxRetriesSet
+	maxResponseTokensResolved := provider.maxResponseTokensSet
 
 	if !providerResolved && hasProfile && profile.providerSet {
 		resolved.Provider = profile.Provider
@@ -1028,6 +1040,10 @@ func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]Runtim
 		resolved.MaxRetries = profile.MaxRetries
 		maxRetriesResolved = true
 	}
+	if !maxResponseTokensResolved && hasProfile && profile.maxResponseTokensSet {
+		resolved.MaxResponseTokens = profile.MaxResponseTokens
+		maxResponseTokensResolved = true
+	}
 	if !providerResolved {
 		resolved.Provider = defaultProvider
 	}
@@ -1036,6 +1052,9 @@ func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]Runtim
 	}
 	if !maxRetriesResolved {
 		resolved.MaxRetries = 0
+	}
+	if !maxResponseTokensResolved {
+		resolved.MaxResponseTokens = 0
 	}
 	if strings.TrimSpace(resolved.Provider) == RuntimeProviderFixture && !modelResolved {
 		resolved.Model = "fixture-8d"
@@ -1074,6 +1093,9 @@ func validateRuntimeProfileFields(errs *validationErrors, label string, profile 
 	}
 	if profile.MaxRetries < 0 {
 		errs.add("%s.max_retries: must be >= 0", label)
+	}
+	if profile.MaxResponseTokens < 0 {
+		errs.add("%s.max_response_tokens: must be >= 0", label)
 	}
 }
 

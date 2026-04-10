@@ -66,7 +66,7 @@ func (p *openAICompatibleAnalysisProvider) AdjudicateCompliance(ctx context.Cont
 	}
 
 	var response complianceAdjudicationResponse
-	if err := p.completeJSON(ctx, openAICompatibleComplianceAdjudicateSystemPrompt, payload, &response); err != nil {
+	if err := p.completeJSON(ctx, payload.Command, openAICompatibleComplianceAdjudicateSystemPrompt, payload, &response); err != nil {
 		return nil, err
 	}
 	response.Adjudications = normalizeAdjudications(response.Adjudications, request.Targets)

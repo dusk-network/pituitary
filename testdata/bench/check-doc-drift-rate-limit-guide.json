@@ -1,0 +1,24 @@
+{
+  "id": "check-doc-drift-rate-limit-guide",
+  "operation": "check-doc-drift",
+  "description": "The public API guide should drift while the rollout runbook stays aligned to the accepted rate-limit specs.",
+  "request": {
+    "scope": "all"
+  },
+  "expectations": {
+    "must_include_doc_refs": [
+      "doc://guides/api-rate-limits"
+    ],
+    "must_exclude_doc_refs": [
+      "doc://runbooks/rate-limit-rollout"
+    ],
+    "must_include_spec_refs": [
+      "SPEC-042"
+    ],
+    "assessment_statuses": {
+      "doc://guides/api-rate-limits": "drift",
+      "doc://runbooks/rate-limit-rollout": "aligned"
+    },
+    "require_structured_evidence": true
+  }
+}
