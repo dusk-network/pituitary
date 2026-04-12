@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/index"
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 func TestRunStatusReportsMissingIndex(t *testing.T) {
@@ -239,6 +244,84 @@ func TestRunStatusJSON(t *testing.T) {
 	}
 }
 
+func TestRunStatusJSONIncludesGovernanceHotspots(t *testing.T) {
+	repo := writeGovernanceHotspotStatusWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0 (stdout: %q, stderr: %q)", exitCode, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runStatus() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result struct {
+			GovernanceHotspots struct {
+				HighFanOutSpecs []struct {
+					Ref            string `json:"ref"`
+					AppliesToCount int    `json:"applies_to_count"`
+				} `json:"high_fan_out_specs"`
+				WeakLinkArtifacts []struct {
+					Ref                string `json:"ref"`
+					ExtractedEdgeCount int    `json:"extracted_edge_count"`
+					InferredEdgeCount  int    `json:"inferred_edge_count"`
+					AmbiguousEdgeCount int    `json:"ambiguous_edge_count"`
+				} `json:"weak_link_artifacts"`
+				MultiGovernedArtifacts []struct {
+					Ref                string   `json:"ref"`
+					GoverningSpecCount int      `json:"governing_spec_count"`
+					GoverningSpecs     []string `json:"governing_specs"`
+				} `json:"multi_governed_artifacts"`
+			} `json:"governance_hotspots"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+	if len(payload.Result.GovernanceHotspots.HighFanOutSpecs) == 0 {
+		t.Fatalf("high_fan_out_specs = %+v, want hotspot output", payload.Result.GovernanceHotspots)
+	}
+	if got, want := payload.Result.GovernanceHotspots.HighFanOutSpecs[0].Ref, "SPEC-300"; got != want {
+		t.Fatalf("high_fan_out_specs[0].ref = %q, want %q", got, want)
+	}
+	if got, want := payload.Result.GovernanceHotspots.HighFanOutSpecs[0].AppliesToCount, 4; got != want {
+		t.Fatalf("high_fan_out_specs[0].applies_to_count = %d, want %d", got, want)
+	}
+	if got, want := payload.Result.GovernanceHotspots.WeakLinkArtifacts[0].Ref, "code://src/service/weak.go"; got != want {
+		t.Fatalf("weak_link_artifacts[0].ref = %q, want %q", got, want)
+	}
+	if payload.Result.GovernanceHotspots.WeakLinkArtifacts[0].ExtractedEdgeCount != 0 {
+		t.Fatalf("weak_link_artifacts[0] = %+v, want zero extracted edges", payload.Result.GovernanceHotspots.WeakLinkArtifacts[0])
+	}
+	var handlerHotspot *struct {
+		Ref                string   `json:"ref"`
+		GoverningSpecCount int      `json:"governing_spec_count"`
+		GoverningSpecs     []string `json:"governing_specs"`
+	}
+	for i := range payload.Result.GovernanceHotspots.MultiGovernedArtifacts {
+		artifact := &payload.Result.GovernanceHotspots.MultiGovernedArtifacts[i]
+		if artifact.Ref == "code://src/service/handler.go" {
+			handlerHotspot = artifact
+			break
+		}
+	}
+	if handlerHotspot == nil {
+		t.Fatalf("multi_governed_artifacts = %+v, want handler hotspot", payload.Result.GovernanceHotspots.MultiGovernedArtifacts)
+	}
+	if got, want := handlerHotspot.GoverningSpecCount, 2; got != want {
+		t.Fatalf("multi_governed_artifacts[0].governing_spec_count = %d, want %d", got, want)
+	}
+}
+
 func TestRunStatusJSONIncludesRepoCoverage(t *testing.T) {
 	repo := writeMultiRepoSearchWorkspace(t)
 
@@ -396,6 +479,111 @@ func TestRunStatusJSONIncludesRuntimeProbeResults(t *testing.T) {
 	}
 	if got, want := payload.Result.Runtime.Checks[1].Status, "disabled"; got != want {
 		t.Fatalf("checks[1].status = %q, want %q", got, want)
+	}
+}
+
+func writeGovernanceHotspotStatusWorkspace(t *testing.T) string {
+	t.Helper()
+
+	repo := t.TempDir()
+	indexPath := filepath.Join(repo, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(repo, "pituitary.toml")
+	mustWriteFileCmd(t, configPath, fmt.Sprintf(`
+[workspace]
+root = "."
+index_path = "%s"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`, filepath.ToSlash(indexPath)))
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-100", "spec.toml"), `
+id = "SPEC-100"
+title = "Handler Governance"
+status = "accepted"
+domain = "api"
+body = "body.md"
+applies_to = [
+  "code://src/service/handler.go",
+  "code://src/service/shared.go",
+]
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-100", "body.md"), `
+# Handler Governance
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-200", "spec.toml"), `
+id = "SPEC-200"
+title = "Worker Governance"
+status = "accepted"
+domain = "api"
+body = "body.md"
+applies_to = [
+  "code://src/service/handler.go",
+  "code://src/service/worker.go",
+]
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-200", "body.md"), `
+# Worker Governance
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-300", "spec.toml"), `
+id = "SPEC-300"
+title = "Fanout Governance"
+status = "accepted"
+domain = "api"
+body = "body.md"
+applies_to = [
+  "code://src/service/fanout-a.go",
+  "code://src/service/fanout-b.go",
+  "code://src/service/fanout-c.go",
+  "code://src/service/fanout-d.go",
+]
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "spec-300", "body.md"), `
+# Fanout Governance
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+	insertGovernanceHotspotStatusEdge(t, cfg.Workspace.ResolvedIndexPath, "SPEC-100", "code://src/service/weak.go", "inferred", "inferred", 0.7)
+	insertGovernanceHotspotStatusEdge(t, cfg.Workspace.ResolvedIndexPath, "SPEC-200", "code://src/service/weak.go", "inferred", "ambiguous", 0.5)
+	return repo
+}
+
+func insertGovernanceHotspotStatusEdge(t *testing.T, indexPath, fromRef, toRef, edgeSource, confidence string, confidenceScore float64) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(indexPath)+"?mode=rw")
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(
+		`INSERT OR REPLACE INTO edges (from_ref, to_ref, edge_type, edge_source, confidence, confidence_score) VALUES (?, ?, 'applies_to', ?, ?, ?)`,
+		fromRef,
+		toRef,
+		edgeSource,
+		confidence,
+		confidenceScore,
+	); err != nil {
+		t.Fatalf("insert hotspot edge %s -> %s: %v", fromRef, toRef, err)
 	}
 }
 

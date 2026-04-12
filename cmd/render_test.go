@@ -213,6 +213,52 @@ func TestRenderStatusResultCompactSuppressesVerboseSections(t *testing.T) {
 	}
 }
 
+func TestRenderStatusResultIncludesGovernanceHotspots(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	renderStatusResult(&stdout, &statusResult{
+		EmbedderProvider: "fixture",
+		IndexExists:      true,
+		SpecCount:        3,
+		DocCount:         0,
+		ChunkCount:       9,
+		GovernanceHotspots: &index.GovernanceHotspots{
+			HighFanOutSpecs: []index.GovernanceSpecHotspot{
+				{Ref: "SPEC-300", Title: "Fanout Governance", AppliesToCount: 4},
+			},
+			WeakLinkArtifacts: []index.GovernanceArtifactHotspot{
+				{
+					Ref:                "code://src/service/weak.go",
+					GoverningSpecCount: 2,
+					InferredEdgeCount:  1,
+					AmbiguousEdgeCount: 1,
+					GoverningSpecs:     []string{"SPEC-100", "SPEC-200"},
+				},
+			},
+			MultiGovernedArtifacts: []index.GovernanceArtifactHotspot{
+				{
+					Ref:                "code://src/service/handler.go",
+					GoverningSpecCount: 2,
+					GoverningSpecs:     []string{"SPEC-100", "SPEC-200"},
+				},
+			},
+		},
+	})
+
+	output := stdout.String()
+	for _, want := range []string{
+		"GOVERNANCE HOTSPOTS",
+		"fan-out spec SPEC-300 · Fanout Governance | 4 applies_to edges",
+		"weak-link artifact code://src/service/weak.go | 2 governing specs | 1 inferred | 1 ambiguous | SPEC-100, SPEC-200",
+		"multi-governed artifact code://src/service/handler.go | 2 governing specs | SPEC-100, SPEC-200",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderStatusResult() output %q does not contain %q", output, want)
+		}
+	}
+}
+
 func TestRenderCommandTableSearchSpecs(t *testing.T) {
 	t.Parallel()
 
