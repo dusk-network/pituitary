@@ -396,6 +396,7 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 			fmt.Fprintf(w, "  %s %s\n", p.cross(), finding.Message)
 		}
 	}
+	renderStatusGovernanceHotspots(w, result.GovernanceHotspots)
 	if result.ArtifactLocations != nil {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("artifact index dir:"), result.ArtifactLocations.IndexDir)
 		fmt.Fprintf(w, "  %s %s\n", p.dim("artifact discover --write default:"), result.ArtifactLocations.DiscoverConfigPath)
@@ -477,6 +478,78 @@ func renderCompactStatusDetails(w io.Writer, result *statusResult) {
 	for _, guidance := range result.Guidance {
 		fmt.Fprintf(w, "  %s %s\n", p.arrow(), guidance)
 	}
+}
+
+func renderStatusGovernanceHotspots(w io.Writer, hotspots *index.GovernanceHotspots) {
+	lines := statusGovernanceHotspotLines(hotspots)
+	if len(lines) == 0 {
+		return
+	}
+
+	p := presentationForWriter(w)
+	fmt.Fprintf(w, "  %s\n", p.white("GOVERNANCE HOTSPOTS"))
+	for i, line := range lines {
+		fmt.Fprintf(w, "  %s %s\n", p.treeItem(i == len(lines)-1), line)
+	}
+}
+
+func statusGovernanceHotspotLines(hotspots *index.GovernanceHotspots) []string {
+	if hotspots == nil {
+		return nil
+	}
+
+	lines := make([]string, 0, len(hotspots.HighFanOutSpecs)+len(hotspots.WeakLinkArtifacts)+len(hotspots.MultiGovernedArtifacts))
+	for _, hotspot := range hotspots.HighFanOutSpecs {
+		line := fmt.Sprintf("fan-out spec %s", hotspot.Ref)
+		if hotspot.Title != "" {
+			line += " · " + hotspot.Title
+		}
+		line += fmt.Sprintf(" | %d applies_to edges", hotspot.AppliesToCount)
+		if weakEdges := hotspot.InferredEdgeCount + hotspot.AmbiguousEdgeCount; weakEdges > 0 {
+			line += fmt.Sprintf(" | %d weak edges", weakEdges)
+		}
+		lines = append(lines, line)
+	}
+	for _, hotspot := range hotspots.WeakLinkArtifacts {
+		line := fmt.Sprintf("weak-link artifact %s | %d governing specs", hotspot.Ref, hotspot.GoverningSpecCount)
+		if hotspot.SourceRef != "" && hotspot.SourceRef != hotspot.Ref {
+			line += " | " + displaySourcePath(hotspot.SourceRef)
+		}
+		if hotspot.InferredEdgeCount > 0 {
+			line += fmt.Sprintf(" | %d inferred", hotspot.InferredEdgeCount)
+		}
+		if hotspot.AmbiguousEdgeCount > 0 {
+			line += fmt.Sprintf(" | %d ambiguous", hotspot.AmbiguousEdgeCount)
+		}
+		if specs := formatGovernanceHotspotSpecRefs(hotspot.GoverningSpecs, 3); specs != "" {
+			line += " | " + specs
+		}
+		lines = append(lines, line)
+	}
+	for _, hotspot := range hotspots.MultiGovernedArtifacts {
+		line := fmt.Sprintf("multi-governed artifact %s | %d governing specs", hotspot.Ref, hotspot.GoverningSpecCount)
+		if hotspot.SourceRef != "" && hotspot.SourceRef != hotspot.Ref {
+			line += " | " + displaySourcePath(hotspot.SourceRef)
+		}
+		if weakEdges := hotspot.InferredEdgeCount + hotspot.AmbiguousEdgeCount; weakEdges > 0 {
+			line += fmt.Sprintf(" | %d weak edges", weakEdges)
+		}
+		if specs := formatGovernanceHotspotSpecRefs(hotspot.GoverningSpecs, 3); specs != "" {
+			line += " | " + specs
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func formatGovernanceHotspotSpecRefs(refs []string, limit int) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	if limit <= 0 || len(refs) <= limit {
+		return strings.Join(refs, ", ")
+	}
+	return fmt.Sprintf("%s +%d more", strings.Join(refs[:limit], ", "), len(refs)-limit)
 }
 
 func renderSpecFamilies(w io.Writer, families *index.FamilyResult) {

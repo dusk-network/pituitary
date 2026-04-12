@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/dusk-network/pituitary/internal/model"
 )
@@ -18,6 +20,7 @@ type Status struct {
 	ChunkCount         int                 `json:"chunk_count"`
 	Repos              []RepoCoverage      `json:"repo_coverage,omitempty"`
 	GovernanceCoverage *GovernanceCoverage `json:"governance_coverage,omitempty"`
+	GovernanceHotspots *GovernanceHotspots `json:"governance_hotspots,omitempty"`
 }
 
 // GovernanceCoverage reports the percentage of indexed source files that have
@@ -30,6 +33,35 @@ type GovernanceCoverage struct {
 	InferredEdges  int     `json:"inferred_edges"`
 	ExtractedEdges int     `json:"extracted_edges,omitempty"`
 	AmbiguousEdges int     `json:"ambiguous_edges,omitempty"`
+}
+
+// GovernanceHotspots surfaces governance-maintenance hotspots from the indexed
+// applies_to graph so operators can distinguish weak traceability from direct
+// contradiction-oriented findings.
+type GovernanceHotspots struct {
+	HighFanOutSpecs        []GovernanceSpecHotspot     `json:"high_fan_out_specs,omitempty"`
+	WeakLinkArtifacts      []GovernanceArtifactHotspot `json:"weak_link_artifacts,omitempty"`
+	MultiGovernedArtifacts []GovernanceArtifactHotspot `json:"multi_governed_artifacts,omitempty"`
+}
+
+type GovernanceSpecHotspot struct {
+	Ref                string `json:"ref"`
+	Title              string `json:"title,omitempty"`
+	AppliesToCount     int    `json:"applies_to_count"`
+	ExtractedEdgeCount int    `json:"extracted_edge_count,omitempty"`
+	InferredEdgeCount  int    `json:"inferred_edge_count,omitempty"`
+	AmbiguousEdgeCount int    `json:"ambiguous_edge_count,omitempty"`
+}
+
+type GovernanceArtifactHotspot struct {
+	Ref                string   `json:"ref"`
+	Title              string   `json:"title,omitempty"`
+	SourceRef          string   `json:"source_ref,omitempty"`
+	GoverningSpecCount int      `json:"governing_spec_count"`
+	ExtractedEdgeCount int      `json:"extracted_edge_count,omitempty"`
+	InferredEdgeCount  int      `json:"inferred_edge_count,omitempty"`
+	AmbiguousEdgeCount int      `json:"ambiguous_edge_count,omitempty"`
+	GoverningSpecs     []string `json:"governing_specs,omitempty"`
 }
 
 // ReadStatus inspects the configured index path and returns basic counts.
@@ -77,6 +109,10 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 		coverage, coverageErr := queryGovernanceCoverageContext(ctx, db)
 		if coverageErr == nil {
 			status.GovernanceCoverage = coverage
+		}
+		hotspots, hotspotErr := queryGovernanceHotspotsContext(ctx, db)
+		if hotspotErr == nil {
+			status.GovernanceHotspots = hotspots
 		}
 	}
 
@@ -128,4 +164,202 @@ func queryGovernanceCoverageContext(ctx context.Context, db *sql.DB) (*Governanc
 	}
 
 	return &coverage, nil
+}
+
+func queryGovernanceHotspotsContext(ctx context.Context, db *sql.DB) (*GovernanceHotspots, error) {
+	hasConfidence := hasEdgeConfidenceColumn(ctx, db)
+
+	highFanOutSpecs, err := queryGovernanceSpecHotspotsContext(ctx, db, hasConfidence)
+	if err != nil {
+		return nil, err
+	}
+	weakLinkArtifacts, err := queryGovernanceArtifactHotspotsContext(
+		ctx,
+		db,
+		hasConfidence,
+		`extracted_edge_count = 0 AND (inferred_edge_count > 0 OR ambiguous_edge_count > 0)`,
+		`ambiguous_edge_count DESC, inferred_edge_count DESC, governing_spec_count DESC, ref`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	multiGovernedArtifacts, err := queryGovernanceArtifactHotspotsContext(
+		ctx,
+		db,
+		hasConfidence,
+		`governing_spec_count > 1`,
+		`governing_spec_count DESC, ambiguous_edge_count DESC, inferred_edge_count DESC, ref`,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(highFanOutSpecs) == 0 && len(weakLinkArtifacts) == 0 && len(multiGovernedArtifacts) == 0 {
+		return nil, nil
+	}
+	return &GovernanceHotspots{
+		HighFanOutSpecs:        highFanOutSpecs,
+		WeakLinkArtifacts:      weakLinkArtifacts,
+		MultiGovernedArtifacts: multiGovernedArtifacts,
+	}, nil
+}
+
+func queryGovernanceSpecHotspotsContext(ctx context.Context, db *sql.DB, hasConfidence bool) ([]GovernanceSpecHotspot, error) {
+	query := fmt.Sprintf(`
+SELECT
+  s.ref,
+  COALESCE(s.title, ''),
+  COUNT(*) AS applies_to_count,
+  %s AS extracted_edge_count,
+  %s AS inferred_edge_count,
+  %s AS ambiguous_edge_count
+FROM edges e
+JOIN artifacts s ON s.ref = e.from_ref
+WHERE e.edge_type = 'applies_to'
+  AND s.kind = ?
+  AND s.status = ?
+GROUP BY s.ref, s.title
+ORDER BY applies_to_count DESC, s.ref
+LIMIT 5`,
+		governanceExtractedEdgeExpr(hasConfidence),
+		governanceInferredEdgeExpr(hasConfidence),
+		governanceAmbiguousEdgeExpr(hasConfidence),
+	)
+
+	rows, err := db.QueryContext(ctx, query, model.ArtifactKindSpec, model.StatusAccepted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hotspots := []GovernanceSpecHotspot{}
+	for rows.Next() {
+		var hotspot GovernanceSpecHotspot
+		if err := rows.Scan(
+			&hotspot.Ref,
+			&hotspot.Title,
+			&hotspot.AppliesToCount,
+			&hotspot.ExtractedEdgeCount,
+			&hotspot.InferredEdgeCount,
+			&hotspot.AmbiguousEdgeCount,
+		); err != nil {
+			return nil, err
+		}
+		hotspots = append(hotspots, hotspot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return hotspots, nil
+}
+
+func queryGovernanceArtifactHotspotsContext(ctx context.Context, db *sql.DB, hasConfidence bool, filter string, orderBy string) ([]GovernanceArtifactHotspot, error) {
+	aggregateQuery := fmt.Sprintf(`
+SELECT
+  e.to_ref AS ref,
+  COALESCE(a.title, '') AS title,
+  COALESCE(a.source_ref, '') AS source_ref,
+  COUNT(DISTINCT e.from_ref) AS governing_spec_count,
+  %s AS extracted_edge_count,
+  %s AS inferred_edge_count,
+  %s AS ambiguous_edge_count,
+  COALESCE(GROUP_CONCAT(DISTINCT e.from_ref), '') AS governing_specs
+FROM edges e
+JOIN artifacts s ON s.ref = e.from_ref
+LEFT JOIN artifacts a ON a.ref = e.to_ref
+WHERE e.edge_type = 'applies_to'
+  AND s.kind = ?
+  AND s.status = ?
+GROUP BY e.to_ref, a.title, a.source_ref`,
+		governanceExtractedEdgeExpr(hasConfidence),
+		governanceInferredEdgeExpr(hasConfidence),
+		governanceAmbiguousEdgeExpr(hasConfidence),
+	)
+	query := fmt.Sprintf(`
+SELECT
+  ref,
+  title,
+  source_ref,
+  governing_spec_count,
+  extracted_edge_count,
+  inferred_edge_count,
+  ambiguous_edge_count,
+  governing_specs
+FROM (%s)
+WHERE %s
+ORDER BY %s
+LIMIT 5`, aggregateQuery, filter, orderBy)
+
+	rows, err := db.QueryContext(ctx, query, model.ArtifactKindSpec, model.StatusAccepted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hotspots := []GovernanceArtifactHotspot{}
+	for rows.Next() {
+		var hotspot GovernanceArtifactHotspot
+		var rawGoverningSpecs string
+		if err := rows.Scan(
+			&hotspot.Ref,
+			&hotspot.Title,
+			&hotspot.SourceRef,
+			&hotspot.GoverningSpecCount,
+			&hotspot.ExtractedEdgeCount,
+			&hotspot.InferredEdgeCount,
+			&hotspot.AmbiguousEdgeCount,
+			&rawGoverningSpecs,
+		); err != nil {
+			return nil, err
+		}
+		hotspot.GoverningSpecs = splitGovernanceSpecRefs(rawGoverningSpecs)
+		hotspots = append(hotspots, hotspot)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return hotspots, nil
+}
+
+func governanceExtractedEdgeExpr(hasConfidence bool) string {
+	if hasConfidence {
+		return `SUM(CASE WHEN e.confidence = 'extracted' THEN 1 ELSE 0 END)`
+	}
+	return `SUM(CASE WHEN e.edge_source = 'manual' THEN 1 ELSE 0 END)`
+}
+
+func governanceInferredEdgeExpr(hasConfidence bool) string {
+	if hasConfidence {
+		return `SUM(CASE WHEN e.confidence = 'inferred' THEN 1 ELSE 0 END)`
+	}
+	return `SUM(CASE WHEN e.edge_source = 'inferred' THEN 1 ELSE 0 END)`
+}
+
+func governanceAmbiguousEdgeExpr(hasConfidence bool) string {
+	if hasConfidence {
+		return `SUM(CASE WHEN e.confidence = 'ambiguous' THEN 1 ELSE 0 END)`
+	}
+	return `0`
+}
+
+func splitGovernanceSpecRefs(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	values := strings.Split(raw, ",")
+	refs := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		ref := strings.TrimSpace(value)
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return refs
 }

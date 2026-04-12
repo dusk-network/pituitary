@@ -19,25 +19,26 @@ type statusRequest struct {
 }
 
 type statusResult struct {
-	WorkspaceRoot     string                     `json:"workspace_root"`
-	ConfigPath        string                     `json:"config_path"`
-	EmbedderProvider  string                     `json:"embedder_provider,omitempty"`
-	AnalysisProvider  string                     `json:"analysis_provider,omitempty"`
-	RuntimeConfig     *statusRuntimeConfig       `json:"runtime_config,omitempty"`
-	ConfigResolution  *configResolution          `json:"config_resolution,omitempty"`
-	IndexPath         string                     `json:"index_path"`
-	IndexExists       bool                       `json:"index_exists"`
-	Freshness         *index.FreshnessStatus     `json:"freshness,omitempty"`
-	SpecCount         int                        `json:"spec_count"`
-	DocCount          int                        `json:"doc_count"`
-	ChunkCount        int                        `json:"chunk_count"`
-	Repos             []index.RepoCoverage       `json:"repo_coverage,omitempty"`
-	ArtifactLocations *statusArtifactLocation    `json:"artifact_locations,omitempty"`
-	RelationGraph     *index.RelationGraphStatus `json:"relation_graph,omitempty"`
-	Families          *index.FamilyResult        `json:"families,omitempty"`
-	Runtime           *runtimeprobe.Result       `json:"runtime,omitempty"`
-	Guidance          []string                   `json:"guidance,omitempty"`
-	Compact           bool                       `json:"-"`
+	WorkspaceRoot      string                     `json:"workspace_root"`
+	ConfigPath         string                     `json:"config_path"`
+	EmbedderProvider   string                     `json:"embedder_provider,omitempty"`
+	AnalysisProvider   string                     `json:"analysis_provider,omitempty"`
+	RuntimeConfig      *statusRuntimeConfig       `json:"runtime_config,omitempty"`
+	ConfigResolution   *configResolution          `json:"config_resolution,omitempty"`
+	IndexPath          string                     `json:"index_path"`
+	IndexExists        bool                       `json:"index_exists"`
+	Freshness          *index.FreshnessStatus     `json:"freshness,omitempty"`
+	SpecCount          int                        `json:"spec_count"`
+	DocCount           int                        `json:"doc_count"`
+	ChunkCount         int                        `json:"chunk_count"`
+	Repos              []index.RepoCoverage       `json:"repo_coverage,omitempty"`
+	GovernanceHotspots *index.GovernanceHotspots  `json:"governance_hotspots,omitempty"`
+	ArtifactLocations  *statusArtifactLocation    `json:"artifact_locations,omitempty"`
+	RelationGraph      *index.RelationGraphStatus `json:"relation_graph,omitempty"`
+	Families           *index.FamilyResult        `json:"families,omitempty"`
+	Runtime            *runtimeprobe.Result       `json:"runtime,omitempty"`
+	Guidance           []string                   `json:"guidance,omitempty"`
+	Compact            bool                       `json:"-"`
 }
 
 type statusRuntimeConfig struct {
@@ -164,23 +165,24 @@ func newStatusResult(result *app.StatusResult, resolution *configResolution) *st
 	guidance := append([]string(nil), result.Guidance...)
 	guidance = append(guidance, statusResolutionGuidance(result.ConfigPath, resolution)...)
 	return &statusResult{
-		WorkspaceRoot:     result.WorkspaceRoot,
-		ConfigPath:        result.ConfigPath,
-		EmbedderProvider:  result.EmbedderProvider,
-		AnalysisProvider:  result.AnalysisProvider,
-		RuntimeConfig:     newStatusRuntimeConfig(result.RuntimeConfig),
-		ConfigResolution:  resolution,
-		IndexPath:         result.Index.IndexPath,
-		IndexExists:       result.Index.Exists,
-		Freshness:         result.Freshness,
-		SpecCount:         result.Index.SpecCount,
-		DocCount:          result.Index.DocCount,
-		ChunkCount:        result.Index.ChunkCount,
-		Repos:             append([]index.RepoCoverage(nil), result.Index.Repos...),
-		ArtifactLocations: buildStatusArtifactLocations(result.WorkspaceRoot, result.ConfigPath, result.Index.IndexPath, resolution),
-		RelationGraph:     result.RelationGraph,
-		Runtime:           result.Runtime,
-		Guidance:          guidance,
+		WorkspaceRoot:      result.WorkspaceRoot,
+		ConfigPath:         result.ConfigPath,
+		EmbedderProvider:   result.EmbedderProvider,
+		AnalysisProvider:   result.AnalysisProvider,
+		RuntimeConfig:      newStatusRuntimeConfig(result.RuntimeConfig),
+		ConfigResolution:   resolution,
+		IndexPath:          result.Index.IndexPath,
+		IndexExists:        result.Index.Exists,
+		Freshness:          result.Freshness,
+		SpecCount:          result.Index.SpecCount,
+		DocCount:           result.Index.DocCount,
+		ChunkCount:         result.Index.ChunkCount,
+		Repos:              append([]index.RepoCoverage(nil), result.Index.Repos...),
+		GovernanceHotspots: result.Index.GovernanceHotspots,
+		ArtifactLocations:  buildStatusArtifactLocations(result.WorkspaceRoot, result.ConfigPath, result.Index.IndexPath, resolution),
+		RelationGraph:      result.RelationGraph,
+		Runtime:            result.Runtime,
+		Guidance:           guidance,
 	}
 }
 
