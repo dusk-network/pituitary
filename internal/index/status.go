@@ -262,8 +262,7 @@ SELECT
   COUNT(DISTINCT e.from_ref) AS governing_spec_count,
   %s AS extracted_edge_count,
   %s AS inferred_edge_count,
-  %s AS ambiguous_edge_count,
-  COALESCE(GROUP_CONCAT(DISTINCT e.from_ref), '') AS governing_specs
+  %s AS ambiguous_edge_count
 FROM edges e
 JOIN artifacts s ON s.ref = e.from_ref
 LEFT JOIN artifacts a ON a.ref = e.to_ref
@@ -283,8 +282,7 @@ SELECT
   governing_spec_count,
   extracted_edge_count,
   inferred_edge_count,
-  ambiguous_edge_count,
-  governing_specs
+  ambiguous_edge_count
 FROM (%s)
 WHERE %s
 ORDER BY %s
@@ -299,7 +297,6 @@ LIMIT 5`, aggregateQuery, filter, orderBy)
 	hotspots := []GovernanceArtifactHotspot{}
 	for rows.Next() {
 		var hotspot GovernanceArtifactHotspot
-		var rawGoverningSpecs string
 		if err := rows.Scan(
 			&hotspot.Ref,
 			&hotspot.Title,
@@ -308,17 +305,73 @@ LIMIT 5`, aggregateQuery, filter, orderBy)
 			&hotspot.ExtractedEdgeCount,
 			&hotspot.InferredEdgeCount,
 			&hotspot.AmbiguousEdgeCount,
-			&rawGoverningSpecs,
 		); err != nil {
 			return nil, err
 		}
-		hotspot.GoverningSpecs = splitGovernanceSpecRefs(rawGoverningSpecs)
 		hotspots = append(hotspots, hotspot)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	refs := make([]string, 0, len(hotspots))
+	for _, hotspot := range hotspots {
+		refs = append(refs, hotspot.Ref)
+	}
+	specRefsByArtifact, err := loadGovernanceSpecRefsByArtifactContext(ctx, db, refs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range hotspots {
+		hotspots[i].GoverningSpecs = specRefsByArtifact[hotspots[i].Ref]
+	}
 	return hotspots, nil
+}
+
+func loadGovernanceSpecRefsByArtifactContext(ctx context.Context, db *sql.DB, refs []string) (map[string][]string, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(refs)), ",")
+	query := fmt.Sprintf(`
+SELECT
+  e.to_ref,
+  e.from_ref
+FROM edges e
+JOIN artifacts s ON s.ref = e.from_ref
+WHERE e.edge_type = 'applies_to'
+  AND s.kind = ?
+  AND s.status = ?
+  AND e.to_ref IN (%s)
+GROUP BY e.to_ref, e.from_ref
+ORDER BY e.to_ref, e.from_ref`, placeholders)
+
+	args := make([]any, 0, 2+len(refs))
+	args = append(args, model.ArtifactKindSpec, model.StatusAccepted)
+	for _, ref := range refs {
+		args = append(args, ref)
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	specRefsByArtifact := make(map[string][]string, len(refs))
+	for rows.Next() {
+		var artifactRef string
+		var specRef string
+		if err := rows.Scan(&artifactRef, &specRef); err != nil {
+			return nil, err
+		}
+		specRefsByArtifact[artifactRef] = append(specRefsByArtifact[artifactRef], specRef)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return specRefsByArtifact, nil
 }
 
 func governanceExtractedEdgeExpr(hasConfidence bool) string {
