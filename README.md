@@ -71,7 +71,7 @@ pituitary init --path .              # discover, index, report
 pituitary new --title "Rate limiting policy" --domain api  # scaffold a draft spec
 pituitary check-doc-drift --scope all  # find stale docs
 pituitary review-spec --path specs/X   # full review of one spec
-pituitary status                       # index health at a glance
+pituitary status                       # index health and governance hotspots at a glance
 ```
 
 ## Command Reference
@@ -97,6 +97,8 @@ All commands output JSON with `--format json`. Agents can set `PITUITARY_FORMAT=
 When file selection looks wrong, start with `pituitary explain-file PATH`. It is the fastest way to confirm which source matched a file, which selectors fired, and why a path was rejected before you debug drift or compliance output.
 
 One `pituitary.toml` can also span multiple repository roots. Bind a source to a named repo root with `repo = "..."`, and Pituitary carries that repo identity through search, drift, impact, status, and index output so cross-repo results stay unambiguous.
+
+`pituitary status` now also flags governance hotspots so you can triage the corpus quickly: specs with unusually broad `applies_to` fan-out, artifacts that are only weakly governed through inferred or ambiguous links, and artifacts currently governed by multiple specs.
 
 For terminology migrations, you can keep running ad hoc audits with `--term` / `--canonical-term`, or declare reusable `[[terminology.policies]]` in config and run `pituitary check-terminology` directly. Results now separate actionable current-state violations from tolerated historical uses, support terminology-only `exclude_paths` for historical containers such as `CHANGELOG.md`, and include replacement suggestions in both text and JSON output.
 
