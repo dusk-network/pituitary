@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	htemplate "html/template"
 	"io"
 	"strings"
 
@@ -717,5 +716,3 @@ func renderReviewHTMLWarningsSection(w io.Writer, result *analysis.ReviewResult,
 func renderReviewHTMLDocumentEnd(w io.Writer) {
 	fmt.Fprint(w, "</main>\n</body>\n</html>\n")
 }
-
-var _ = htemplate.HTMLEscapeString
