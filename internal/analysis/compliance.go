@@ -282,13 +282,30 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	}
 	evaluationTargets = collapseComplianceDuplicateEvaluationTargets(evaluationTargets)
 
+	result := newComplianceResult(cfg, targets)
+	relevant := map[string]*complianceRelevantAccumulator{}
+
+	adjudicationCandidates, err := evaluateComplianceDeterministically(repo, evaluationTargets, result, relevant)
+	if err != nil {
+		return nil, err
+	}
+	if err := refineComplianceSemantically(ctx, cfg, repo, adjudicationCandidates, result); err != nil {
+		return nil, err
+	}
+	if err := finalizeComplianceResult(ctx, cfg, repo, evaluationTargets, relevant, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func newComplianceResult(cfg *config.Config, targets []complianceTarget) *ComplianceResult {
 	analysisRuntime := newAnalysisRuntimeUsage(cfg.Runtime.Analysis)
 	var runtime *CommandRuntime
 	if analysisRuntime != nil {
 		runtime = &CommandRuntime{Analysis: analysisRuntime}
 	}
 
-	result := &ComplianceResult{
+	return &ComplianceResult{
 		Paths:        complianceTargetPaths(targets),
 		Compliant:    []ComplianceFinding{},
 		Conflicts:    []ComplianceFinding{},
@@ -298,8 +315,9 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 		Runtime:      runtime,
 		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}
-	relevant := map[string]*complianceRelevantAccumulator{}
+}
 
+func evaluateComplianceDeterministically(repo *analysisRepository, evaluationTargets []complianceEvaluationTarget, result *ComplianceResult, relevant map[string]*complianceRelevantAccumulator) (map[string]*complianceAdjudicationCandidate, error) {
 	adjudicationCandidates := map[string]*complianceAdjudicationCandidate{}
 
 	for _, item := range evaluationTargets {
@@ -309,13 +327,13 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 			if err != nil {
 				return nil, err
 			}
-			item, specRef, title, basis := complianceNoSpecFinding(repo, target, suggestions)
+			finding, specRef, title, basis := complianceNoSpecFinding(repo, target, suggestions)
 			if specRef != "" {
 				addComplianceRelevantSpec(relevant, specRef, target.Path, basis)
-				item.SpecRef = specRef
-				item.Title = title
+				finding.SpecRef = specRef
+				finding.Title = title
 			}
-			result.Unspecified = append(result.Unspecified, item)
+			result.Unspecified = append(result.Unspecified, finding)
 			continue
 		}
 
@@ -331,59 +349,69 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 			addComplianceRelevantSpec(relevant, ref, target.Path, "applies_to")
 			assessment := assessComplianceSpec(spec, target)
 			assessment.Finding.Provenance = ProvenanceLiteral
-			switch assessment.Kind {
-			case "conflict":
-				result.Conflicts = append(result.Conflicts, assessment.Finding)
-			case "compliant":
-				result.Compliant = append(result.Compliant, assessment.Finding)
-			default:
-				result.Unspecified = append(result.Unspecified, assessment.Finding)
+			appendComplianceFinding(result, assessment.Finding, assessment.Kind)
+			if assessment.Kind == "compliant" {
+				continue
 			}
-
-			// Collect non-compliant targets for adjudication — targets already
-			// deterministically resolved as compliant are low-value for the
-			// model and would consume the per-request target budget.
-			if assessment.Kind != "compliant" {
-				if _, ok := adjudicationCandidates[ref]; !ok {
-					adjudicationCandidates[ref] = &complianceAdjudicationCandidate{spec: spec}
-				}
-				adjudicationCandidates[ref].targets = append(adjudicationCandidates[ref].targets, target)
+			if _, ok := adjudicationCandidates[ref]; !ok {
+				adjudicationCandidates[ref] = &complianceAdjudicationCandidate{spec: spec}
 			}
+			adjudicationCandidates[ref].targets = append(adjudicationCandidates[ref].targets, target)
 		}
 	}
 
-	// Semantic adjudication: if the analysis runtime is configured, use the
-	// model to find compliance violations that deterministic matching missed.
+	return adjudicationCandidates, nil
+}
+
+func appendComplianceFinding(result *ComplianceResult, finding ComplianceFinding, kind string) {
+	switch kind {
+	case "conflict":
+		result.Conflicts = append(result.Conflicts, finding)
+	case "compliant":
+		result.Compliant = append(result.Compliant, finding)
+	default:
+		result.Unspecified = append(result.Unspecified, finding)
+	}
+}
+
+func refineComplianceSemantically(ctx context.Context, cfg *config.Config, repo *analysisRepository, adjudicationCandidates map[string]*complianceAdjudicationCandidate, result *ComplianceResult) error {
+	if len(adjudicationCandidates) == 0 {
+		return nil
+	}
+
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
-	if adjudicator, ok := analyzer.(complianceAdjudicator); ok && len(adjudicationCandidates) > 0 {
-		adjudicator = complianceAdjudicatorWithTimings(ctx, adjudicator)
-		if result.Runtime != nil && result.Runtime.Analysis != nil {
-			result.Runtime.Analysis.Used = true
-		}
-		adjFindings, err := runComplianceAdjudication(ctx, adjudicator, repo, adjudicationCandidates, result)
-		if err != nil {
-			return nil, err
-		}
-		result.Conflicts = append(result.Conflicts, adjFindings...)
+	adjudicator, ok := analyzer.(complianceAdjudicator)
+	if !ok {
+		return nil
 	}
 
+	adjudicator = complianceAdjudicatorWithTimings(ctx, adjudicator)
+	if result.Runtime != nil && result.Runtime.Analysis != nil {
+		result.Runtime.Analysis.Used = true
+	}
+	adjFindings, err := runComplianceAdjudication(ctx, adjudicator, repo, adjudicationCandidates, result)
+	if err != nil {
+		return err
+	}
+	result.Conflicts = append(result.Conflicts, adjFindings...)
+	return nil
+}
+
+func finalizeComplianceResult(ctx context.Context, cfg *config.Config, repo *analysisRepository, evaluationTargets []complianceEvaluationTarget, relevant map[string]*complianceRelevantAccumulator, result *ComplianceResult) error {
 	allSpecRefs := complianceRelevantSpecRefs(relevant)
 	if len(allSpecRefs) > 0 {
 		specs, err := repo.loadSelectedSpecs(allSpecRefs)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		result.RelevantSpecs = buildComplianceRelevantSpecs(specs, relevant)
 	}
 
-	// Classify conflicts as deliberate_deviation or unintentional_drift
-	// based on rationale comments found in the source files.
 	classifyComplianceConflicts(ctx, cfg, result)
-
 	sortComplianceFindings(result.Compliant)
 	sortComplianceFindings(result.Conflicts)
 	sortComplianceFindings(result.Unspecified)
@@ -393,7 +421,7 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	result.RelationSummary = buildComplianceRelationSummary(result.Relations)
 	result.Discovery = buildComplianceDiscovery(result.Unspecified, explicitRelationTargets)
 	result.TopSuggestions = buildComplianceTopSuggestions(result)
-	return result, nil
+	return nil
 }
 
 // runComplianceAdjudication sends narrowed targets to the analysis model for

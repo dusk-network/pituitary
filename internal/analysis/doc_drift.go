@@ -281,174 +281,17 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 }
 
 func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, analysisRuntime *RuntimeUsage, scope DocDriftScope, selectedDocs map[string]docDocument, specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) (*DocDriftResult, error) {
-	driftItems := make([]DriftItem, 0, len(selectedDocs))
-	assessments := make([]DocDriftAssessment, 0, len(selectedDocs))
-	remediationItems := make([]DocRemediationItem, 0, len(selectedDocs))
-	relevantSpecRefs := make([]string, 0, len(specs))
-	warningSpecs := make([]specDocument, 0, len(specs))
-	inferenceSpecs := specs
-	var allSpecs map[string]specDocument
-	ensureAllSpecs := func() (map[string]specDocument, error) {
-		if allSpecs != nil || loadAllSpecs == nil {
-			return allSpecs, nil
-		}
-		loaded, err := loadAllSpecs()
-		if err != nil {
-			return nil, err
-		}
-		allSpecs = loaded
-		inferenceSpecs = loaded
-		return allSpecs, nil
+	loader := newDocDriftSpecLoader(specs, loadAllSpecs)
+	state, pending, err := collectDocDriftDeterministicResults(analyzer, selectedDocs, specs, loader)
+	if err != nil {
+		return nil, err
 	}
-	// Phase 1: deterministic evaluation — collect items that need LLM refinement.
-	type pendingRefinement struct {
-		ref         string
-		doc         docDocument
-		relevant    []specDocument
-		item        *DriftItem
-		remediation *DocRemediationItem
+	refined, err := refinePendingDocDriftResults(ctx, analyzer, analysisRuntime, pending)
+	if err != nil {
+		return nil, err
 	}
-	var pending []pendingRefinement
-
-	for _, ref := range sortedDocRefs(selectedDocs) {
-		doc := selectedDocs[ref]
-		relevant := relevantAcceptedSpecs(doc, specs)
-		if roleToleratesHistoricalDrift(doc) {
-			if assessment := historicalDocAssessment(doc, relevant); assessment != nil {
-				assessments = append(assessments, *assessment)
-				relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
-				for _, specRef := range assessment.SpecRefs {
-					if spec, ok := specs[specRef]; ok {
-						warningSpecs = append(warningSpecs, spec)
-					}
-				}
-			}
-			continue
-		}
-		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
-		if item != nil && analyzer != nil {
-			pending = append(pending, pendingRefinement{
-				ref: ref, doc: doc, relevant: relevant,
-				item: item, remediation: remediation,
-			})
-			continue
-		}
-		// No LLM refinement needed — process deterministically.
-		if assessment := assessDocDrift(doc, relevant, item); assessment != nil {
-			assessments = append(assessments, *assessment)
-			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
-			for _, specRef := range assessment.SpecRefs {
-				if spec, ok := specs[specRef]; ok {
-					warningSpecs = append(warningSpecs, spec)
-				}
-			}
-		} else if item == nil {
-			allSpecs, err := ensureAllSpecs()
-			if err != nil {
-				return nil, err
-			}
-			if assessment := possibleDriftAssessment(doc, allSpecs); assessment != nil {
-				assessments = append(assessments, *assessment)
-				relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
-				for _, specRef := range assessment.SpecRefs {
-					if spec, ok := allSpecs[specRef]; ok {
-						warningSpecs = append(warningSpecs, spec)
-					}
-				}
-			}
-		}
-		if item == nil {
-			continue
-		}
-		driftItems = append(driftItems, *item)
-		if remediation != nil {
-			remediationItems = append(remediationItems, *remediation)
-		}
-		for _, specRef := range item.SpecRefs {
-			if spec, ok := specs[specRef]; ok {
-				relevantSpecRefs = append(relevantSpecRefs, specRef)
-				warningSpecs = append(warningSpecs, spec)
-			}
-		}
-	}
-
-	// Phase 2: parallel LLM refinement for docs that need it.
-	type refinedResult struct {
-		idx         int
-		item        *DriftItem
-		remediation *DocRemediationItem
-	}
-	refined := make([]refinedResult, len(pending))
-
-	if len(pending) > 0 {
-		if analysisRuntime != nil && analyzer != nil {
-			analysisRuntime.Used = true
-		}
-
-		var mu sync.Mutex
-		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(adjudicationConcurrency)
-
-		for i, p := range pending {
-			g.Go(func() error {
-				shortlist := p.relevant
-				if len(shortlist) > docDriftRelevantSpecLimit {
-					shortlist = shortlist[:docDriftRelevantSpecLimit]
-				}
-				relevantByRef := make(map[string]specDocument, len(shortlist))
-				for _, spec := range shortlist {
-					relevantByRef[spec.Record.Ref] = spec
-				}
-				rItem, rRemediation, err := analyzer.RefineDocDrift(gctx, p.doc, relevantByRef, *p.item, p.remediation)
-				if err != nil {
-					return err
-				}
-				mu.Lock()
-				refined[i] = refinedResult{idx: i, item: rItem, remediation: rRemediation}
-				mu.Unlock()
-				return nil
-			})
-		}
-
-		if err := g.Wait(); err != nil {
-			return nil, err
-		}
-	}
-
-	// Phase 3: merge refined results back.
-	for i, p := range pending {
-		item := p.item
-		remediation := p.remediation
-		if refined[i].item != nil {
-			item = refined[i].item
-		}
-		if refined[i].remediation != nil {
-			remediation = refined[i].remediation
-		}
-		if assessment := assessDocDrift(p.doc, p.relevant, item); assessment != nil {
-			assessments = append(assessments, *assessment)
-			relevantSpecRefs = append(relevantSpecRefs, assessment.SpecRefs...)
-			for _, specRef := range assessment.SpecRefs {
-				if spec, ok := specs[specRef]; ok {
-					warningSpecs = append(warningSpecs, spec)
-				}
-			}
-		}
-		if item == nil {
-			continue
-		}
-		driftItems = append(driftItems, *item)
-		if remediation != nil {
-			remediationItems = append(remediationItems, *remediation)
-		}
-		for _, specRef := range item.SpecRefs {
-			if spec, ok := specs[specRef]; ok {
-				relevantSpecRefs = append(relevantSpecRefs, specRef)
-				warningSpecs = append(warningSpecs, spec)
-			}
-		}
-	}
-	relevantSpecRefs = uniqueStrings(relevantSpecRefs)
+	mergeRefinedDocDriftResults(&state, pending, refined, specs)
+	relevantSpecRefs := uniqueStrings(state.relevantSpecRefs)
 
 	var runtime *CommandRuntime
 	if analysisRuntime != nil {
@@ -457,16 +300,204 @@ func buildDocDriftResult(ctx context.Context, analyzer qualitativeAnalyzer, anal
 
 	return &DocDriftResult{
 		Scope:          scope,
-		DriftItems:     driftItems,
-		Assessments:    assessments,
-		SpecInferences: buildSpecInferences(inferenceSpecs, relevantSpecRefs),
+		DriftItems:     state.driftItems,
+		Assessments:    state.assessments,
+		SpecInferences: buildSpecInferences(loader.inferenceSpecs(), relevantSpecRefs),
 		Remediation: &DocRemediationResult{
-			Items: remediationItems,
+			Items: state.remediationItems,
 		},
 		Runtime:      runtime,
-		Warnings:     buildSpecInferenceWarnings("doc-drift analysis", warningSpecs...),
+		Warnings:     buildSpecInferenceWarnings("doc-drift analysis", state.warningSpecs...),
 		ContentTrust: resultmeta.UntrustedWorkspaceText(),
 	}, nil
+}
+
+type pendingDocDriftRefinement struct {
+	ref         string
+	doc         docDocument
+	relevant    []specDocument
+	item        *DriftItem
+	remediation *DocRemediationItem
+}
+
+type refinedDocDriftResult struct {
+	item        *DriftItem
+	remediation *DocRemediationItem
+}
+
+type docDriftBuildState struct {
+	driftItems       []DriftItem
+	assessments      []DocDriftAssessment
+	remediationItems []DocRemediationItem
+	relevantSpecRefs []string
+	warningSpecs     []specDocument
+}
+
+type docDriftSpecLoader struct {
+	baseSpecs    map[string]specDocument
+	loadAllSpecs func() (map[string]specDocument, error)
+	allSpecs     map[string]specDocument
+}
+
+func newDocDriftSpecLoader(specs map[string]specDocument, loadAllSpecs func() (map[string]specDocument, error)) *docDriftSpecLoader {
+	return &docDriftSpecLoader{
+		baseSpecs:    specs,
+		loadAllSpecs: loadAllSpecs,
+	}
+}
+
+func (l *docDriftSpecLoader) ensureAllSpecs() (map[string]specDocument, error) {
+	if l.allSpecs != nil || l.loadAllSpecs == nil {
+		return l.allSpecs, nil
+	}
+	loaded, err := l.loadAllSpecs()
+	if err != nil {
+		return nil, err
+	}
+	l.allSpecs = loaded
+	return l.allSpecs, nil
+}
+
+func (l *docDriftSpecLoader) inferenceSpecs() map[string]specDocument {
+	if l.allSpecs != nil {
+		return l.allSpecs
+	}
+	return l.baseSpecs
+}
+
+func newDocDriftBuildState(selectedDocCount, specCount int) docDriftBuildState {
+	return docDriftBuildState{
+		driftItems:       make([]DriftItem, 0, selectedDocCount),
+		assessments:      make([]DocDriftAssessment, 0, selectedDocCount),
+		remediationItems: make([]DocRemediationItem, 0, selectedDocCount),
+		relevantSpecRefs: make([]string, 0, specCount),
+		warningSpecs:     make([]specDocument, 0, specCount),
+	}
+}
+
+func (s *docDriftBuildState) appendAssessment(assessment *DocDriftAssessment, specs map[string]specDocument) {
+	if assessment == nil {
+		return
+	}
+	s.assessments = append(s.assessments, *assessment)
+	s.relevantSpecRefs = append(s.relevantSpecRefs, assessment.SpecRefs...)
+	for _, specRef := range assessment.SpecRefs {
+		if spec, ok := specs[specRef]; ok {
+			s.warningSpecs = append(s.warningSpecs, spec)
+		}
+	}
+}
+
+func (s *docDriftBuildState) appendItem(item *DriftItem, remediation *DocRemediationItem, specs map[string]specDocument) {
+	if item == nil {
+		return
+	}
+	s.driftItems = append(s.driftItems, *item)
+	if remediation != nil {
+		s.remediationItems = append(s.remediationItems, *remediation)
+	}
+	for _, specRef := range item.SpecRefs {
+		if spec, ok := specs[specRef]; ok {
+			s.relevantSpecRefs = append(s.relevantSpecRefs, specRef)
+			s.warningSpecs = append(s.warningSpecs, spec)
+		}
+	}
+}
+
+func collectDocDriftDeterministicResults(analyzer qualitativeAnalyzer, selectedDocs map[string]docDocument, specs map[string]specDocument, loader *docDriftSpecLoader) (docDriftBuildState, []pendingDocDriftRefinement, error) {
+	state := newDocDriftBuildState(len(selectedDocs), len(specs))
+	pending := make([]pendingDocDriftRefinement, 0, len(selectedDocs))
+
+	for _, ref := range sortedDocRefs(selectedDocs) {
+		doc := selectedDocs[ref]
+		relevant := relevantAcceptedSpecs(doc, specs)
+		if roleToleratesHistoricalDrift(doc) {
+			state.appendAssessment(historicalDocAssessment(doc, relevant), specs)
+			continue
+		}
+
+		item, remediation := driftAgainstAcceptedSpecs(doc, relevant)
+		if item != nil && analyzer != nil {
+			pending = append(pending, pendingDocDriftRefinement{
+				ref:         ref,
+				doc:         doc,
+				relevant:    relevant,
+				item:        item,
+				remediation: remediation,
+			})
+			continue
+		}
+
+		if assessment := assessDocDrift(doc, relevant, item); assessment != nil {
+			state.appendAssessment(assessment, specs)
+		} else if item == nil {
+			allSpecs, err := loader.ensureAllSpecs()
+			if err != nil {
+				return docDriftBuildState{}, nil, err
+			}
+			state.appendAssessment(possibleDriftAssessment(doc, allSpecs), allSpecs)
+		}
+		state.appendItem(item, remediation, specs)
+	}
+
+	return state, pending, nil
+}
+
+func refinePendingDocDriftResults(ctx context.Context, analyzer qualitativeAnalyzer, analysisRuntime *RuntimeUsage, pending []pendingDocDriftRefinement) ([]refinedDocDriftResult, error) {
+	refined := make([]refinedDocDriftResult, len(pending))
+	if len(pending) == 0 || analyzer == nil {
+		return refined, nil
+	}
+	if analysisRuntime != nil {
+		analysisRuntime.Used = true
+	}
+
+	var mu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(adjudicationConcurrency)
+
+	for i, pendingItem := range pending {
+		i := i
+		pendingItem := pendingItem
+		g.Go(func() error {
+			shortlist := pendingItem.relevant
+			if len(shortlist) > docDriftRelevantSpecLimit {
+				shortlist = shortlist[:docDriftRelevantSpecLimit]
+			}
+			relevantByRef := make(map[string]specDocument, len(shortlist))
+			for _, spec := range shortlist {
+				relevantByRef[spec.Record.Ref] = spec
+			}
+			item, remediation, err := analyzer.RefineDocDrift(gctx, pendingItem.doc, relevantByRef, *pendingItem.item, pendingItem.remediation)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			refined[i] = refinedDocDriftResult{item: item, remediation: remediation}
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return refined, nil
+}
+
+func mergeRefinedDocDriftResults(state *docDriftBuildState, pending []pendingDocDriftRefinement, refined []refinedDocDriftResult, specs map[string]specDocument) {
+	for i, pendingItem := range pending {
+		item := pendingItem.item
+		remediation := pendingItem.remediation
+		if refined[i].item != nil {
+			item = refined[i].item
+		}
+		if refined[i].remediation != nil {
+			remediation = refined[i].remediation
+		}
+		state.appendAssessment(assessDocDrift(pendingItem.doc, pendingItem.relevant, item), specs)
+		state.appendItem(item, remediation, specs)
+	}
 }
 
 func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
