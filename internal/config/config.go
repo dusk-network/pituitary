@@ -478,31 +478,55 @@ func validate(cfg *Config) error {
 		registeredAdapterSet[name] = struct{}{}
 	}
 
-	if cfg.Workspace.Root == "" {
-		errs.add("workspace.root: value is required")
-	} else {
-		cfg.Workspace.RootPath = resolvePath(cfg.ConfigDir, cfg.Workspace.Root)
-		info, err := os.Stat(cfg.Workspace.RootPath)
-		switch {
-		case err == nil && !info.IsDir():
-			errs.add(
-				"workspace.root: %q is not a directory (%s)",
-				cfg.Workspace.Root,
-				pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
-			)
-		case err != nil:
-			errs.add(
-				"workspace.root: %q does not exist (%s)",
-				cfg.Workspace.Root,
-				pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
-			)
-		}
+	primaryRepoID := validateWorkspace(cfg, &errs)
+	validateSources(cfg, &errs, primaryRepoID, registeredAdapters, registeredAdapterSet)
+
+	if err := validateRuntime(&cfg.Runtime); err != nil {
+		errs.items = append(errs.items, err.Error())
+	}
+	if err := validateTerminology(&cfg.Terminology); err != nil {
+		errs.items = append(errs.items, err.Error())
 	}
 
+	return errs.err()
+}
+
+func validateWorkspace(cfg *Config, errs *validationErrors) string {
+	validateWorkspaceRoot(cfg, errs)
 	if cfg.Workspace.RepoID != "" && !isValidRepoID(cfg.Workspace.RepoID) {
 		errs.add("workspace.repo_id: unsupported repo id %q", cfg.Workspace.RepoID)
 	}
 	primaryRepoID := effectiveWorkspaceRepoID(cfg.Workspace)
+	validateWorkspaceRepos(cfg, errs, primaryRepoID)
+	validateWorkspaceIndexPath(cfg, errs)
+	return primaryRepoID
+}
+
+func validateWorkspaceRoot(cfg *Config, errs *validationErrors) {
+	if cfg.Workspace.Root == "" {
+		errs.add("workspace.root: value is required")
+		return
+	}
+
+	cfg.Workspace.RootPath = resolvePath(cfg.ConfigDir, cfg.Workspace.Root)
+	info, err := os.Stat(cfg.Workspace.RootPath)
+	switch {
+	case err == nil && !info.IsDir():
+		errs.add(
+			"workspace.root: %q is not a directory (%s)",
+			cfg.Workspace.Root,
+			pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
+		)
+	case err != nil:
+		errs.add(
+			"workspace.root: %q does not exist (%s)",
+			cfg.Workspace.Root,
+			pathResolutionDetail("workspace.root", cfg.Workspace.Root, cfg.ConfigDir, cfg.Workspace.RootPath),
+		)
+	}
+}
+
+func validateWorkspaceRepos(cfg *Config, errs *validationErrors, primaryRepoID string) {
 	seenRepoIDs := map[string]struct{}{}
 	if primaryRepoID != "" {
 		seenRepoIDs[primaryRepoID] = struct{}{}
@@ -544,186 +568,212 @@ func validate(cfg *Config) error {
 			)
 		}
 	}
+}
 
+func validateWorkspaceIndexPath(cfg *Config, errs *validationErrors) {
 	if cfg.Workspace.IndexPath == "" {
 		errs.add("workspace.index_path: value is required")
-	} else if cfg.Workspace.RootPath != "" {
-		cfg.Workspace.ResolvedIndexPath = resolvePath(cfg.Workspace.RootPath, cfg.Workspace.IndexPath)
-		if info, err := os.Stat(cfg.Workspace.ResolvedIndexPath); err == nil && info.IsDir() {
-			errs.add("workspace.index_path: %q resolves to a directory, not a database file", cfg.Workspace.IndexPath)
-		}
+		return
+	}
+	if cfg.Workspace.RootPath == "" {
+		return
 	}
 
+	cfg.Workspace.ResolvedIndexPath = resolvePath(cfg.Workspace.RootPath, cfg.Workspace.IndexPath)
+	if info, err := os.Stat(cfg.Workspace.ResolvedIndexPath); err == nil && info.IsDir() {
+		errs.add("workspace.index_path: %q resolves to a directory, not a database file", cfg.Workspace.IndexPath)
+	}
+}
+
+func validateSources(cfg *Config, errs *validationErrors, primaryRepoID string, registeredAdapters []string, registeredAdapterSet map[string]struct{}) {
 	if len(cfg.Sources) == 0 {
 		errs.add("sources: at least one source is required")
 	}
 
 	seenNames := make(map[string]struct{}, len(cfg.Sources))
 	for i := range cfg.Sources {
-		source := &cfg.Sources[i]
-		label := fmt.Sprintf("sources[%d]", i)
-		if source.Name == "" {
-			errs.add("%s.name: value is required", label)
-		} else {
-			if _, exists := seenNames[source.Name]; exists {
-				errs.add("%s.name: %q is duplicated", label, source.Name)
-			}
-			seenNames[source.Name] = struct{}{}
-			label = fmt.Sprintf("source %q", source.Name)
-		}
+		validateSource(
+			cfg,
+			&cfg.Sources[i],
+			i,
+			errs,
+			primaryRepoID,
+			registeredAdapters,
+			registeredAdapterSet,
+			seenNames,
+		)
+	}
+}
 
-		if source.Adapter == "" {
-			errs.add("%s.adapter: value is required", label)
-		} else if _, exists := registeredAdapterSet[source.Adapter]; !exists {
-			errs.add(
-				"%s.adapter: unknown adapter %q (registered adapters: %s)",
-				label,
-				source.Adapter,
-				strings.Join(registeredAdapters, ", "),
-			)
+func validateSource(cfg *Config, source *Source, index int, errs *validationErrors, primaryRepoID string, registeredAdapters []string, registeredAdapterSet map[string]struct{}, seenNames map[string]struct{}) {
+	label := fmt.Sprintf("sources[%d]", index)
+	if source.Name == "" {
+		errs.add("%s.name: value is required", label)
+	} else {
+		if _, exists := seenNames[source.Name]; exists {
+			errs.add("%s.name: %q is duplicated", label, source.Name)
 		}
+		seenNames[source.Name] = struct{}{}
+		label = fmt.Sprintf("source %q", source.Name)
+	}
 
-		if source.Kind == "" {
-			errs.add("%s.kind: value is required", label)
-		}
-		if source.Role != "" && !IsValidSourceRole(source.Role) {
-			errs.add("%s.role: unsupported role %q", label, source.Role)
-		}
-		if source.Repo != "" && !isValidRepoID(source.Repo) {
-			errs.add("%s.repo: unsupported repo id %q", label, source.Repo)
-		}
+	if source.Adapter == "" {
+		errs.add("%s.adapter: value is required", label)
+	} else if _, exists := registeredAdapterSet[source.Adapter]; !exists {
+		errs.add(
+			"%s.adapter: unknown adapter %q (registered adapters: %s)",
+			label,
+			source.Adapter,
+			strings.Join(registeredAdapters, ", "),
+		)
+	}
 
-		filesystemSource := source.Adapter == AdapterFilesystem
-		jsonSource := source.Adapter == AdapterJSON
-		if strings.TrimSpace(source.Path) == "" && (filesystemSource || jsonSource) {
-			errs.add("%s.path: value is required", label)
+	if source.Kind == "" {
+		errs.add("%s.kind: value is required", label)
+	}
+	if source.Role != "" && !IsValidSourceRole(source.Role) {
+		errs.add("%s.role: unsupported role %q", label, source.Role)
+	}
+	if source.Repo != "" && !isValidRepoID(source.Repo) {
+		errs.add("%s.repo: unsupported repo id %q", label, source.Repo)
+	}
+
+	filesystemSource := source.Adapter == AdapterFilesystem
+	jsonSource := source.Adapter == AdapterJSON
+	if strings.TrimSpace(source.Path) == "" && (filesystemSource || jsonSource) {
+		errs.add("%s.path: value is required", label)
+	}
+	if jsonSource {
+		switch source.Kind {
+		case SourceKindJSONSpec, SourceKindJSONDoc:
+		default:
+			errs.add("%s.kind: unsupported kind %q for adapter %q", label, source.Kind, source.Adapter)
 		}
-		if jsonSource {
-			switch source.Kind {
-			case SourceKindJSONSpec, SourceKindJSONDoc:
-			default:
-				errs.add("%s.kind: unsupported kind %q for adapter %q", label, source.Kind, source.Adapter)
-			}
-		}
-		files := make([]string, 0, len(source.Files))
-		seenFiles := make(map[string]struct{}, len(source.Files))
-		for i, value := range source.Files {
-			normalized, err := normalizeSourceFileSelector(value)
-			if err != nil {
-				errs.add("%s.files[%d]: %v", label, i, err)
-				continue
-			}
-			if filesystemSource && source.Kind == SourceKindSpecBundle && pathpkg.Base(normalized) != "spec.toml" {
-				errs.add("%s.files[%d]: %q must point to a spec.toml file for kind %q", label, i, value, source.Kind)
-				continue
-			}
-			if filesystemSource && (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
-				errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
-				continue
-			}
-			if jsonSource && pathpkg.Ext(normalized) != ".json" {
-				errs.add("%s.files[%d]: %q must point to a JSON file for adapter %q", label, i, value, source.Adapter)
-				continue
-			}
-			if _, exists := seenFiles[normalized]; exists {
-				continue
-			}
-			seenFiles[normalized] = struct{}{}
-			files = append(files, normalized)
-		}
-		source.Files = files
-		if filesystemSource && len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
-			errs.add("%s.files: path is required when files are set", label)
-		}
-		for _, pattern := range source.Include {
-			if strings.TrimSpace(pattern) == "" {
-				errs.add("%s.include: patterns must not be empty", label)
-				continue
-			}
-			if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
-				errs.add("%s.include: invalid pattern %q: %v", label, pattern, err)
-			}
-		}
-		for _, pattern := range source.Exclude {
-			if strings.TrimSpace(pattern) == "" {
-				errs.add("%s.exclude: patterns must not be empty", label)
-				continue
-			}
-			if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
-				errs.add("%s.exclude: invalid pattern %q: %v", label, pattern, err)
-			}
-		}
-		if cfg.Workspace.RootPath == "" {
+	}
+
+	validateSourceFiles(errs, label, source, filesystemSource, jsonSource)
+	if filesystemSource && len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
+		errs.add("%s.files: path is required when files are set", label)
+	}
+	validateSourcePatterns(errs, label, "include", source.Include)
+	validateSourcePatterns(errs, label, "exclude", source.Exclude)
+
+	if cfg.Workspace.RootPath == "" {
+		return
+	}
+
+	resolveAndValidateSourcePaths(cfg, errs, label, source, primaryRepoID, filesystemSource)
+}
+
+func validateSourceFiles(errs *validationErrors, label string, source *Source, filesystemSource bool, jsonSource bool) {
+	files := make([]string, 0, len(source.Files))
+	seenFiles := make(map[string]struct{}, len(source.Files))
+	for i, value := range source.Files {
+		normalized, err := normalizeSourceFileSelector(value)
+		if err != nil {
+			errs.add("%s.files[%d]: %v", label, i, err)
 			continue
 		}
-		repoID := primaryRepoID
-		repoRootPath := cfg.Workspace.RootPath
-		if source.Repo != "" {
-			repoID = source.Repo
-			resolved, ok := lookupWorkspaceRepoRoot(cfg.Workspace, repoID)
-			if !ok {
-				errs.add("%s.repo: unknown repo %q", label, source.Repo)
-				continue
-			}
-			repoRootPath = resolved
+		if filesystemSource && source.Kind == SourceKindSpecBundle && pathpkg.Base(normalized) != "spec.toml" {
+			errs.add("%s.files[%d]: %q must point to a spec.toml file for kind %q", label, i, value, source.Kind)
+			continue
 		}
-		source.ResolvedRepo = repoID
-		source.PrimaryRepo = primaryRepoID
-		source.RepoRootPath = repoRootPath
-		if strings.TrimSpace(source.Path) != "" {
-			source.ResolvedPath = resolvePath(repoRootPath, source.Path)
+		if filesystemSource && (source.Kind == SourceKindMarkdownDocs || source.Kind == SourceKindMarkdownContract) && pathpkg.Ext(normalized) != ".md" {
+			errs.add("%s.files[%d]: %q must point to a markdown file for kind %q", label, i, value, source.Kind)
+			continue
 		}
-		if filesystemSource && source.ResolvedPath != "" {
-			info, err := os.Stat(source.ResolvedPath)
-			switch {
-			case err == nil && !info.IsDir():
-				errs.add(
-					"%s.path: %q is not a directory (%s)",
-					label,
-					source.Path,
-					sourcePathResolutionDetail(cfg, source, repoRootPath),
-				)
-			case err != nil:
-				errs.add(
-					"%s.path: %q does not exist (%s)",
-					label,
-					source.Path,
-					sourcePathResolutionDetail(cfg, source, repoRootPath),
-				)
-			}
-			for i, relFile := range source.Files {
-				resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
-				info, err := os.Stat(resolvedFile)
-				switch {
-				case err == nil && info.IsDir():
-					errs.add(
-						"%s.files[%d]: %q is a directory (%s)",
-						label,
-						i,
-						relFile,
-						pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
-					)
-				case err != nil:
-					errs.add(
-						"%s.files[%d]: %q does not exist (%s)",
-						label,
-						i,
-						relFile,
-						pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
-					)
-				}
-			}
+		if jsonSource && pathpkg.Ext(normalized) != ".json" {
+			errs.add("%s.files[%d]: %q must point to a JSON file for adapter %q", label, i, value, source.Adapter)
+			continue
 		}
+		if _, exists := seenFiles[normalized]; exists {
+			continue
+		}
+		seenFiles[normalized] = struct{}{}
+		files = append(files, normalized)
+	}
+	source.Files = files
+}
+
+func validateSourcePatterns(errs *validationErrors, label string, field string, patterns []string) {
+	for _, pattern := range patterns {
+		if strings.TrimSpace(pattern) == "" {
+			errs.add("%s.%s: patterns must not be empty", label, field)
+			continue
+		}
+		if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
+			errs.add("%s.%s: invalid pattern %q: %v", label, field, pattern, err)
+		}
+	}
+}
+
+func resolveAndValidateSourcePaths(cfg *Config, errs *validationErrors, label string, source *Source, primaryRepoID string, filesystemSource bool) {
+	repoID := primaryRepoID
+	repoRootPath := cfg.Workspace.RootPath
+	if source.Repo != "" {
+		repoID = source.Repo
+		resolved, ok := lookupWorkspaceRepoRoot(cfg.Workspace, repoID)
+		if !ok {
+			errs.add("%s.repo: unknown repo %q", label, source.Repo)
+			return
+		}
+		repoRootPath = resolved
 	}
 
-	if err := validateRuntime(&cfg.Runtime); err != nil {
-		errs.items = append(errs.items, err.Error())
+	source.ResolvedRepo = repoID
+	source.PrimaryRepo = primaryRepoID
+	source.RepoRootPath = repoRootPath
+	if strings.TrimSpace(source.Path) != "" {
+		source.ResolvedPath = resolvePath(repoRootPath, source.Path)
 	}
-	if err := validateTerminology(&cfg.Terminology); err != nil {
-		errs.items = append(errs.items, err.Error())
+	if !filesystemSource || source.ResolvedPath == "" {
+		return
 	}
 
-	return errs.err()
+	validateResolvedFilesystemSource(cfg, errs, label, source, repoRootPath)
+}
+
+func validateResolvedFilesystemSource(cfg *Config, errs *validationErrors, label string, source *Source, repoRootPath string) {
+	info, err := os.Stat(source.ResolvedPath)
+	switch {
+	case err == nil && !info.IsDir():
+		errs.add(
+			"%s.path: %q is not a directory (%s)",
+			label,
+			source.Path,
+			sourcePathResolutionDetail(cfg, source, repoRootPath),
+		)
+	case err != nil:
+		errs.add(
+			"%s.path: %q does not exist (%s)",
+			label,
+			source.Path,
+			sourcePathResolutionDetail(cfg, source, repoRootPath),
+		)
+	}
+
+	for i, relFile := range source.Files {
+		resolvedFile := resolvePath(source.ResolvedPath, filepath.FromSlash(relFile))
+		info, err := os.Stat(resolvedFile)
+		switch {
+		case err == nil && info.IsDir():
+			errs.add(
+				"%s.files[%d]: %q is a directory (%s)",
+				label,
+				i,
+				relFile,
+				pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
+			)
+		case err != nil:
+			errs.add(
+				"%s.files[%d]: %q does not exist (%s)",
+				label,
+				i,
+				relFile,
+				pathResolutionDetail(label+".files", relFile, source.ResolvedPath, resolvedFile),
+			)
+		}
+	}
 }
 
 func validateTerminology(terminology *Terminology) error {
