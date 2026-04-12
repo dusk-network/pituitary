@@ -375,13 +375,17 @@ func appendComplianceFinding(result *ComplianceResult, finding ComplianceFinding
 }
 
 func refineComplianceSemantically(ctx context.Context, cfg *config.Config, repo *analysisRepository, adjudicationCandidates map[string]*complianceAdjudicationCandidate, result *ComplianceResult) error {
+	if len(adjudicationCandidates) == 0 {
+		return nil
+	}
+
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)
 	if err != nil {
 		return err
 	}
 	analyzer = qualitativeAnalyzerWithTimings(ctx, analyzer)
 	adjudicator, ok := analyzer.(complianceAdjudicator)
-	if !ok || len(adjudicationCandidates) == 0 {
+	if !ok {
 		return nil
 	}
 
