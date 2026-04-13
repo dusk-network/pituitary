@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#stop-your-agent-from-building-on-stale-decisions">Agent</a> · <a href="#use-it-in-ci">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
+  <a href="#what-it-catches">What It Catches</a> · <a href="#quick-start">Quick Start</a> · <a href="#stop-your-agent-from-building-on-stale-decisions">Agent</a> · <a href="#optional-ci-wiring">CI</a> · <a href="docs/cheatsheet.md">Cheatsheet</a> · <a href="docs/reference.md">Reference</a>
 </p>
 
 ---
@@ -29,6 +29,8 @@
 [Watch on asciinema](https://asciinema.org/a/4NBiD3tUyuwMWooT) for the interactive version.
 
 Single binary. No Docker. No API keys required. One SQLite file.
+
+The core shipped slice is local and CLI-first. The MCP server, CI wiring, and provider-backed semantic runtimes are optional wrappers around that same deterministic core.
 
 ## What It Catches
 
@@ -62,7 +64,7 @@ Pituitary starts as a drift detector. As your intent corpus grows, it becomes th
 
 **Spec families.** Community detection on the dependency graph discovers natural governance clusters. Coverage gaps between families are the highest-risk ungoverned areas.
 
-**Governance protocol for AI.** The MCP server teaches your AI assistant *when* to check governance — before modifying files, before committing, after accepting specs, when writing docs — not just how.
+**Governance protocol for AI.** The optional MCP wrapper teaches your AI assistant *when* to check governance — before modifying files, before committing, after accepting specs, when writing docs — not just how.
 
 ## Quick Start
 
@@ -131,7 +133,7 @@ sudo install pituitary /usr/local/bin/
 
 Your agent writes specs, reviews PRs, and proposes changes — but it doesn't know what's already been decided. Pituitary gives it that context. The governance protocol teaches it when to check, not just how.
 
-### MCP Server (Claude Code, Cursor, Windsurf, or any MCP client)
+### Optional MCP Server (Claude Code, Cursor, Windsurf, or any MCP client)
 
 ```json
 {
@@ -168,9 +170,9 @@ The repo's [AGENTS.md](AGENTS.md) is the canonical project policy. Tools that re
 
 See [skills/pituitary-cli/README.md](skills/pituitary-cli/README.md) for the full install guide, request templates, and security notes.
 
-## Use It in CI
+## Optional CI Wiring
 
-For pull requests that change specs, use the shipped GitHub Action to run `review-spec` and post the report as a PR comment:
+If you already use GitHub Actions, you can wrap the same local CLI workflow in the checked-in action and post `review-spec` output as a PR comment:
 
 ```yaml
 permissions:
