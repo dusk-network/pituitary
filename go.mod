@@ -5,6 +5,7 @@ go 1.25.9
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
+	github.com/dusk-network/stroma v0.0.0-20260413071551-6bc4ec2ab196
 	github.com/google/go-github/v79 v79.0.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mark3labs/mcp-go v0.45.0

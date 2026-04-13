@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"math"
 	"strings"
-	"unicode"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	stembed "github.com/dusk-network/stroma/embed"
 )
 
 // DependencyUnavailableError indicates that a required runtime dependency
@@ -81,12 +79,7 @@ func DependencyUnavailableDetails(err error) map[string]any {
 }
 
 // Embedder generates embeddings for rebuild and query-time retrieval.
-type Embedder interface {
-	Fingerprint() string
-	Dimension(ctx context.Context) (int, error)
-	EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error)
-	EmbedQueries(ctx context.Context, texts []string) ([][]float64, error)
-}
+type Embedder = stembed.Embedder
 
 // NewEmbedder resolves the configured embedder runtime.
 func NewEmbedder(provider config.RuntimeProvider) (Embedder, error) {
@@ -96,7 +89,11 @@ func NewEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 		if err != nil {
 			return nil, err
 		}
-		return fixtureEmbedder{dimension: dimension, model: provider.Model}, nil
+		base, err := stembed.NewFixture(provider.Model, dimension)
+		if err != nil {
+			return nil, err
+		}
+		return &fixtureEmbedder{base: base, model: provider.Model}, nil
 	case config.RuntimeProviderOpenAI:
 		return newOpenAICompatibleEmbedder(provider)
 	default:
@@ -114,96 +111,26 @@ func newEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 }
 
 type fixtureEmbedder struct {
-	dimension int
-	model     string
+	base  *stembed.Fixture
+	model string
 }
 
-func (e fixtureEmbedder) Fingerprint() string {
+func (e *fixtureEmbedder) Fingerprint() string {
 	return embedderFingerprint(config.RuntimeProviderFixture, e.model, "plain_v1")
 }
 
-func (e fixtureEmbedder) Dimension(ctx context.Context) (int, error) {
-	return e.dimension, nil
+func (e *fixtureEmbedder) Dimension(ctx context.Context) (int, error) {
+	return e.base.Dimension(ctx)
 }
 
-func (e fixtureEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error) {
-	return e.embedTexts(ctx, texts)
+func (e *fixtureEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error) {
+	return e.base.EmbedDocuments(ctx, texts)
 }
 
-func (e fixtureEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
-	return e.embedTexts(ctx, texts)
-}
-
-func (e fixtureEmbedder) embedTexts(ctx context.Context, texts []string) ([][]float64, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	vectors := make([][]float64, 0, len(texts))
-	for _, text := range texts {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		vectors = append(vectors, fixtureVector(text, e.dimension))
-	}
-	return vectors, nil
+func (e *fixtureEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
+	return e.base.EmbedQueries(ctx, texts)
 }
 
 func embedderFingerprint(provider, model, strategy string) string {
 	return fmt.Sprintf("%s|%s|%s", strings.TrimSpace(provider), strings.TrimSpace(model), strings.TrimSpace(strategy))
-}
-
-func fixtureVector(text string, dimension int) []float64 {
-	vector := make([]float64, dimension)
-	if dimension <= 0 {
-		return vector
-	}
-
-	tokens := tokenize(text)
-	if len(tokens) == 0 {
-		return vector
-	}
-
-	for i, token := range tokens {
-		vector[tokenBucket(token, dimension)] += 1.0
-		if i > 0 {
-			bigram := tokens[i-1] + "_" + token
-			vector[tokenBucket(bigram, dimension)] += 1.5
-		}
-	}
-
-	return normalize(vector)
-}
-
-func tokenize(text string) []string {
-	var builder strings.Builder
-	builder.Grow(len(text))
-	for _, r := range strings.ToLower(text) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			builder.WriteRune(r)
-			continue
-		}
-		builder.WriteByte(' ')
-	}
-	return strings.Fields(builder.String())
-}
-
-func tokenBucket(token string, dimension int) int {
-	hasher := fnv.New32a()
-	_, _ = hasher.Write([]byte(token))
-	return int(int64(hasher.Sum32()) % int64(dimension))
-}
-
-func normalize(vector []float64) []float64 {
-	var norm float64
-	for _, value := range vector {
-		norm += value * value
-	}
-	if norm == 0 {
-		return vector
-	}
-	norm = math.Sqrt(norm)
-	for i := range vector {
-		vector[i] /= norm
-	}
-	return vector
 }
