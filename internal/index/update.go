@@ -72,7 +72,12 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	if err != nil {
 		return nil, fmt.Errorf("open index %s: %w", indexPath, err)
 	}
-	defer db.Close()
+	closeDB := true
+	defer func() {
+		if closeDB && db != nil {
+			_ = db.Close()
+		}
+	}()
 
 	storedRefs, err := loadStoredArtifactRefsContext(ctx, db)
 	if err != nil {
@@ -92,6 +97,11 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 			return nil, fmt.Errorf("snapshot old artifacts: %w", err)
 		}
 	}
+	if err := db.Close(); err != nil {
+		return nil, fmt.Errorf("close index %s before rebuild: %w", indexPath, err)
+	}
+	closeDB = false
+	db = nil
 
 	result, err := rebuildContext(ctx, cfg, records, RebuildOptions{}, reporter)
 	if err != nil {

@@ -199,6 +199,8 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		Embedder: embedder,
 	}
 	if !options.Full {
+		// Stroma rebuilds through Path+".new", so reusing the currently published
+		// snapshot remains safe even when the content-addressed path is unchanged.
 		stromaOptions.ReuseFromPath = currentSnapshotPath
 	}
 	if _, err := stindex.Rebuild(ctx, corpusRecords, stromaOptions); err != nil {
