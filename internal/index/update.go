@@ -217,7 +217,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 
 	// Prepare insert statements.
-	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (artifact_ref, section, content) VALUES (?, ?, ?)`)
+	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunk_records (record_ref, chunk_index, heading, content) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare chunk insert: %w", err)
 	}
@@ -540,15 +540,15 @@ ORDER BY c.id`, ref)
 // vectors from the database within a transaction.
 func deleteArtifactDataContext(ctx context.Context, tx *sql.Tx, ref string) error {
 	// Delete vectors (vec0 virtual table) via subquery on chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE artifact_ref = ?)`, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE chunk_id IN (SELECT id FROM chunk_records WHERE record_ref = ?)`, ref); err != nil {
 		return fmt.Errorf("delete vectors for %s: %w", ref, err)
 	}
 	// Delete chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE artifact_ref = ?`, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_records WHERE record_ref = ?`, ref); err != nil {
 		return fmt.Errorf("delete chunks for %s: %w", ref, err)
 	}
 	// Delete artifact.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM artifacts WHERE ref = ?`, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE ref = ?`, ref); err != nil {
 		return fmt.Errorf("delete artifact %s: %w", ref, err)
 	}
 	return nil
@@ -586,7 +586,7 @@ func countChunksForRefsContext(ctx context.Context, db *sql.DB, refs []string) (
 	if len(refs) == 0 {
 		return 0, nil
 	}
-	query := `SELECT COUNT(*) FROM chunks WHERE artifact_ref IN (` + placeholders(len(refs)) + `)`
+	query := `SELECT COUNT(*) FROM chunk_records WHERE record_ref IN (` + placeholders(len(refs)) + `)`
 	args := make([]any, 0, len(refs))
 	for _, ref := range refs {
 		args = append(args, ref)

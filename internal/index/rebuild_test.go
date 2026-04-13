@@ -55,7 +55,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
 	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 6)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 7)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
 	var sourceManifest string
@@ -77,8 +77,10 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 		"Public API Rate Limits / Operational Notes",
 	})
 
-	assertSchemaObject(t, db, "table", "artifacts")
-	assertSchemaObject(t, db, "table", "chunks")
+	assertSchemaObject(t, db, "view", "artifacts")
+	assertSchemaObject(t, db, "view", "chunks")
+	assertSchemaObject(t, db, "table", "records")
+	assertSchemaObject(t, db, "table", "chunk_records")
 	assertSchemaObject(t, db, "table", "chunks_vec")
 	assertSchemaObject(t, db, "table", "edges")
 	assertSchemaObject(t, db, "index", "idx_artifacts_kind_status_domain")
@@ -711,13 +713,13 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Verify schema version is 5.
+	// Verify schema version matches the Stroma-backed compatibility schema.
 	var version string
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "7" {
-		t.Errorf("schema_version = %q, want 7", version)
+	if version != "8" {
+		t.Errorf("schema_version = %q, want 8", version)
 	}
 
 	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).
