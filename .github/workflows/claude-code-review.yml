@@ -15,6 +15,7 @@ env:
 
 jobs:
   claude-review:
+    if: ${{ vars.CLAUDE_CODE_REVIEW_ENABLED == 'true' }}
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
