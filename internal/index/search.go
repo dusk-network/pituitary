@@ -3,7 +3,6 @@ package index
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 const (
@@ -149,18 +149,15 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 	}
 	defer db.Close()
 
-	vectors, err := embedder.EmbedQueries(ctx, []string{query.Query})
+	dimension, err := embedder.Dimension(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("embed query: %w", err)
+		return nil, fmt.Errorf("resolve embedder dimension: %w", err)
 	}
-	if len(vectors) != 1 {
-		return nil, fmt.Errorf("embed query: returned %d vector(s) for 1 query", len(vectors))
-	}
-	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), len(vectors[0])); err != nil {
+	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), dimension); err != nil {
 		return nil, err
 	}
 
-	candidates, err := loadRankedCandidatesContext(ctx, db, query, vectors[0])
+	candidates, err := loadRankedCandidatesContext(ctx, db, cfg.Workspace.ResolvedIndexPath, embedder, query)
 	if err != nil {
 		return nil, err
 	}
@@ -274,67 +271,54 @@ func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint 
 	return nil
 }
 
-func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSpecQuery, queryEmbedding []float64) ([]chunkCandidate, error) {
-	queryBlob, err := encodeVectorBlob(queryEmbedding)
-	if err != nil {
-		return nil, fmt.Errorf("encode query embedding: %w", err)
-	}
+func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, indexPath string, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
 	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
-	sqlText, args := buildCandidateQuery(query, queryBlob)
-	rows, err := db.QueryContext(ctx, sqlText, args...)
+	hits, err := stindex.Search(ctx, stindex.SearchQuery{
+		Path:     indexPath,
+		Text:     query.Query,
+		Limit:    searchCandidateLimit(query.Limit),
+		Kinds:    []string{query.Kind},
+		Embedder: embedder,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query search candidates: %w", err)
 	}
-	defer rows.Close()
+
+	states, err := loadSearchArtifactStateContext(ctx, db, refsForSearchHits(hits))
+	if err != nil {
+		return nil, err
+	}
 
 	candidates := make([]chunkCandidate, 0, query.Limit)
-	for rows.Next() {
-		var (
-			candidate   chunkCandidate
-			rawMetadata string
-			distance    float64
-		)
-		if err := rows.Scan(
-			&candidate.ChunkID,
-			&candidate.Ref,
-			&candidate.Title,
-			&candidate.SectionHeading,
-			&candidate.Content,
-			&candidate.SourceRef,
-			&candidate.Kind,
-			&candidate.Status,
-			&candidate.Domain,
-			&rawMetadata,
-			&distance,
-		); err != nil {
-			return nil, fmt.Errorf("scan search candidate: %w", err)
+	for _, hit := range hits {
+		state := states[hit.Ref]
+		candidate := chunkCandidate{
+			ChunkID:        hit.ChunkID,
+			Ref:            hit.Ref,
+			Title:          hit.Title,
+			SectionHeading: hit.Heading,
+			Content:        strings.TrimSpace(hit.Content),
+			SourceRef:      hit.SourceRef,
+			Kind:           hit.Kind,
+			Status:         state.Status,
+			Domain:         state.Domain,
 		}
-		if strings.TrimSpace(rawMetadata) != "" {
-			metadata := map[string]string{}
-			if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
-				return nil, fmt.Errorf("parse search metadata for %s: %w", candidate.Ref, err)
-			}
-			candidate.Repo = strings.TrimSpace(metadata["repo_id"])
-			candidate.Inference, err = model.DecodeInferenceConfidence(metadata)
+		if !candidateMatchesSearchQuery(candidate, query) {
+			continue
+		}
+		if len(hit.Metadata) > 0 {
+			candidate.Repo = strings.TrimSpace(hit.Metadata["repo_id"])
+			candidate.Inference, err = model.DecodeInferenceConfidence(hit.Metadata)
 			if err != nil {
 				return nil, fmt.Errorf("decode search inference for %s: %w", candidate.Ref, err)
 			}
 		}
-
-		candidate.Content = strings.TrimSpace(candidate.Content)
-		candidate.Score = ranking.AdjustHistoricalSectionScore(
-			cosineScoreFromDistance(distance),
-			candidate.SectionHeading,
-			preferHistorical,
-		)
+		candidate.Score = ranking.AdjustHistoricalSectionScore(hit.Score, candidate.SectionHeading, preferHistorical)
 		if candidate.Score <= 0 {
 			continue
 		}
 		candidates = append(candidates, candidate)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate search candidates: %w", err)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		switch {
@@ -354,58 +338,94 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, query SearchSp
 	return candidates, nil
 }
 
-func buildCandidateQuery(query SearchSpecQuery, queryBlob []byte) (string, []any) {
-	var builder strings.Builder
-	args := make([]any, 0, 4+len(query.Statuses))
+type searchArtifactState struct {
+	Status string
+	Domain string
+}
 
-	builder.WriteString(`
-WITH vector_hits AS (
-  SELECT chunk_id, distance
-  FROM chunks_vec
-  WHERE embedding MATCH ? AND k = ?
-  ORDER BY distance
-)
-SELECT
-  vh.chunk_id,
-  a.ref,
-  a.title,
-  c.section,
-  c.content,
-  a.source_ref,
-  a.kind,
-  COALESCE(a.status, ''),
-  COALESCE(a.domain, ''),
-  a.metadata_json,
-  vh.distance
-FROM vector_hits vh
-JOIN chunks c ON c.id = vh.chunk_id
-JOIN artifacts a ON a.ref = c.artifact_ref
-WHERE a.kind = ?`)
-	args = append(args, queryBlob, searchCandidateLimit(query.Limit), query.Kind)
-
-	if len(query.Statuses) > 0 {
-		builder.WriteString(" AND a.status IN (")
-		for i, status := range query.Statuses {
-			if i > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString("?")
-			args = append(args, status)
+func refsForSearchHits(hits []stindex.SearchHit) []string {
+	if len(hits) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(hits))
+	seen := make(map[string]struct{}, len(hits))
+	for _, hit := range hits {
+		if _, ok := seen[hit.Ref]; ok {
+			continue
 		}
-		builder.WriteString(")")
+		seen[hit.Ref] = struct{}{}
+		refs = append(refs, hit.Ref)
+	}
+	return refs
+}
+
+func loadSearchArtifactStateContext(ctx context.Context, db *sql.DB, refs []string) (map[string]searchArtifactState, error) {
+	states := make(map[string]searchArtifactState, len(refs))
+	if len(refs) == 0 {
+		return states, nil
 	}
 
-	if query.Domain != "" {
-		builder.WriteString(" AND a.domain = ?")
-		args = append(args, query.Domain)
-	}
+	var builder strings.Builder
+	args := make([]any, 0, len(refs))
 
 	builder.WriteString(`
-ORDER BY vh.distance ASC, a.ref ASC, c.section ASC, vh.chunk_id ASC
-LIMIT ?`)
-	args = append(args, searchCandidateLimit(query.Limit))
+SELECT
+  a.ref,
+  COALESCE(a.status, ''),
+  COALESCE(a.domain, '')
+FROM artifacts a
+WHERE a.ref IN (`)
+	for i, ref := range refs {
+		if i > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString("?")
+		args = append(args, ref)
+	}
+	builder.WriteString(`)`)
 
-	return builder.String(), args
+	rows, err := db.QueryContext(ctx, builder.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query search record state: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			ref    string
+			status string
+			domain string
+		)
+		if err := rows.Scan(&ref, &status, &domain); err != nil {
+			return nil, fmt.Errorf("scan search record state: %w", err)
+		}
+		states[ref] = searchArtifactState{Status: status, Domain: domain}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search record state: %w", err)
+	}
+	return states, nil
+}
+
+func candidateMatchesSearchQuery(candidate chunkCandidate, query SearchSpecQuery) bool {
+	if candidate.Kind != query.Kind {
+		return false
+	}
+	if len(query.Statuses) > 0 {
+		matched := false
+		for _, status := range query.Statuses {
+			if candidate.Status == status {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if query.Domain != "" && candidate.Domain != query.Domain {
+		return false
+	}
+	return true
 }
 
 func searchCandidateLimit(limit int) int {

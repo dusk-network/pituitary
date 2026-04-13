@@ -220,11 +220,11 @@ WITH vector_hits AS (
 )
 SELECT
   a.ref,
-  c.section,
+  c.heading,
   vh.distance
 FROM vector_hits vh
 JOIN chunks c ON c.id = vh.chunk_id
-JOIN artifacts a ON a.ref = c.artifact_ref
+JOIN artifacts a ON a.ref = c.record_ref
 WHERE a.kind = ?`)
 	args = append(args, queryBlob, shortlistChunkProbeLimit(limit), query.Kind)
 
@@ -253,7 +253,7 @@ WHERE a.kind = ?`)
 	}
 
 	builder.WriteString(`
-ORDER BY vh.distance ASC, a.ref ASC, c.section ASC, vh.chunk_id ASC
+ORDER BY vh.distance ASC, a.ref ASC, c.heading ASC, vh.chunk_id ASC
 LIMIT ?`)
 	args = append(args, shortlistChunkProbeLimit(limit))
 

@@ -217,7 +217,7 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 	}
 
 	// Prepare insert statements.
-	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunk_records (record_ref, chunk_index, heading, content) VALUES (?, ?, ?, ?)`)
+	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (record_ref, chunk_index, heading, content) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return nil, fmt.Errorf("prepare chunk insert: %w", err)
 	}
@@ -502,10 +502,10 @@ func loadStoredChunksForRefsContext(ctx context.Context, db *sql.DB, refs []stri
 	// Load chunks with embeddings.
 	for _, ref := range refs {
 		rows, err := db.QueryContext(ctx, `
-SELECT c.section, c.content, v.embedding
+SELECT c.heading, c.content, v.embedding
 FROM chunks c
 JOIN chunks_vec v ON v.chunk_id = c.id
-WHERE c.artifact_ref = ?
+WHERE c.record_ref = ?
 ORDER BY c.id`, ref)
 		if err != nil {
 			return nil, fmt.Errorf("query stored chunks for %s: %w", ref, err)
@@ -540,11 +540,11 @@ ORDER BY c.id`, ref)
 // vectors from the database within a transaction.
 func deleteArtifactDataContext(ctx context.Context, tx *sql.Tx, ref string) error {
 	// Delete vectors (vec0 virtual table) via subquery on chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE chunk_id IN (SELECT id FROM chunk_records WHERE record_ref = ?)`, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE record_ref = ?)`, ref); err != nil {
 		return fmt.Errorf("delete vectors for %s: %w", ref, err)
 	}
 	// Delete chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_records WHERE record_ref = ?`, ref); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE record_ref = ?`, ref); err != nil {
 		return fmt.Errorf("delete chunks for %s: %w", ref, err)
 	}
 	// Delete artifact.
@@ -586,7 +586,7 @@ func countChunksForRefsContext(ctx context.Context, db *sql.DB, refs []string) (
 	if len(refs) == 0 {
 		return 0, nil
 	}
-	query := `SELECT COUNT(*) FROM chunk_records WHERE record_ref IN (` + placeholders(len(refs)) + `)`
+	query := `SELECT COUNT(*) FROM chunks WHERE record_ref IN (` + placeholders(len(refs)) + `)`
 	args := make([]any, 0, len(refs))
 	for _, ref := range refs {
 		args = append(args, ref)

@@ -106,11 +106,10 @@ func loadStoredArtifactsContext(ctx context.Context, db *sql.DB) (*reuseState, e
 	}
 
 	rows, err = db.QueryContext(ctx, `
-SELECT a.ref, c.section, c.content, v.embedding
+SELECT c.record_ref, c.heading, c.content, v.embedding
 FROM chunks c
-JOIN artifacts a ON a.ref = c.artifact_ref
 JOIN chunks_vec v ON v.chunk_id = c.id
-ORDER BY a.ref, c.id`)
+ORDER BY c.record_ref, c.id`)
 	if err != nil {
 		return nil, fmt.Errorf("query stored chunks: %w", err)
 	}
