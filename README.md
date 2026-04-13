@@ -28,7 +28,7 @@
 
 [Watch on asciinema](https://asciinema.org/a/4NBiD3tUyuwMWooT) for the interactive version.
 
-Single binary. No Docker. No API keys required. One SQLite file.
+Single binary. No Docker. No API keys required. One governance SQLite file plus one local Stroma snapshot.
 
 The core shipped slice is local and CLI-first. The MCP server, CI wiring, and provider-backed semantic runtimes are optional wrappers around that same deterministic core.
 
@@ -264,7 +264,7 @@ Retrieval remains deterministic. The analysis model only sees narrowly shortlist
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions: deterministic retrieval first, tools-only (no embedded agent), single SQLite file with atomic rebuilds.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design. Key decisions: deterministic retrieval first, tools-only (no embedded agent), one governance SQLite file plus an opaque local Stroma snapshot with atomic rebuilds.
 
 ## Project Status
 

@@ -149,6 +149,12 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 	}
 	defer db.Close()
 
+	snapshot, err := OpenStromaSnapshotContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return nil, err
+	}
+	defer snapshot.Close()
+
 	dimension, err := embedder.Dimension(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve embedder dimension: %w", err)
@@ -157,7 +163,7 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 		return nil, err
 	}
 
-	candidates, err := loadRankedCandidatesContext(ctx, db, cfg.Workspace.ResolvedIndexPath, embedder, query)
+	candidates, err := loadRankedCandidatesContext(ctx, db, snapshot, embedder, query)
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +277,10 @@ func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint 
 	return nil
 }
 
-func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, indexPath string, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
+func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
 	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
-	hits, err := stindex.Search(ctx, stindex.SearchQuery{
-		Path:     indexPath,
+	hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
 		Text:     query.Query,
 		Limit:    searchCandidateLimit(query.Limit),
 		Kinds:    []string{query.Kind},

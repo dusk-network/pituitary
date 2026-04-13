@@ -47,7 +47,7 @@ The first shipping slice should be intentionally narrow. It exists to prove that
 - Local filesystem only
 - One metadata format for specs: `spec.toml`
 - One body format for specs and docs: Markdown
-- One index backend: local SQLite + `sqlite-vec`
+- One embedded corpus backend: local SQLite + `sqlite-vec` via Stroma, plus a local Pituitary governance DB
 - One required transport: CLI
 - Five required analysis capabilities:
   - `search_specs`
@@ -151,17 +151,15 @@ When teams want more rigor, Pituitary may optionally generate an explicit spec b
 │  2. Chunk text                                               │
 │  3. Generate embeddings                                      │
 │  4. Build relations graph                                    │
-│  5. Atomically rebuild pituitary.db                          │
+│  5. Publish a Stroma snapshot + rebuild pituitary.db         │
 └──────────────────────────────┬───────────────────────────────┘
                                │
                                ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                     Unified Analysis Index                    │
+│                       Local Stores                            │
 │                                                              │
-│  • artifacts   (canonical records)                           │
-│  • chunks      (text sections)                               │
-│  • chunks_vec  (embeddings)                                  │
-│  • edges       (depends_on / supersedes / applies_to)        │
+│  • Stroma snapshot: records / chunks / chunks_vec / metadata │
+│  • pituitary.db: artifacts / edges / ast_cache / metadata    │
 └──────────────────────────────┬───────────────────────────────┘
                                │ queries
                                ▼
@@ -398,6 +396,7 @@ Step 5: Graph Build
   └── Keep all refs in canonical string form
 
 Step 6: Atomic Swap
+  ├── Publish the rebuilt Stroma snapshot
   └── Replace the active pituitary.db with the rebuilt staging DB
 ```
 
@@ -443,13 +442,18 @@ Retry and timeout rules:
 
 **Chunking strategy:** The current implementation uses a lightweight internal Markdown scanner that splits on ATX headings, preserves the nested heading path in each section title, and falls back to one title-scoped chunk when a document has no headings. For non-Markdown inputs, adapters should either provide text with lightweight structural markers or let the chunker fall back to paragraph-based splitting.
 
-**Filtered vector queries:** `chunks_vec` should store only vectors. Metadata filters stay in canonical tables: vector search returns candidate `chunk_id`s, then the query joins back through `chunks` and `artifacts` to filter by `kind`, `status`, `domain`, or other metadata before ranking the final candidate set.
+**Filtered vector queries:** Stroma owns `chunks_vec`, `chunks`, and `records`, and should resolve corpus-local joins behind its library API. Pituitary should ask Stroma for candidate sections, then apply governance filters such as `status`, `domain`, and other business metadata against `artifacts` before ranking the final candidate set.
 
 ---
 
 ### 4. Storage Layer — Unified SQLite Index
 
-All indexed state lives in a **single SQLite database** (`pituitary.db`) using `sqlite-vec` for vector operations. At this scale, SQLite is enough, keeps deployment simple, and makes full atomic rebuilds straightforward. In the current Go implementation, `vec0` is wired through `github.com/mattn/go-sqlite3` plus `github.com/asg017/sqlite-vec-go-bindings/cgo`, so local and CI builds need a CGO-capable C toolchain.
+Indexed state is split into two local artifacts:
+
+- a Stroma snapshot that owns corpus records, chunks, vectors, and neutral metadata
+- `pituitary.db`, which owns governance metadata, edges, AST cache, and the pointer to the active Stroma snapshot
+
+At this scale, local SQLite is still enough, keeps deployment simple, and makes staged rebuilds straightforward. In the current Go implementation, `vec0` is wired through `github.com/mattn/go-sqlite3` plus `github.com/asg017/sqlite-vec-go-bindings/cgo`, so local and CI builds need a CGO-capable C toolchain.
 
 #### Schema
 
@@ -515,7 +519,7 @@ Code is intentionally **not** indexed as a third stored semantic corpus in v1. F
 
 #### Atomic Rebuild
 
-The indexer always writes to a **staging database** (`pituitary.db.new`) and then swaps it in. That guarantees each rebuilt index is internally consistent: metadata, chunks, vectors, and edges all come from the same snapshot.
+The indexer writes a staged `pituitary.db.new` and publishes a content-addressed local Stroma snapshot. The live Pituitary DB then points at that immutable snapshot, so governance metadata and corpus retrieval stay aligned without Pituitary querying Stroma tables directly.
 
 ```text
 pituitary index --rebuild
@@ -523,8 +527,8 @@ pituitary index --rebuild
   1. Create pituitary.db.new
   2. Load all records from configured adapters
   3. Reuse unchanged chunk vectors from the active index when schema + fingerprints still match
-  4. Populate artifacts + edges
-  5. Chunk text and populate chunks + chunks_vec
+  4. Publish the content-addressed Stroma snapshot
+  5. Populate artifacts + edges + snapshot pointer metadata in pituitary.db.new
   6. Run integrity checks
   7. Rename pituitary.db.new -> pituitary.db
   8. On failure: delete pituitary.db.new, keep existing index untouched
@@ -660,8 +664,8 @@ Process:
   Phase 1 — retrieval
   1. Parse or load the candidate spec body
   2. Chunk and embed it
-  3. Query chunks_vec for candidate chunk_ids
-  4. Join through chunks + artifacts to keep kind = "spec"
+  3. Ask Stroma for candidate sections
+  4. Filter candidates through `artifacts` to keep kind = "spec"
      and status != "deprecated"
      while still allowing `superseded` specs as historical candidates
   5. Group by artifact_ref and rank by similarity
@@ -964,10 +968,10 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 ### Workstream 2: Index and Retrieval
 
 - Build the SQLite schema
-- Implement full atomic rebuild into `.pituitary/pituitary.db`
+- Implement full atomic rebuild into the split-store layout (`pituitary.db` + Stroma snapshot)
 - Chunk Markdown by heading
 - Generate embeddings for spec and doc chunks
-- Implement filtered vector retrieval via `chunks_vec -> chunks -> artifacts`
+- Implement filtered retrieval via Stroma search plus Pituitary artifact filters
 - Ship `search_specs`
 
 ### Workstream 3: Core Spec Analysis

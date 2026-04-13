@@ -3,16 +3,14 @@ package index
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 type reuseState struct {
@@ -37,102 +35,63 @@ type artifactChunkPlan struct {
 	artifactUnchanged  bool
 }
 
-func loadReuseStateContext(ctx context.Context, indexPath, embedderFingerprint string, embedderDimension int, currentSourceFingerprint string, options RebuildOptions) (*reuseState, error) {
+func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, currentSourceFingerprint string, options RebuildOptions) (*reuseState, error) {
+	_ = currentSourceFingerprint
 	if options.Full {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
 
-	info, err := os.Stat(indexPath)
+	info, err := os.Stat(snapshotPath)
 	switch {
 	case os.IsNotExist(err):
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	case err != nil:
-		return nil, fmt.Errorf("stat existing index %s: %w", indexPath, err)
+		return nil, fmt.Errorf("stat existing snapshot %s: %w", snapshotPath, err)
 	case info.IsDir():
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
 
-	db, err := OpenReadOnlyContext(ctx, indexPath)
+	snapshot, err := stindex.OpenSnapshot(ctx, snapshotPath)
 	if err != nil {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
-	defer db.Close()
+	defer snapshot.Close()
 
-	metadata, err := readMetadataContext(ctx, db, "schema_version", "embedder_fingerprint", "embedder_dimension", "source_fingerprint")
+	stats, err := snapshot.Stats(ctx)
 	if err != nil {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
-	if strings.TrimSpace(metadata["schema_version"]) != fmt.Sprintf("%d", schemaVersion) {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
-	}
-	if strings.TrimSpace(metadata["embedder_fingerprint"]) != embedderFingerprint {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
-	}
-	if strings.TrimSpace(metadata["embedder_dimension"]) != strconv.Itoa(embedderDimension) {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
-	}
-	if strings.TrimSpace(metadata["source_fingerprint"]) != currentSourceFingerprint {
+	if stats.EmbedderFingerprint != embedderFingerprint || stats.EmbedderDimension != embedderDimension {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
 
-	return loadStoredArtifactsContext(ctx, db)
+	return loadStoredArtifactsContext(ctx, snapshot)
 }
 
-func loadStoredArtifactsContext(ctx context.Context, db *sql.DB) (*reuseState, error) {
-	rows, err := db.QueryContext(ctx, `SELECT ref, title, content_hash FROM artifacts`)
+func loadStoredArtifactsContext(ctx context.Context, snapshot *stindex.Snapshot) (*reuseState, error) {
+	records, err := snapshot.Records(ctx, stindex.RecordQuery{})
 	if err != nil {
 		return nil, fmt.Errorf("query stored artifacts: %w", err)
 	}
-	defer rows.Close()
 
 	state := &reuseState{artifacts: make(map[string]storedArtifact)}
-	for rows.Next() {
-		var (
-			ref         string
-			title       sql.NullString
-			contentHash string
-		)
-		if err := rows.Scan(&ref, &title, &contentHash); err != nil {
-			return nil, fmt.Errorf("scan stored artifact: %w", err)
-		}
-		state.artifacts[ref] = storedArtifact{
-			contentHash: contentHash,
-			title:       title.String,
+	for _, record := range records {
+		state.artifacts[record.Ref] = storedArtifact{
+			contentHash: record.ContentHash,
+			title:       record.Title,
 			chunks:      map[string]storedChunk{},
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate stored artifacts: %w", err)
-	}
 
-	rows, err = db.QueryContext(ctx, `
-SELECT c.record_ref, c.heading, c.content, v.embedding
-FROM chunks c
-JOIN chunks_vec v ON v.chunk_id = c.id
-ORDER BY c.record_ref, c.id`)
+	sections, err := snapshot.Sections(ctx, stindex.SectionQuery{})
 	if err != nil {
 		return nil, fmt.Errorf("query stored chunks: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var (
-			ref       string
-			section   sql.NullString
-			content   string
-			embedding []byte
-		)
-		if err := rows.Scan(&ref, &section, &content, &embedding); err != nil {
-			return nil, fmt.Errorf("scan stored chunk: %w", err)
-		}
-		artifact := state.artifacts[ref]
-		artifact.chunks[reuseChunkKey(artifact.title, section.String, content)] = storedChunk{
-			embedding: append([]byte(nil), embedding...),
-		}
-		state.artifacts[ref] = artifact
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate stored chunks: %w", err)
+	for _, section := range sections {
+		artifact := state.artifacts[section.Ref]
+		artifact.chunks[reuseChunkKey(artifact.title, section.Heading, section.Content)] = storedChunk{}
+		state.artifacts[section.Ref] = artifact
 	}
 
 	return state, nil

@@ -167,8 +167,9 @@ include = ["guides/*.md"]
 	db := mustOpenReadOnly(t, indexPath)
 	defer db.Close()
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 1)
-	// Verify no orphaned chunks.
-	assertCount(t, db, `SELECT COUNT(*) FROM chunks WHERE record_ref NOT IN (SELECT ref FROM records)`, 0)
+	corpusDB := mustOpenCorpusReadOnly(t, indexPath)
+	defer corpusDB.Close()
+	assertCount(t, corpusDB, `SELECT COUNT(*) FROM records`, 1)
 }
 
 func TestUpdateChangedArtifact(t *testing.T) {
@@ -245,13 +246,16 @@ func TestUpdatePreconditionSchemaVersion(t *testing.T) {
 	}
 	db.Close()
 
-	_, err = UpdateContextWithOptions(context.Background(), cfg, records)
-	if !IsUpdatePrecondition(err) {
-		t.Fatalf("expected UpdatePreconditionError, got %v", err)
+	result, err := UpdateContextWithOptions(context.Background(), cfg, records)
+	if err != nil {
+		t.Fatalf("UpdateContextWithOptions() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "--rebuild") {
-		t.Fatalf("error message %q should contain --rebuild guidance", err.Error())
+	if !result.FullRebuild {
+		t.Fatalf("result = %+v, want update to recover via full rebuild", result)
 	}
+	db = mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "schema_version", "10")
 }
 
 func TestUpdatePreconditionEmbedder(t *testing.T) {
@@ -277,10 +281,16 @@ func TestUpdatePreconditionEmbedder(t *testing.T) {
 	}
 	db.Close()
 
-	_, err = UpdateContextWithOptions(context.Background(), cfg, records)
-	if !IsUpdatePrecondition(err) {
-		t.Fatalf("expected UpdatePreconditionError, got %v", err)
+	result, err := UpdateContextWithOptions(context.Background(), cfg, records)
+	if err != nil {
+		t.Fatalf("UpdateContextWithOptions() error = %v", err)
 	}
+	if !result.FullRebuild {
+		t.Fatalf("result = %+v, want update to recover via full rebuild", result)
+	}
+	db = mustOpenReadOnly(t, indexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 }
 
 func TestUpdateMissingIndex(t *testing.T) {

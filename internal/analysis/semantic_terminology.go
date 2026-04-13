@@ -8,6 +8,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 const (
@@ -116,15 +117,10 @@ func semanticTerminologyNearMisses(ctx context.Context, cfg *config.Config, repo
 // searchTermChunks queries the index for chunks similar to a single term
 // embedding, filtering out chunks that contain the literal term.
 func searchTermChunks(ctx context.Context, repo *analysisRepository, embedding []float64, term, preferred string, kinds []string, literalMatchers []terminologyMatcher) ([]semanticTerminologyMatch, error) {
-	queryBlob, err := index.EncodeVectorBlob(embedding)
-	if err != nil {
-		return nil, fmt.Errorf("encode term embedding: %w", err)
-	}
-
 	// Query all matching artifact kinds.
 	var matches []semanticTerminologyMatch
 	for _, kind := range kinds {
-		kindMatches, err := searchTermChunksForKind(ctx, repo, queryBlob, term, preferred, kind, literalMatchers)
+		kindMatches, err := searchTermChunksForKind(ctx, repo, embedding, term, preferred, kind, literalMatchers)
 		if err != nil {
 			return nil, err
 		}
@@ -133,86 +129,50 @@ func searchTermChunks(ctx context.Context, repo *analysisRepository, embedding [
 	return matches, nil
 }
 
-func searchTermChunksForKind(ctx context.Context, repo *analysisRepository, queryBlob []byte, term, preferred, kind string, literalMatchers []terminologyMatcher) ([]semanticTerminologyMatch, error) {
-	sqlText, args := buildSemanticTermChunkQuery(kind, queryBlob)
-	rows, err := repo.db.QueryContext(ctx, sqlText, args...)
+func searchTermChunksForKind(ctx context.Context, repo *analysisRepository, embedding []float64, term, preferred, kind string, literalMatchers []terminologyMatcher) ([]semanticTerminologyMatch, error) {
+	hits, err := repo.snapshot.SearchVector(ctx, stindex.VectorSearchQuery{
+		Embedding: embedding,
+		Limit:     semanticTerminologyShortlistLimit,
+		Kinds:     []string{kind},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query semantic terminology chunks: %w", err)
 	}
-	defer rows.Close()
 
 	termLower := strings.ToLower(term)
 	var matches []semanticTerminologyMatch
-	for rows.Next() {
-		var (
-			ref       string
-			title     string
-			sourceRef string
-			section   string
-			content   string
-			distance  float64
-		)
-		if err := rows.Scan(&ref, &title, &sourceRef, &section, &content, &distance); err != nil {
-			return nil, fmt.Errorf("scan semantic terminology chunk: %w", err)
-		}
-
-		similarity := similarityScoreFromDistance(distance)
+	for _, hit := range hits {
+		similarity := hit.Score
 		if similarity < semanticTerminologySimilarityThreshold {
 			continue
 		}
 
 		// Skip chunks where the literal term already appears — those are
 		// caught by deterministic matching.
-		contentLower := strings.ToLower(content)
+		contentLower := strings.ToLower(hit.Content)
 		if strings.Contains(contentLower, termLower) {
 			continue
 		}
 
 		// Also skip if any of the governed literal matchers fire on this chunk.
-		if terminologyChunkHasLiteralMatch(content, literalMatchers) {
+		if terminologyChunkHasLiteralMatch(hit.Content, literalMatchers) {
 			continue
 		}
 
-		excerpt := extractSemanticExcerpt(content)
+		excerpt := extractSemanticExcerpt(hit.Content)
 		matches = append(matches, semanticTerminologyMatch{
 			Term:        term,
 			Preferred:   preferred,
-			ArtifactRef: ref,
+			ArtifactRef: hit.Ref,
 			Kind:        kind,
-			Title:       title,
-			SourceRef:   sourceRef,
-			Section:     section,
+			Title:       hit.Title,
+			SourceRef:   hit.SourceRef,
+			Section:     hit.Heading,
 			Excerpt:     excerpt,
 			Similarity:  roundScore(similarity),
 		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate semantic terminology chunks: %w", err)
-	}
 	return matches, nil
-}
-
-func buildSemanticTermChunkQuery(kind string, queryBlob []byte) (string, []any) {
-	return `
-WITH vector_hits AS (
-  SELECT chunk_id, distance
-  FROM chunks_vec
-  WHERE embedding MATCH ? AND k = ?
-  ORDER BY distance
-)
-SELECT
-  a.ref,
-  a.title,
-  a.source_ref,
-  c.heading,
-  c.content,
-  vh.distance
-FROM vector_hits vh
-JOIN chunks c ON c.id = vh.chunk_id
-JOIN artifacts a ON a.ref = c.record_ref
-WHERE a.kind = ?
-ORDER BY vh.distance ASC
-LIMIT ?`, []any{queryBlob, semanticTerminologyShortlistLimit * 4, kind, semanticTerminologyShortlistLimit}
 }
 
 // terminologyChunkHasLiteralMatch returns true if any governed term matcher

@@ -89,6 +89,17 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 	}
 	defer db.Close()
 
+	snapshot, err := OpenStromaSnapshotContext(ctx, db, path)
+	if err != nil {
+		return nil, err
+	}
+	defer snapshot.Close()
+
+	stats, err := snapshot.Stats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read stroma stats: %w", err)
+	}
+
 	status.Exists = true
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifacts WHERE kind = ?`, model.ArtifactKindSpec).Scan(&status.SpecCount); err != nil {
 		return nil, fmt.Errorf("count indexed specs: %w", err)
@@ -96,9 +107,7 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifacts WHERE kind = ?`, model.ArtifactKindDoc).Scan(&status.DocCount); err != nil {
 		return nil, fmt.Errorf("count indexed docs: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks`).Scan(&status.ChunkCount); err != nil {
-		return nil, fmt.Errorf("count indexed chunks: %w", err)
-	}
+	status.ChunkCount = stats.ChunkCount
 	status.Repos, err = repoCoverageFromDBContext(ctx, db)
 	if err != nil {
 		return nil, err

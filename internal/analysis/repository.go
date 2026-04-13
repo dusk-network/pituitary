@@ -8,12 +8,14 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 type analysisRepository struct {
 	cfg            *config.Config
 	ctx            context.Context
 	db             *sql.DB
+	snapshot       *stindex.Snapshot
 	atDate         string // ISO date for point-in-time queries; empty = current
 	minConfidence  string // minimum confidence tier filter; empty = all
 	specCache      map[string]specDocument
@@ -36,23 +38,41 @@ func openAnalysisRepositoryContext(ctx context.Context, cfg *config.Config) (*an
 		return nil, fmt.Errorf("open index %s: %w", cfg.Workspace.ResolvedIndexPath, err)
 	}
 
+	snapshot, err := index.OpenStromaSnapshotContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
 	return &analysisRepository{
-		cfg: cfg,
-		ctx: ctx,
-		db:  db,
+		cfg:      cfg,
+		ctx:      ctx,
+		db:       db,
+		snapshot: snapshot,
 	}, nil
 }
 
 func (r *analysisRepository) Close() error {
-	if r == nil || r.db == nil {
+	if r == nil {
 		return nil
 	}
-	return r.db.Close()
+	var firstErr error
+	if r.snapshot != nil {
+		if err := r.snapshot.Close(); err != nil {
+			firstErr = err
+		}
+	}
+	if r.db != nil {
+		if err := r.db.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (r *analysisRepository) loadAllSpecs() (map[string]specDocument, error) {
 	if !r.allSpecsLoaded {
-		specs, err := loadIndexedSpecsContext(r.ctx, r.db, nil)
+		specs, err := loadIndexedSpecsContext(r.ctx, r.db, r.snapshot, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +92,7 @@ func (r *analysisRepository) loadSpecs(refs []string) (map[string]specDocument, 
 	}
 	missing := missingSpecRefs(r.specCache, refs)
 	if len(missing) > 0 {
-		specs, err := loadIndexedSpecsContext(r.ctx, r.db, missing)
+		specs, err := loadIndexedSpecsContext(r.ctx, r.db, r.snapshot, missing)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +136,7 @@ ORDER BY ref ASC`, "spec")
 
 func (r *analysisRepository) loadAllDocs() (map[string]docDocument, error) {
 	if !r.allDocsLoaded {
-		docs, err := loadIndexedDocsContext(r.ctx, r.db, nil)
+		docs, err := loadIndexedDocsContext(r.ctx, r.db, r.snapshot, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -136,7 +156,7 @@ func (r *analysisRepository) loadDocs(refs []string) (map[string]docDocument, er
 	}
 	missing := missingDocRefs(r.docCache, refs)
 	if len(missing) > 0 {
-		docs, err := loadIndexedDocsContext(r.ctx, r.db, missing)
+		docs, err := loadIndexedDocsContext(r.ctx, r.db, r.snapshot, missing)
 		if err != nil {
 			return nil, err
 		}

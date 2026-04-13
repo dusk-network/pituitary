@@ -13,9 +13,9 @@ import (
 	"unicode"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	stindex "github.com/dusk-network/stroma/index"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -539,7 +539,7 @@ func normalizeDocDriftScope(request DocDriftRequest) (DocDriftScope, error) {
 	}
 }
 
-func loadIndexedDocsContext(ctx context.Context, db *sql.DB, refs []string) (map[string]docDocument, error) {
+func loadIndexedDocsContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, refs []string) (map[string]docDocument, error) {
 	rows, err := loadIndexedDocRowsContext(ctx, db, refs)
 	if err != nil {
 		return nil, err
@@ -558,7 +558,7 @@ func loadIndexedDocsContext(ctx context.Context, db *sql.DB, refs []string) (map
 			},
 		}
 	}
-	if err := loadDocSectionsContext(ctx, db, docs); err != nil {
+	if err := loadDocSectionsContext(ctx, snapshot, docs); err != nil {
 		return nil, err
 	}
 	return docs, nil
@@ -611,58 +611,32 @@ WHERE kind = ?`)
 	return result, nil
 }
 
-func loadDocSectionsContext(ctx context.Context, db *sql.DB, docs map[string]docDocument) error {
+func loadDocSectionsContext(ctx context.Context, snapshot *stindex.Snapshot, docs map[string]docDocument) error {
 	refs := sortedDocRefs(docs)
 	if len(refs) == 0 {
 		return nil
 	}
 
-	var builder strings.Builder
-	args := make([]any, 0, 1+len(refs))
-	builder.WriteString(`
-SELECT c.record_ref, c.heading, c.content, cv.embedding
-FROM chunks c
-JOIN chunks_vec cv ON cv.chunk_id = c.id
-JOIN artifacts a ON a.ref = c.record_ref
-WHERE a.kind = ?`)
-	args = append(args, model.ArtifactKindDoc)
-	appendRefFilterClause(&builder, &args, "c.record_ref", refs)
-	builder.WriteString(`
-ORDER BY c.id`)
-
-	rows, err := db.QueryContext(ctx, builder.String(), args...)
+	sections, err := snapshot.Sections(ctx, stindex.SectionQuery{
+		Refs:              refs,
+		Kinds:             []string{model.ArtifactKindDoc},
+		IncludeEmbeddings: true,
+	})
 	if err != nil {
 		return fmt.Errorf("query doc sections: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var (
-			ref           string
-			heading       string
-			content       string
-			embeddingBlob []byte
-		)
-		if err := rows.Scan(&ref, &heading, &content, &embeddingBlob); err != nil {
-			return fmt.Errorf("scan doc section: %w", err)
-		}
-		document, ok := docs[ref]
+	for _, section := range sections {
+		document, ok := docs[section.Ref]
 		if !ok {
 			continue
 		}
-		embedding, err := index.DecodeVectorBlob(embeddingBlob)
-		if err != nil {
-			return fmt.Errorf("decode doc embedding for %s: %w", ref, err)
-		}
 		document.Sections = append(document.Sections, embeddedSection{
-			Heading:   heading,
-			Content:   content,
-			Embedding: embedding,
+			Heading:   section.Heading,
+			Content:   section.Content,
+			Embedding: append([]float64(nil), section.Embedding...),
 		})
-		docs[ref] = document
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate doc sections: %w", err)
+		docs[section.Ref] = document
 	}
 	return nil
 }
