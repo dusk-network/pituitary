@@ -713,197 +713,60 @@ func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimensio
 	return nil
 }
 
-func buildStagingContext(ctx context.Context, db *sql.DB, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, state *reuseState, options RebuildOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
-	if err := createSchemaContext(ctx, db, dimension); err != nil {
-		return nil, fmt.Errorf("create schema: %w", err)
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin rebuild transaction: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	result := &RebuildResult{
-		EmbedderDimension: dimension,
-		FullRebuild:       options.Full,
-		Repos:             repoCoverageFromRecords(records),
-		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
-	}
-	totalArtifacts := len(records.Specs) + len(records.Docs)
-	currentArtifact := 0
-
-	if err := insertMetadataContext(ctx, tx, "schema_version", strconv.Itoa(schemaVersion)); err != nil {
-		return nil, err
-	}
-	if err := insertMetadataContext(ctx, tx, "embedder_dimension", strconv.Itoa(dimension)); err != nil {
-		return nil, err
-	}
-	if err := insertMetadataContext(ctx, tx, "embedder_fingerprint", embedder.Fingerprint()); err != nil {
-		return nil, err
-	}
-	if err := insertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
-		return nil, err
-	}
-	if manifest := sourceManifestJSON(cfg); manifest != "" {
-		if err := insertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
-			return nil, err
-		}
-	}
-
-	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (artifact_ref, section, content) VALUES (?, ?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare chunk insert: %w", err)
-	}
-	defer chunkStmt.Close()
-
-	vectorStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare chunk vector insert: %w", err)
-	}
-	defer vectorStmt.Close()
-
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to, confidence, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare edge insert: %w", err)
-	}
-	defer edgeStmt.Close()
-
-	rebuildTime := time.Now().UTC().Format("2006-01-02")
-	rebuildTimePtr := &rebuildTime
-
-	for _, spec := range records.Specs {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		currentArtifact++
-		if err := insertSpecArtifactContext(ctx, tx, spec); err != nil {
-			return nil, err
-		}
-		result.ArtifactCount++
-		result.SpecCount++
-
-		plan := planArtifactReuse(spec.Title, spec.ContentHash, spec.BodyText, storedArtifactForRecord(state, spec.Ref))
-		chunkCount, reusedCount, embeddedCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, spec.Ref, spec.Title, plan, RebuildProgressEvent{
-			ArtifactKind: model.ArtifactKindSpec,
-			ArtifactRef:  spec.Ref,
-			Current:      currentArtifact,
-			Total:        totalArtifacts,
-		}, reporter)
-		if err != nil {
-			return nil, err
-		}
-		result.ChunkCount += chunkCount
-		result.ReusedChunkCount += reusedCount
-		result.EmbeddedChunkCount += embeddedCount
-		if plan.artifactUnchanged {
-			result.ReusedArtifactCount++
-		}
-
-		// Superseded or deprecated specs get valid_to set to close their edges.
-		var edgeValidTo *string
-		if spec.Status == "superseded" || spec.Status == "deprecated" {
-			edgeValidTo = rebuildTimePtr
-		}
-
-		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", rebuildTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
-				return nil, err
-			}
-			result.EdgeCount++
-		}
-		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", rebuildTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
-				return nil, err
-			}
-			result.EdgeCount++
-		}
-	}
-
-	for _, doc := range records.Docs {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		currentArtifact++
-		if err := insertDocArtifactContext(ctx, tx, doc); err != nil {
-			return nil, err
-		}
-		result.ArtifactCount++
-		result.DocCount++
-
-		plan := planArtifactReuse(doc.Title, doc.ContentHash, doc.BodyText, storedArtifactForRecord(state, doc.Ref))
-		chunkCount, reusedCount, embeddedCount, err := insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, doc.Ref, doc.Title, plan, RebuildProgressEvent{
-			ArtifactKind: model.ArtifactKindDoc,
-			ArtifactRef:  doc.Ref,
-			Current:      currentArtifact,
-			Total:        totalArtifacts,
-		}, reporter)
-		if err != nil {
-			return nil, err
-		}
-		result.ChunkCount += chunkCount
-		result.ReusedChunkCount += reusedCount
-		result.EmbeddedChunkCount += embeddedCount
-		if plan.artifactUnchanged {
-			result.ReusedArtifactCount++
-		}
-	}
-
-	// Infer AST-based applies_to edges from code file symbols.
-	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, rebuildTimePtr)
-	if inferErr != nil {
-		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
-	}
-	result.EdgeCount += inferredCount
-	result.InferredEdgeCount = inferredCount
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit rebuild transaction: %w", err)
-	}
-	tx = nil
-
-	if err := runIntegrityChecksContext(ctx, db); err != nil {
-		return nil, err
-	}
-
-	result.ContentFingerprint = contentFingerprint(records)
-	if err := insertContentFingerprintContext(ctx, db, result.ContentFingerprint); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 	statements := []string{
-		`CREATE TABLE artifacts (
+		`CREATE TABLE records (
 			ref           TEXT PRIMARY KEY,
 			kind          TEXT NOT NULL,
 			title         TEXT,
-			status        TEXT,
-			domain        TEXT,
 			source_ref    TEXT NOT NULL,
-			adapter       TEXT NOT NULL,
 			body_format   TEXT NOT NULL,
+			body_text     TEXT NOT NULL,
 			content_hash  TEXT NOT NULL,
 			metadata_json TEXT NOT NULL,
+			status        TEXT,
+			domain        TEXT,
+			adapter       TEXT NOT NULL DEFAULT 'filesystem',
 			valid_from    TEXT,
 			valid_to      TEXT
 		)`,
-		`CREATE TABLE chunks (
+		`CREATE TABLE chunk_records (
 			id            INTEGER PRIMARY KEY AUTOINCREMENT,
-			artifact_ref  TEXT NOT NULL,
-			section       TEXT,
+			record_ref    TEXT NOT NULL,
+			chunk_index   INTEGER NOT NULL,
+			heading       TEXT,
 			content       TEXT NOT NULL,
-			FOREIGN KEY (artifact_ref) REFERENCES artifacts(ref)
+			FOREIGN KEY (record_ref) REFERENCES records(ref)
 		)`,
 		fmt.Sprintf(`CREATE VIRTUAL TABLE chunks_vec USING vec0(
 			chunk_id INTEGER PRIMARY KEY,
 			embedding float[%d] distance_metric=cosine
 		)`, dimension),
+		`CREATE VIEW artifacts AS
+			SELECT
+				ref,
+				kind,
+				title,
+				status,
+				domain,
+				source_ref,
+				adapter,
+				body_format,
+				content_hash,
+				metadata_json,
+				valid_from,
+				valid_to
+			FROM records`,
+		`CREATE VIEW chunks AS
+			SELECT
+				id,
+				record_ref,
+				chunk_index,
+				heading,
+				content,
+				record_ref AS artifact_ref,
+				heading AS section
+			FROM chunk_records`,
 		`CREATE TABLE edges (
 			from_ref         TEXT NOT NULL,
 			to_ref           TEXT NOT NULL,
@@ -926,9 +789,9 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			value         TEXT NOT NULL
 		)`,
 		`CREATE INDEX idx_artifacts_kind_status_domain
-			ON artifacts(kind, status, domain)`,
+			ON records(kind, status, domain)`,
 		`CREATE INDEX idx_chunks_artifact_ref
-			ON chunks(artifact_ref)`,
+			ON chunk_records(record_ref)`,
 		`CREATE INDEX idx_edges_from_ref_type
 			ON edges(from_ref, edge_type)`,
 		`CREATE INDEX idx_edges_to_ref_type
@@ -1137,20 +1000,6 @@ var (
 func insertEdgeContext(ctx context.Context, stmt *sql.Stmt, fromRef, toRef, edgeType, edgeSource string, validFrom, validTo *string, conf EdgeConfidence) error {
 	if _, err := stmt.ExecContext(ctx, fromRef, toRef, edgeType, edgeSource, validFrom, validTo, conf.Tier, conf.Score); err != nil {
 		return fmt.Errorf("insert edge %s -> %s (%s, %s): %w", fromRef, toRef, edgeType, edgeSource, err)
-	}
-	return nil
-}
-
-func insertMetadataContext(ctx context.Context, tx *sql.Tx, key, value string) error {
-	if _, err := tx.ExecContext(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, key, value); err != nil {
-		return fmt.Errorf("insert metadata %s: %w", key, err)
-	}
-	return nil
-}
-
-func insertContentFingerprintContext(ctx context.Context, db *sql.DB, value string) error {
-	if _, err := db.ExecContext(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, "content_fingerprint", value); err != nil {
-		return fmt.Errorf("insert content fingerprint: %w", err)
 	}
 	return nil
 }
