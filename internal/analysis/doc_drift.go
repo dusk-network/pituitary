@@ -620,13 +620,13 @@ func loadDocSectionsContext(ctx context.Context, db *sql.DB, docs map[string]doc
 	var builder strings.Builder
 	args := make([]any, 0, 1+len(refs))
 	builder.WriteString(`
-SELECT c.artifact_ref, c.section, c.content, cv.embedding
+SELECT c.record_ref, c.heading, c.content, cv.embedding
 FROM chunks c
 JOIN chunks_vec cv ON cv.chunk_id = c.id
-JOIN artifacts a ON a.ref = c.artifact_ref
+JOIN artifacts a ON a.ref = c.record_ref
 WHERE a.kind = ?`)
 	args = append(args, model.ArtifactKindDoc)
-	appendRefFilterClause(&builder, &args, "c.artifact_ref", refs)
+	appendRefFilterClause(&builder, &args, "c.record_ref", refs)
 	builder.WriteString(`
 ORDER BY c.id`)
 

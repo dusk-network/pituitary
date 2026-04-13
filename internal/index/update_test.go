@@ -168,7 +168,7 @@ include = ["guides/*.md"]
 	defer db.Close()
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 1)
 	// Verify no orphaned chunks.
-	assertCount(t, db, `SELECT COUNT(*) FROM chunks WHERE artifact_ref NOT IN (SELECT ref FROM artifacts)`, 0)
+	assertCount(t, db, `SELECT COUNT(*) FROM chunks WHERE record_ref NOT IN (SELECT ref FROM records)`, 0)
 }
 
 func TestUpdateChangedArtifact(t *testing.T) {

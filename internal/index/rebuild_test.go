@@ -78,9 +78,9 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	})
 
 	assertSchemaObject(t, db, "view", "artifacts")
-	assertSchemaObject(t, db, "view", "chunks")
 	assertSchemaObject(t, db, "table", "records")
-	assertSchemaObject(t, db, "table", "chunk_records")
+	assertSchemaObject(t, db, "table", "pituitary_records")
+	assertSchemaObject(t, db, "table", "chunks")
 	assertSchemaObject(t, db, "table", "chunks_vec")
 	assertSchemaObject(t, db, "table", "edges")
 	assertSchemaObject(t, db, "index", "idx_artifacts_kind_status_domain")
@@ -571,7 +571,7 @@ func assertMetadataValue(t *testing.T, db *sql.DB, key, want string) {
 func assertSections(t *testing.T, db *sql.DB, artifactRef string, want []string) {
 	t.Helper()
 
-	rows, err := db.Query(`SELECT section FROM chunks WHERE artifact_ref = ? ORDER BY id`, artifactRef)
+	rows, err := db.Query(`SELECT heading FROM chunks WHERE record_ref = ? ORDER BY id`, artifactRef)
 	if err != nil {
 		t.Fatalf("query sections for %s: %v", artifactRef, err)
 	}
@@ -718,8 +718,8 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "8" {
-		t.Errorf("schema_version = %q, want 8", version)
+	if version != "9" {
+		t.Errorf("schema_version = %q, want 9", version)
 	}
 
 	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).

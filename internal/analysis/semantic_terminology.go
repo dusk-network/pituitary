@@ -204,12 +204,12 @@ SELECT
   a.ref,
   a.title,
   a.source_ref,
-  c.section,
+  c.heading,
   c.content,
   vh.distance
 FROM vector_hits vh
 JOIN chunks c ON c.id = vh.chunk_id
-JOIN artifacts a ON a.ref = c.artifact_ref
+JOIN artifacts a ON a.ref = c.record_ref
 WHERE a.kind = ?
 ORDER BY vh.distance ASC
 LIMIT ?`, []any{queryBlob, semanticTerminologyShortlistLimit * 4, kind, semanticTerminologyShortlistLimit}
