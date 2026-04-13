@@ -26,7 +26,13 @@ func TestLoadIndexedSpecsContextSelectedRefsLoadsOnlyRequestedSpec(t *testing.T)
 	}
 	defer db.Close()
 
-	specs, err := loadIndexedSpecsContext(context.Background(), db, []string{"SPEC-042"})
+	snapshot, err := index.OpenStromaSnapshotContext(context.Background(), db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("index.OpenStromaSnapshotContext() error = %v", err)
+	}
+	defer snapshot.Close()
+
+	specs, err := loadIndexedSpecsContext(context.Background(), db, snapshot, []string{"SPEC-042"})
 	if err != nil {
 		t.Fatalf("loadIndexedSpecsContext() error = %v", err)
 	}
@@ -67,7 +73,13 @@ func TestLoadIndexedDocsContextSelectedRefsLoadsOnlyRequestedDoc(t *testing.T) {
 	}
 	defer db.Close()
 
-	docs, err := loadIndexedDocsContext(context.Background(), db, []string{"doc://guides/api-rate-limits"})
+	snapshot, err := index.OpenStromaSnapshotContext(context.Background(), db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		t.Fatalf("index.OpenStromaSnapshotContext() error = %v", err)
+	}
+	defer snapshot.Close()
+
+	docs, err := loadIndexedDocsContext(context.Background(), db, snapshot, []string{"doc://guides/api-rate-limits"})
 	if err != nil {
 		t.Fatalf("loadIndexedDocsContext() error = %v", err)
 	}

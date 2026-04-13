@@ -50,14 +50,18 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 
 	db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
 	defer db.Close()
+	corpusDB := mustOpenCorpusReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer corpusDB.Close()
 
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 5)
-	assertCount(t, db, `SELECT COUNT(*) FROM chunks`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
-	assertCount(t, db, `SELECT COUNT(*) FROM chunks_vec`, 17)
 	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 7)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
+	assertMetadataValue(t, db, "stroma_snapshot_path", stromaSnapshotPathForContent(cfg.Workspace.ResolvedIndexPath, result.ContentFingerprint))
 	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
+	assertCount(t, corpusDB, `SELECT COUNT(*) FROM records`, 5)
+	assertCount(t, corpusDB, `SELECT COUNT(*) FROM chunks`, 17)
+	assertCount(t, corpusDB, `SELECT COUNT(*) FROM chunks_vec`, 17)
 	var sourceManifest string
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'source_manifest'`).Scan(&sourceManifest); err != nil {
 		t.Fatalf("query source_manifest: %v", err)
@@ -65,31 +69,31 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 	if strings.TrimSpace(sourceManifest) == "" {
 		t.Fatal("metadata.source_manifest = empty, want manifest detail")
 	}
-	assertSections(t, db, "SPEC-042", []string{
+	assertSections(t, corpusDB, "SPEC-042", []string{
 		"Overview",
 		"Requirements",
 		"Design Decisions",
 	})
-	assertSections(t, db, "doc://guides/api-rate-limits", []string{
+	assertSections(t, corpusDB, "doc://guides/api-rate-limits", []string{
 		"Public API Rate Limits",
 		"Public API Rate Limits / Default Limit",
 		"Public API Rate Limits / Configuration",
 		"Public API Rate Limits / Operational Notes",
 	})
 
-	assertSchemaObject(t, db, "view", "artifacts")
-	assertSchemaObject(t, db, "table", "records")
-	assertSchemaObject(t, db, "table", "pituitary_records")
-	assertSchemaObject(t, db, "table", "chunks")
-	assertSchemaObject(t, db, "table", "chunks_vec")
+	assertSchemaObject(t, db, "table", "artifacts")
 	assertSchemaObject(t, db, "table", "edges")
+	assertSchemaObject(t, db, "table", "metadata")
+	assertSchemaObject(t, corpusDB, "table", "records")
+	assertSchemaObject(t, corpusDB, "table", "chunks")
+	assertSchemaObject(t, corpusDB, "table", "chunks_vec")
 	assertSchemaObject(t, db, "index", "idx_artifacts_kind_status_domain")
 	assertSchemaObject(t, db, "index", "idx_edges_from_ref_type")
 	assertAllAdapters(t, db, config.AdapterFilesystem)
 	assertSourceAdapterMetadata(t, db, config.AdapterFilesystem, 5)
-	assertSchemaSQLContains(t, db, "chunks_vec", "CREATE VIRTUAL TABLE chunks_vec USING vec0")
-	assertSchemaSQLContains(t, db, "chunks_vec", "embedding float[8] distance_metric=cosine")
-	assertColumnType(t, db, `SELECT typeof(embedding) FROM chunks_vec LIMIT 1`, "blob")
+	assertSchemaSQLContains(t, corpusDB, "chunks_vec", "CREATE VIRTUAL TABLE chunks_vec USING vec0")
+	assertSchemaSQLContains(t, corpusDB, "chunks_vec", "embedding float[8] distance_metric=cosine")
+	assertColumnType(t, corpusDB, `SELECT typeof(embedding) FROM chunks_vec LIMIT 1`, "blob")
 
 	_, err = db.Exec(`INSERT INTO metadata (key, value) VALUES ('x', 'y')`)
 	if err == nil {
@@ -223,11 +227,8 @@ func TestPrepareRebuildDoesNotReuseWhenSourceFingerprintChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareRebuildContextWithOptions() error = %v", err)
 	}
-	if result.ReusedArtifactCount != 0 || result.ReusedChunkCount != 0 {
-		t.Fatalf("result = %+v, want reuse disabled when source fingerprint changes", result)
-	}
-	if result.EmbeddedChunkCount != result.ChunkCount {
-		t.Fatalf("result = %+v, want all chunks re-embedded when source fingerprint changes", result)
+	if result.ReusedArtifactCount == 0 || result.ReusedChunkCount == 0 {
+		t.Fatalf("result = %+v, want snapshot-driven reuse to remain available across source fingerprint changes", result)
 	}
 }
 
@@ -258,11 +259,8 @@ func TestPrepareRebuildDoesNotReuseWhenStoredEmbedderDimensionDiffers(t *testing
 	if err != nil {
 		t.Fatalf("PrepareRebuildContextWithOptions() error = %v", err)
 	}
-	if result.ReusedArtifactCount != 0 || result.ReusedChunkCount != 0 {
-		t.Fatalf("result = %+v, want reuse disabled when stored embedder dimension changes", result)
-	}
-	if result.EmbeddedChunkCount != result.ChunkCount {
-		t.Fatalf("result = %+v, want all chunks re-embedded when stored embedder dimension changes", result)
+	if result.ReusedArtifactCount == 0 || result.ReusedChunkCount == 0 {
+		t.Fatalf("result = %+v, want reuse to key off the active Stroma snapshot rather than business metadata", result)
 	}
 }
 
@@ -513,6 +511,19 @@ func mustOpenReadOnly(t *testing.T, path string) *sql.DB {
 	return db
 }
 
+func mustOpenCorpusReadOnly(t *testing.T, indexPath string) *sql.DB {
+	t.Helper()
+	snapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext(%s) error = %v", indexPath, err)
+	}
+	db, err := OpenReadOnly(snapshotPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly(%s) error = %v", snapshotPath, err)
+	}
+	return db
+}
+
 func assertCount(t *testing.T, db *sql.DB, query string, want int) {
 	t.Helper()
 	var got int
@@ -713,13 +724,13 @@ func TestRebuildSetsTemporalValidityOnEdges(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Verify schema version matches the Stroma-backed compatibility schema.
+	// Verify schema version matches the split-store business schema.
 	var version string
 	if err := db.QueryRow(`SELECT value FROM metadata WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema_version: %v", err)
 	}
-	if version != "9" {
-		t.Errorf("schema_version = %q, want 9", version)
+	if version != "10" {
+		t.Errorf("schema_version = %q, want 10", version)
 	}
 
 	// Verify that manual edges have valid_from set to today (YYYY-MM-DD).

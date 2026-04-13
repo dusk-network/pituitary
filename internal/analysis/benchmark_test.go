@@ -185,11 +185,17 @@ func BenchmarkLoadIndexedTargets(b *testing.B) {
 	}
 	defer db.Close()
 
+	snapshot, err := index.OpenStromaSnapshotContext(context.Background(), db, fixture.cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		b.Fatalf("index.OpenStromaSnapshotContext() error = %v", err)
+	}
+	defer snapshot.Close()
+
 	b.Run("specs_selected", func(b *testing.B) {
 		refs := []string{"SPEC-042", "SPEC-055"}
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			specs, err := loadIndexedSpecsContext(context.Background(), db, refs)
+			specs, err := loadIndexedSpecsContext(context.Background(), db, snapshot, refs)
 			if err != nil {
 				b.Fatalf("loadIndexedSpecsContext() error = %v", err)
 			}
@@ -203,7 +209,7 @@ func BenchmarkLoadIndexedTargets(b *testing.B) {
 		refs := []string{"doc://guides/api-rate-limits", "doc://runbooks/rate-limit-rollout"}
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			docs, err := loadIndexedDocsContext(context.Background(), db, refs)
+			docs, err := loadIndexedDocsContext(context.Background(), db, snapshot, refs)
 			if err != nil {
 				b.Fatalf("loadIndexedDocsContext() error = %v", err)
 			}

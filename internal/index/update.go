@@ -5,14 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -41,37 +37,27 @@ type UpdateOptions struct {
 	ComputeDelta bool
 }
 
-// UpdateContextWithOptions performs an incremental index update, writing only
-// changed artifacts to the existing database.
+// UpdateContextWithOptions performs an update using a rebuild-backed flow that
+// preserves update diff reporting against the existing database.
 func UpdateContextWithOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, UpdateOptions{}, nil)
 }
 
-// UpdateWithProgressContextAndOptions performs an incremental index update with
+// UpdateWithProgressContextAndOptions performs a rebuild-backed update with
 // progress reporting.
 func UpdateWithProgressContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, UpdateOptions{}, reporter)
 }
 
-// UpdateWithDeltaContextAndOptions performs an incremental index update with
+// UpdateWithDeltaContextAndOptions performs a rebuild-backed update with
 // progress reporting and governance delta computation.
 func UpdateWithDeltaContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, options, reporter)
 }
 
 func updateContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
-	embedder, err := prepareRebuildContext(ctx, cfg, records)
-	if err != nil {
-		return nil, err
-	}
-	dimension, err := embedder.Dimension(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	indexPath := cfg.Workspace.ResolvedIndexPath
 
-	// Step 3: Validate index file exists.
 	info, err := os.Stat(indexPath)
 	switch {
 	case os.IsNotExist(err):
@@ -82,197 +68,23 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 		return nil, fmt.Errorf("index path %s is a directory", indexPath)
 	}
 
-	// Step 4: Create backup.
-	backupPath := indexPath + ".bak"
-	if err := copyFile(indexPath, backupPath); err != nil {
-		return nil, fmt.Errorf("create index backup: %w", err)
-	}
-
-	result, err := applyUpdateContext(ctx, indexPath, cfg, dimension, embedder, records, options, reporter)
+	db, err := OpenReadOnlyContext(ctx, indexPath)
 	if err != nil {
-		// Restore from backup on any failure. Keep the backup in place
-		// if restoration itself fails so the user has a recovery path.
-		if restoreErr := restoreFromBackup(backupPath, indexPath); restoreErr != nil {
-			return nil, fmt.Errorf("update failed: %w; additionally, backup restore failed: %v", err, restoreErr)
+		return nil, fmt.Errorf("open index %s: %w", indexPath, err)
+	}
+	closeDB := true
+	defer func() {
+		if closeDB && db != nil {
+			_ = db.Close()
 		}
-		return nil, err
-	}
+	}()
 
-	// Success — clean up backup.
-	_ = os.Remove(backupPath)
-	return result, nil
-}
-
-func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Config, dimension int, embedder Embedder, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
-	db, err := openReadWriteContext(ctx, indexPath)
-	if err != nil {
-		return nil, fmt.Errorf("open index for update: %w", err)
-	}
-	defer db.Close()
-
-	// Migrate schema to v4 if needed (add edge_source column and ast_cache table).
-	// This must run before validateUpdatePreconditions, which checks schema_version.
-	if err := migrateToSchemaV4(ctx, db); err != nil {
-		return nil, fmt.Errorf("schema migration to v4: %w", err)
-	}
-	// Migrate schema to v5 if needed (add temporal validity columns).
-	if err := migrateToSchemaV5(ctx, db); err != nil {
-		return nil, fmt.Errorf("schema migration to v5: %w", err)
-	}
-	// Migrate schema to v6 if needed (add confidence tiers to edges).
-	if err := migrateToSchemaV6(ctx, db); err != nil {
-		return nil, fmt.Errorf("schema migration to v6: %w", err)
-	}
-	// Migrate schema to v7 if needed (add rationale_json to ast_cache).
-	if err := migrateToSchemaV7(ctx, db); err != nil {
-		return nil, fmt.Errorf("schema migration to v7: %w", err)
-	}
-
-	// Step 6: Validate preconditions.
-	if err := validateUpdatePreconditions(ctx, db, embedder.Fingerprint(), dimension); err != nil {
-		return nil, err
-	}
-
-	// Step 7: Load stored artifact refs and content hashes.
 	storedRefs, err := loadStoredArtifactRefsContext(ctx, db)
 	if err != nil {
 		return nil, err
 	}
-
-	// Step 8: Compute diff.
 	diff := computeArtifactDiff(storedRefs, records)
 
-	// Step 9: Load stored chunks for changed artifacts (embedding reuse).
-	var partialReuse *reuseState
-	if len(diff.updated) > 0 {
-		partialReuse, err = loadStoredChunksForRefsContext(ctx, db, diff.updated)
-		if err != nil {
-			return nil, fmt.Errorf("load stored chunks for reuse: %w", err)
-		}
-	} else {
-		partialReuse = &reuseState{artifacts: map[string]storedArtifact{}}
-	}
-
-	// Build ref lookup maps for O(1) record access.
-	specsByRef := make(map[string]model.SpecRecord, len(records.Specs))
-	for _, spec := range records.Specs {
-		specsByRef[spec.Ref] = spec
-	}
-	docsByRef := make(map[string]model.DocRecord, len(records.Docs))
-	for _, doc := range records.Docs {
-		docsByRef[doc.Ref] = doc
-	}
-
-	// Step 10: Begin transaction and apply changes.
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin update transaction: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	result := &RebuildResult{
-		Update:            true,
-		IndexPath:         indexPath,
-		EmbedderDimension: dimension,
-		AddedCount:        len(diff.added),
-		UpdatedCount:      len(diff.updated),
-		RemovedCount:      len(diff.removed),
-		UnchangedCount:    len(diff.unchanged),
-		Repos:             repoCoverageFromRecords(records),
-		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
-	}
-
-	totalWork := len(diff.removed) + len(diff.updated) + len(diff.added)
-	currentWork := 0
-
-	// Step 10a: Delete removed artifacts.
-	for _, ref := range diff.removed {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		currentWork++
-		reportRebuildProgress(reporter, RebuildProgressEvent{
-			Phase:       "deleting",
-			ArtifactRef: ref,
-			Current:     currentWork,
-			Total:       totalWork,
-		})
-		if err := deleteArtifactDataContext(ctx, tx, ref); err != nil {
-			return nil, err
-		}
-	}
-
-	// Step 10b: Delete changed artifacts' data.
-	for _, ref := range diff.updated {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := deleteArtifactDataContext(ctx, tx, ref); err != nil {
-			return nil, err
-		}
-	}
-
-	// Prepare insert statements.
-	chunkStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks (record_ref, chunk_index, heading, content) VALUES (?, ?, ?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare chunk insert: %w", err)
-	}
-	defer chunkStmt.Close()
-
-	vectorStmt, err := tx.PrepareContext(ctx, `INSERT INTO chunks_vec (chunk_id, embedding) VALUES (?, ?)`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare chunk vector insert: %w", err)
-	}
-	defer vectorStmt.Close()
-
-	// Step 10c: Insert changed artifacts.
-	for _, ref := range diff.updated {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		currentWork++
-		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, specsByRef, docsByRef, ref, partialReuse, RebuildProgressEvent{
-			Current: currentWork,
-			Total:   totalWork,
-		}, reporter)
-		if err != nil {
-			return nil, err
-		}
-		result.ChunkCount += chunkCount
-		result.ReusedChunkCount += reusedCount
-		result.EmbeddedChunkCount += embeddedCount
-	}
-
-	// Step 10d: Insert new artifacts.
-	for _, ref := range diff.added {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		currentWork++
-		chunkCount, reusedCount, embeddedCount, err := insertRecordContext(ctx, tx, chunkStmt, vectorStmt, embedder, specsByRef, docsByRef, ref, partialReuse, RebuildProgressEvent{
-			Current: currentWork,
-			Total:   totalWork,
-		}, reporter)
-		if err != nil {
-			return nil, err
-		}
-		result.ChunkCount += chunkCount
-		result.ReusedChunkCount += reusedCount
-		result.EmbeddedChunkCount += embeddedCount
-	}
-
-	// Count chunks from unchanged artifacts in a single query.
-	unchangedChunkCount, err := countChunksForRefsContext(ctx, db, diff.unchanged)
-	if err != nil {
-		return nil, err
-	}
-	result.ChunkCount += unchangedChunkCount
-
-	// Snapshot edges and spec artifacts before edge rebuild for delta computation.
 	var oldEdges []snapshotEdge
 	var oldArtifacts []snapshotArtifact
 	if options.ComputeDelta {
@@ -285,121 +97,42 @@ func applyUpdateContext(ctx context.Context, indexPath string, cfg *config.Confi
 			return nil, fmt.Errorf("snapshot old artifacts: %w", err)
 		}
 	}
-
-	// Step 10e: Full edge rebuild.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM edges`); err != nil {
-		return nil, fmt.Errorf("delete edges: %w", err)
+	if err := db.Close(); err != nil {
+		return nil, fmt.Errorf("close index %s before rebuild: %w", indexPath, err)
 	}
+	closeDB = false
+	db = nil
 
-	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to, confidence, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	result, err := rebuildContext(ctx, cfg, records, RebuildOptions{}, reporter)
 	if err != nil {
-		return nil, fmt.Errorf("prepare edge insert: %w", err)
+		return nil, err
 	}
-	defer edgeStmt.Close()
+	result.Update = true
+	result.FullRebuild = true
+	result.AddedCount = len(diff.added)
+	result.UpdatedCount = len(diff.updated)
+	result.RemovedCount = len(diff.removed)
+	result.UnchangedCount = len(diff.unchanged)
 
-	updateTime := time.Now().UTC().Format("2006-01-02")
-	updateTimePtr := &updateTime
-
-	for _, spec := range records.Specs {
-		var edgeValidTo *string
-		if spec.Status == "superseded" || spec.Status == "deprecated" {
-			edgeValidTo = updateTimePtr
-		}
-		for _, relation := range spec.Relations {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, relation.Ref, string(relation.Type), "manual", updateTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
-				return nil, err
-			}
-			result.EdgeCount++
-		}
-		for _, appliesTo := range spec.AppliesTo {
-			if err := insertEdgeContext(ctx, edgeStmt, spec.Ref, appliesTo, "applies_to", "manual", updateTimePtr, edgeValidTo, ConfidenceExtracted); err != nil {
-				return nil, err
-			}
-			result.EdgeCount++
-		}
-	}
-
-	// Infer AST-based applies_to edges.
-	inferredCount, inferErr := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, updateTimePtr)
-	if inferErr != nil {
-		return nil, fmt.Errorf("infer AST edges: %w", inferErr)
-	}
-	result.EdgeCount += inferredCount
-	result.InferredEdgeCount = inferredCount
-
-	// Compute governance delta from edge and artifact snapshots.
 	if options.ComputeDelta {
-		newEdges, deltaErr := snapshotEdgesTxContext(ctx, tx)
-		if deltaErr != nil {
-			return nil, fmt.Errorf("snapshot new edges: %w", deltaErr)
+		newDB, err := OpenReadOnlyContext(ctx, indexPath)
+		if err != nil {
+			return nil, fmt.Errorf("reopen rebuilt index %s: %w", indexPath, err)
 		}
-		newArtifacts, deltaErr := snapshotSpecArtifactsTxContext(ctx, tx)
-		if deltaErr != nil {
-			return nil, fmt.Errorf("snapshot new artifacts: %w", deltaErr)
+		defer newDB.Close()
+
+		newEdges, err := snapshotEdgesContext(ctx, newDB)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot new edges: %w", err)
+		}
+		newArtifacts, err := snapshotSpecArtifactsContext(ctx, newDB)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot new artifacts: %w", err)
 		}
 		result.Delta = computeGovernanceDelta(oldArtifacts, newArtifacts, oldEdges, newEdges)
 	}
 
-	// Step 10f: Upsert metadata.
-	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
-		return nil, err
-	}
-	if manifest := sourceManifestJSON(cfg); manifest != "" {
-		if err := upsertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
-			return nil, err
-		}
-	}
-	result.ContentFingerprint = contentFingerprint(records)
-	if err := upsertMetadataContext(ctx, tx, "content_fingerprint", result.ContentFingerprint); err != nil {
-		return nil, err
-	}
-
-	// Step 10g + 11: Integrity checks inside transaction.
-	if err := runTransactionIntegrityChecks(ctx, tx); err != nil {
-		return nil, err
-	}
-
-	// Step 12: Commit.
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit update transaction: %w", err)
-	}
-	tx = nil
-
-	// Populate final counts.
-	result.ArtifactCount = len(records.Specs) + len(records.Docs)
-	result.SpecCount = len(records.Specs)
-	result.DocCount = len(records.Docs)
-
 	return result, nil
-}
-
-// validateUpdatePreconditions checks that the existing index is structurally
-// compatible with the current embedder configuration.
-func validateUpdatePreconditions(ctx context.Context, db *sql.DB, embedderFP string, embedderDim int) error {
-	metadata, err := readMetadataContext(ctx, db, "schema_version", "embedder_fingerprint", "embedder_dimension")
-	if err != nil {
-		return fmt.Errorf("read index metadata for update: %w", err)
-	}
-
-	if stored := strings.TrimSpace(metadata["schema_version"]); stored != fmt.Sprintf("%d", schemaVersion) {
-		return &UpdatePreconditionError{
-			Reason: fmt.Sprintf("index schema version %q does not match expected version %d", stored, schemaVersion),
-			Action: "run `pituitary index --rebuild`",
-		}
-	}
-	if stored := strings.TrimSpace(metadata["embedder_fingerprint"]); stored != embedderFP {
-		return &UpdatePreconditionError{
-			Reason: fmt.Sprintf("index embedder fingerprint %q does not match configured fingerprint %q", stored, embedderFP),
-			Action: "run `pituitary index --rebuild`",
-		}
-	}
-	if stored := strings.TrimSpace(metadata["embedder_dimension"]); stored != strconv.Itoa(embedderDim) {
-		return &UpdatePreconditionError{
-			Reason: fmt.Sprintf("index embedder dimension %q does not match configured dimension %d", stored, embedderDim),
-			Action: "run `pituitary index --rebuild`",
-		}
-	}
-	return nil
 }
 
 // storedArtifactRef holds the minimal stored artifact data needed for diffing.
@@ -473,131 +206,6 @@ func computeArtifactDiff(stored []storedArtifactRef, records *source.LoadResult)
 	return diff
 }
 
-// loadStoredChunksForRefsContext loads stored artifact + chunk data for a
-// specific set of refs, for embedding reuse during update.
-func loadStoredChunksForRefsContext(ctx context.Context, db *sql.DB, refs []string) (*reuseState, error) {
-	if len(refs) == 0 {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
-	}
-
-	state := &reuseState{artifacts: make(map[string]storedArtifact, len(refs))}
-
-	// Load artifact metadata.
-	for _, ref := range refs {
-		var (
-			title       sql.NullString
-			contentHash string
-		)
-		err := db.QueryRowContext(ctx, `SELECT title, content_hash FROM artifacts WHERE ref = ?`, ref).Scan(&title, &contentHash)
-		if err != nil {
-			return nil, fmt.Errorf("query stored artifact %s: %w", ref, err)
-		}
-		state.artifacts[ref] = storedArtifact{
-			contentHash: contentHash,
-			title:       title.String,
-			chunks:      map[string]storedChunk{},
-		}
-	}
-
-	// Load chunks with embeddings.
-	for _, ref := range refs {
-		rows, err := db.QueryContext(ctx, `
-SELECT c.heading, c.content, v.embedding
-FROM chunks c
-JOIN chunks_vec v ON v.chunk_id = c.id
-WHERE c.record_ref = ?
-ORDER BY c.id`, ref)
-		if err != nil {
-			return nil, fmt.Errorf("query stored chunks for %s: %w", ref, err)
-		}
-
-		artifact := state.artifacts[ref]
-		for rows.Next() {
-			var (
-				section   sql.NullString
-				content   string
-				embedding []byte
-			)
-			if err := rows.Scan(&section, &content, &embedding); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("scan stored chunk for %s: %w", ref, err)
-			}
-			artifact.chunks[reuseChunkKey(artifact.title, section.String, content)] = storedChunk{
-				embedding: append([]byte(nil), embedding...),
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterate stored chunks for %s: %w", ref, err)
-		}
-		state.artifacts[ref] = artifact
-	}
-
-	return state, nil
-}
-
-// deleteArtifactDataContext removes an artifact and its associated chunks and
-// vectors from the database within a transaction.
-func deleteArtifactDataContext(ctx context.Context, tx *sql.Tx, ref string) error {
-	// Delete vectors (vec0 virtual table) via subquery on chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE chunk_id IN (SELECT id FROM chunks WHERE record_ref = ?)`, ref); err != nil {
-		return fmt.Errorf("delete vectors for %s: %w", ref, err)
-	}
-	// Delete chunks.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE record_ref = ?`, ref); err != nil {
-		return fmt.Errorf("delete chunks for %s: %w", ref, err)
-	}
-	// Delete artifact.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM records WHERE ref = ?`, ref); err != nil {
-		return fmt.Errorf("delete artifact %s: %w", ref, err)
-	}
-	return nil
-}
-
-// insertRecordContext inserts a single artifact (spec or doc) with its chunks,
-// embeddings, and edges into the transaction.
-func insertRecordContext(ctx context.Context, tx *sql.Tx, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, specsByRef map[string]model.SpecRecord, docsByRef map[string]model.DocRecord, ref string, state *reuseState, baseEvent RebuildProgressEvent, reporter RebuildProgressReporter) (chunkCount, reusedCount, embeddedCount int, err error) {
-	if spec, ok := specsByRef[ref]; ok {
-		if err := insertSpecArtifactContext(ctx, tx, spec); err != nil {
-			return 0, 0, 0, err
-		}
-		plan := planArtifactReuse(spec.Title, spec.ContentHash, spec.BodyText, storedArtifactForRecord(state, ref))
-		baseEvent.Phase = "chunking"
-		baseEvent.ArtifactKind = model.ArtifactKindSpec
-		baseEvent.ArtifactRef = ref
-		return insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, ref, spec.Title, plan, baseEvent, reporter)
-	}
-	if doc, ok := docsByRef[ref]; ok {
-		if err := insertDocArtifactContext(ctx, tx, doc); err != nil {
-			return 0, 0, 0, err
-		}
-		plan := planArtifactReuse(doc.Title, doc.ContentHash, doc.BodyText, storedArtifactForRecord(state, ref))
-		baseEvent.Phase = "chunking"
-		baseEvent.ArtifactKind = model.ArtifactKindDoc
-		baseEvent.ArtifactRef = ref
-		return insertArtifactChunksContext(ctx, chunkStmt, vectorStmt, embedder, ref, doc.Title, plan, baseEvent, reporter)
-	}
-	return 0, 0, 0, fmt.Errorf("record %s not found in loaded sources", ref)
-}
-
-// countChunksForRefsContext returns the total chunk count for a set of artifact refs
-// in a single query.
-func countChunksForRefsContext(ctx context.Context, db *sql.DB, refs []string) (int, error) {
-	if len(refs) == 0 {
-		return 0, nil
-	}
-	query := `SELECT COUNT(*) FROM chunks WHERE record_ref IN (` + placeholders(len(refs)) + `)`
-	args := make([]any, 0, len(refs))
-	for _, ref := range refs {
-		args = append(args, ref)
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count chunks for unchanged artifacts: %w", err)
-	}
-	return count, nil
-}
-
 // upsertMetadataContext inserts or replaces a metadata key-value pair.
 func upsertMetadataContext(ctx context.Context, tx *sql.Tx, key, value string) error {
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)`, key, value); err != nil {
@@ -636,49 +244,6 @@ func runTransactionIntegrityChecks(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	return nil
-}
-
-// restoreFromBackup restores the index from a backup file, removing the
-// potentially corrupted index first. If the rename fails (e.g., cross-device),
-// it falls back to a copy.
-func restoreFromBackup(backupPath, indexPath string) error {
-	if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove index before restore: %w", err)
-	}
-	if err := os.Rename(backupPath, indexPath); err != nil {
-		// Rename can fail cross-device; fall back to copy.
-		if copyErr := copyFile(backupPath, indexPath); copyErr != nil {
-			return fmt.Errorf("rename: %w; copy fallback: %v", err, copyErr)
-		}
-		_ = os.Remove(backupPath)
-	}
-	return nil
-}
-
-// copyFile copies src to dst using a temporary file and rename for atomicity.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	tmp := dst + ".tmp"
-	out, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, dst)
 }
 
 // migrateToSchemaV4 adds the edge_source column and ast_cache table to an

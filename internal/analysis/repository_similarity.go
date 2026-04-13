@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 const (
@@ -169,95 +169,105 @@ func (r *analysisRepository) shortlistSimilarArtifactRefs(sections []embeddedSec
 }
 
 func (r *analysisRepository) shortlistScoresForEmbedding(embedding []float64, query artifactShortlistQuery) (map[string]float64, error) {
-	queryBlob, err := index.EncodeVectorBlob(embedding)
-	if err != nil {
-		return nil, fmt.Errorf("encode shortlist embedding: %w", err)
-	}
-
-	sqlText, args := buildArtifactShortlistQuery(query, queryBlob)
-	rows, err := r.db.QueryContext(r.ctx, sqlText, args...)
+	hits, err := r.snapshot.SearchVector(r.ctx, stindex.VectorSearchQuery{
+		Embedding: embedding,
+		Limit:     shortlistChunkProbeLimit(normalizeArtifactShortlistLimit(query.Limit)),
+		Kinds:     []string{query.Kind},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query artifact shortlist: %w", err)
 	}
-	defer rows.Close()
+
+	states, err := r.loadArtifactShortlistState(refsFromSearchHits(hits))
+	if err != nil {
+		return nil, err
+	}
 
 	scores := make(map[string]float64)
-	for rows.Next() {
-		var (
-			ref      string
-			heading  string
-			distance float64
-		)
-		if err := rows.Scan(&ref, &heading, &distance); err != nil {
-			return nil, fmt.Errorf("scan shortlisted artifact: %w", err)
+	excluded := make(map[string]struct{}, len(query.ExcludeRefs))
+	for _, ref := range uniqueStrings(query.ExcludeRefs) {
+		excluded[ref] = struct{}{}
+	}
+
+	for _, hit := range hits {
+		if _, ok := excluded[hit.Ref]; ok {
+			continue
 		}
-		score := ranking.AdjustHistoricalSectionScore(similarityScoreFromDistance(distance), heading, false)
+		state := states[hit.Ref]
+		if len(query.Statuses) > 0 && !containsString(query.Statuses, state) {
+			continue
+		}
+		score := ranking.AdjustHistoricalSectionScore(hit.Score, hit.Heading, false)
 		if score <= 0 {
 			continue
 		}
-		if score > scores[ref] {
-			scores[ref] = score
+		if score > scores[hit.Ref] {
+			scores[hit.Ref] = score
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate shortlisted artifacts: %w", err)
 	}
 	return scores, nil
 }
 
-func buildArtifactShortlistQuery(query artifactShortlistQuery, queryBlob []byte) (string, []any) {
-	limit := normalizeArtifactShortlistLimit(query.Limit)
+func (r *analysisRepository) loadArtifactShortlistState(refs []string) (map[string]string, error) {
+	states := make(map[string]string, len(refs))
+	if len(refs) == 0 {
+		return states, nil
+	}
 
 	var builder strings.Builder
-	args := make([]any, 0, 4+len(query.Statuses)+len(query.ExcludeRefs))
-
+	args := make([]any, 0, len(refs))
 	builder.WriteString(`
-WITH vector_hits AS (
-  SELECT chunk_id, distance
-  FROM chunks_vec
-  WHERE embedding MATCH ? AND k = ?
-  ORDER BY distance
-)
-SELECT
-  a.ref,
-  c.heading,
-  vh.distance
-FROM vector_hits vh
-JOIN chunks c ON c.id = vh.chunk_id
-JOIN artifacts a ON a.ref = c.record_ref
-WHERE a.kind = ?`)
-	args = append(args, queryBlob, shortlistChunkProbeLimit(limit), query.Kind)
-
-	if len(query.Statuses) > 0 {
-		builder.WriteString(" AND a.status IN (")
-		for i, status := range query.Statuses {
-			if i > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString("?")
-			args = append(args, status)
+SELECT ref, COALESCE(status, '')
+FROM artifacts
+WHERE ref IN (`)
+	for i, ref := range refs {
+		if i > 0 {
+			builder.WriteString(", ")
 		}
-		builder.WriteString(")")
+		builder.WriteString("?")
+		args = append(args, ref)
 	}
+	builder.WriteString(`)`)
 
-	if len(query.ExcludeRefs) > 0 {
-		builder.WriteString(" AND a.ref NOT IN (")
-		for i, ref := range query.ExcludeRefs {
-			if i > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString("?")
-			args = append(args, ref)
+	rows, err := r.db.QueryContext(r.ctx, builder.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query artifact shortlist state: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ref, status string
+		if err := rows.Scan(&ref, &status); err != nil {
+			return nil, fmt.Errorf("scan artifact shortlist state: %w", err)
 		}
-		builder.WriteString(")")
+		states[ref] = status
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate artifact shortlist state: %w", err)
+	}
+	return states, nil
+}
 
-	builder.WriteString(`
-ORDER BY vh.distance ASC, a.ref ASC, c.heading ASC, vh.chunk_id ASC
-LIMIT ?`)
-	args = append(args, shortlistChunkProbeLimit(limit))
+func refsFromSearchHits(hits []stindex.SearchHit) []string {
+	refs := make([]string, 0, len(hits))
+	seen := make(map[string]struct{}, len(hits))
+	for _, hit := range hits {
+		if _, ok := seen[hit.Ref]; ok {
+			continue
+		}
+		seen[hit.Ref] = struct{}{}
+		refs = append(refs, hit.Ref)
+	}
+	return refs
+}
 
-	return builder.String(), args
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *analysisRepository) specRefsSharingAppliesTo(appliesTo []string, excludeRefs []string) ([]string, error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 const (
@@ -292,7 +293,7 @@ func validateDraftSpec(record model.SpecRecord) error {
 	return nil
 }
 
-func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, refs []string) (map[string]specDocument, error) {
+func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, refs []string) (map[string]specDocument, error) {
 	artifacts, err := loadIndexedArtifactRowsContext(ctx, db, refs)
 	if err != nil {
 		return nil, err
@@ -323,7 +324,7 @@ func loadIndexedSpecsContext(ctx context.Context, db *sql.DB, refs []string) (ma
 	if err := loadSpecEdgesContext(ctx, db, specs); err != nil {
 		return nil, err
 	}
-	if err := loadSpecSectionsContext(ctx, db, specs); err != nil {
+	if err := loadSpecSectionsContext(ctx, snapshot, specs); err != nil {
 		return nil, err
 	}
 
@@ -431,58 +432,32 @@ ORDER BY from_ref ASC, edge_type ASC, to_ref ASC`)
 	return nil
 }
 
-func loadSpecSectionsContext(ctx context.Context, db *sql.DB, specs map[string]specDocument) error {
+func loadSpecSectionsContext(ctx context.Context, snapshot *stindex.Snapshot, specs map[string]specDocument) error {
 	refs := sortedSpecRefs(specs)
 	if len(refs) == 0 {
 		return nil
 	}
 
-	var builder strings.Builder
-	args := make([]any, 0, 1+len(refs))
-	builder.WriteString(`
-SELECT c.record_ref, c.heading, c.content, cv.embedding
-FROM chunks c
-JOIN chunks_vec cv ON cv.chunk_id = c.id
-JOIN artifacts a ON a.ref = c.record_ref
-WHERE a.kind = ?`)
-	args = append(args, model.ArtifactKindSpec)
-	appendRefFilterClause(&builder, &args, "c.record_ref", refs)
-	builder.WriteString(`
-ORDER BY c.id`)
-
-	rows, err := db.QueryContext(ctx, builder.String(), args...)
+	sections, err := snapshot.Sections(ctx, stindex.SectionQuery{
+		Refs:              refs,
+		Kinds:             []string{model.ArtifactKindSpec},
+		IncludeEmbeddings: true,
+	})
 	if err != nil {
 		return fmt.Errorf("query spec sections: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var (
-			ref           string
-			heading       string
-			content       string
-			embeddingBlob []byte
-		)
-		if err := rows.Scan(&ref, &heading, &content, &embeddingBlob); err != nil {
-			return fmt.Errorf("scan spec section: %w", err)
-		}
-		document, ok := specs[ref]
+	for _, section := range sections {
+		document, ok := specs[section.Ref]
 		if !ok {
 			continue
 		}
-		embedding, err := index.DecodeVectorBlob(embeddingBlob)
-		if err != nil {
-			return fmt.Errorf("decode section embedding for %s: %w", ref, err)
-		}
 		document.Sections = append(document.Sections, embeddedSection{
-			Heading:   heading,
-			Content:   content,
-			Embedding: embedding,
+			Heading:   section.Heading,
+			Content:   section.Content,
+			Embedding: append([]float64(nil), section.Embedding...),
 		})
-		specs[ref] = document
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate spec sections: %w", err)
+		specs[section.Ref] = document
 	}
 	return nil
 }

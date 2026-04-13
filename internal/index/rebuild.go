@@ -23,7 +23,7 @@ import (
 	stindex "github.com/dusk-network/stroma/index"
 )
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
@@ -104,7 +104,11 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	if err := prepareDryRunPreflightContext(ctx, cfg.Workspace.ResolvedIndexPath, dimension); err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	currentSnapshotPath, err := currentStromaSnapshotPathContext(ctx, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return nil, err
+	}
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
 	if err != nil {
 		return nil, err
 	}
@@ -160,12 +164,18 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, cfg.Workspace.ResolvedIndexPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	indexPath := cfg.Workspace.ResolvedIndexPath
+	currentSnapshotPath, err := currentStromaSnapshotPathContext(ctx, indexPath)
+	if err != nil {
+		return nil, err
+	}
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
 	if err != nil {
 		return nil, err
 	}
 
-	indexPath := cfg.Workspace.ResolvedIndexPath
+	contentFP := contentFingerprint(records)
+	snapshotPath := stromaSnapshotPathForContent(indexPath, contentFP)
 	stagePath, err := prepareStagingPath(indexPath)
 	if err != nil {
 		return nil, err
@@ -184,22 +194,33 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		}
 	}()
 
-	if _, err := stindex.Rebuild(ctx, corpusRecords, stindex.BuildOptions{
-		Path:     stagePath,
+	stromaOptions := stindex.BuildOptions{
+		Path:     snapshotPath,
 		Embedder: embedder,
-	}); err != nil {
-		return nil, fmt.Errorf("build stroma staging database: %w", err)
+	}
+	if !options.Full {
+		// Stroma rebuilds through Path+".new", so reusing the currently published
+		// snapshot remains safe even when the content-addressed path is unchanged.
+		stromaOptions.ReuseFromPath = currentSnapshotPath
+	}
+	if _, err := stindex.Rebuild(ctx, corpusRecords, stromaOptions); err != nil {
+		return nil, fmt.Errorf("build stroma snapshot: %w", err)
 	}
 
 	db, err := openReadWriteContext(ctx, stagePath)
 	if err != nil {
 		return nil, fmt.Errorf("open staging database: %w", err)
 	}
+	if err := createSchemaContext(ctx, db, dimension); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("create staging schema: %w", err)
+	}
 
 	result := summarizeRebuild(records, dimension, reuseState, options)
+	result.ContentFingerprint = contentFP
 	result.IndexPath = indexPath
 
-	if err := finalizeStromaIndexContext(ctx, db, cfg, records, result); err != nil {
+	if err := finalizeBusinessIndexContext(ctx, db, cfg, records, result, snapshotPath); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -279,10 +300,10 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 	return cloned
 }
 
-func finalizeStromaIndexContext(ctx context.Context, db *sql.DB, cfg *config.Config, records *source.LoadResult, result *RebuildResult) error {
+func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.Config, records *source.LoadResult, result *RebuildResult, snapshotPath string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin stroma augmentation transaction: %w", err)
+		return fmt.Errorf("begin business index transaction: %w", err)
 	}
 	defer func() {
 		if tx != nil {
@@ -290,11 +311,15 @@ func finalizeStromaIndexContext(ctx context.Context, db *sql.DB, cfg *config.Con
 		}
 	}()
 
-	if err := extendStromaSchemaContext(ctx, tx); err != nil {
-		return err
+	for _, spec := range records.Specs {
+		if err := insertSpecArtifactContext(ctx, tx, spec); err != nil {
+			return err
+		}
 	}
-	if err := populatePituitaryRecordsContext(ctx, tx, records); err != nil {
-		return err
+	for _, doc := range records.Docs {
+		if err := insertDocArtifactContext(ctx, tx, doc); err != nil {
+			return err
+		}
 	}
 
 	edgeStmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO edges (from_ref, to_ref, edge_type, edge_source, valid_from, valid_to, confidence, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -335,6 +360,19 @@ func finalizeStromaIndexContext(ctx context.Context, db *sql.DB, cfg *config.Con
 	if err := upsertMetadataContext(ctx, tx, "schema_version", strconv.Itoa(schemaVersion)); err != nil {
 		return err
 	}
+	if err := upsertMetadataContext(ctx, tx, "stroma_snapshot_path", snapshotPath); err != nil {
+		return err
+	}
+	if err := upsertMetadataContext(ctx, tx, "embedder_dimension", strconv.Itoa(result.EmbedderDimension)); err != nil {
+		return err
+	}
+	embedderFingerprint, err := ConfiguredEmbedderFingerprint(cfg.Runtime.Embedder)
+	if err != nil {
+		return err
+	}
+	if err := upsertMetadataContext(ctx, tx, "embedder_fingerprint", embedderFingerprint); err != nil {
+		return err
+	}
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
 		return err
 	}
@@ -353,7 +391,7 @@ func finalizeStromaIndexContext(ctx context.Context, db *sql.DB, cfg *config.Con
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit stroma augmentation transaction: %w", err)
+		return fmt.Errorf("commit business index transaction: %w", err)
 	}
 	tx = nil
 
@@ -363,93 +401,6 @@ func finalizeStromaIndexContext(ctx context.Context, db *sql.DB, cfg *config.Con
 
 	result.EdgeCount = edgeCount
 	result.InferredEdgeCount = inferredCount
-	return nil
-}
-
-func extendStromaSchemaContext(ctx context.Context, tx *sql.Tx) error {
-	statements := []string{
-		`CREATE TABLE pituitary_records (
-			record_ref TEXT PRIMARY KEY,
-			status     TEXT,
-			domain     TEXT,
-			adapter    TEXT NOT NULL DEFAULT 'filesystem',
-			FOREIGN KEY (record_ref) REFERENCES records(ref) ON DELETE CASCADE
-		)`,
-		`CREATE VIEW artifacts AS
-			SELECT
-				r.ref,
-				r.kind,
-				r.title,
-				pr.status,
-				pr.domain,
-				r.source_ref,
-				COALESCE(pr.adapter, 'filesystem') AS adapter,
-				r.body_format,
-				r.content_hash,
-				r.metadata_json,
-				NULL AS valid_from,
-				NULL AS valid_to
-			FROM records r
-			LEFT JOIN pituitary_records pr ON pr.record_ref = r.ref`,
-		`CREATE TABLE edges (
-			from_ref         TEXT NOT NULL,
-			to_ref           TEXT NOT NULL,
-			edge_type        TEXT NOT NULL,
-			edge_source      TEXT NOT NULL DEFAULT 'manual',
-			valid_from       TEXT,
-			valid_to         TEXT,
-			confidence       TEXT NOT NULL DEFAULT 'extracted',
-			confidence_score REAL NOT NULL DEFAULT 1.0,
-			PRIMARY KEY (from_ref, to_ref, edge_type)
-		)`,
-		`CREATE TABLE ast_cache (
-			content_hash   TEXT PRIMARY KEY,
-			path           TEXT NOT NULL,
-			symbols_json   TEXT NOT NULL,
-			rationale_json TEXT NOT NULL DEFAULT '[]'
-		)`,
-		`CREATE INDEX idx_artifacts_kind_status_domain ON pituitary_records(status, domain, record_ref)`,
-		`CREATE INDEX idx_edges_from_ref_type ON edges(from_ref, edge_type)`,
-		`CREATE INDEX idx_edges_to_ref_type ON edges(to_ref, edge_type)`,
-	}
-
-	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("augment stroma schema: %w", err)
-		}
-	}
-	return nil
-}
-
-func populatePituitaryRecordsContext(ctx context.Context, tx *sql.Tx, records *source.LoadResult) error {
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO pituitary_records (record_ref, status, domain, adapter) VALUES (?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("prepare pituitary record insert: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, spec := range records.Specs {
-		if _, err := stmt.ExecContext(
-			ctx,
-			spec.Ref,
-			nullableString(strings.TrimSpace(spec.Status)),
-			nullableString(strings.TrimSpace(spec.Domain)),
-			adapterFromMetadata(spec.Metadata),
-		); err != nil {
-			return fmt.Errorf("insert pituitary spec record %s: %w", spec.Ref, err)
-		}
-	}
-	for _, doc := range records.Docs {
-		if _, err := stmt.ExecContext(
-			ctx,
-			doc.Ref,
-			nil,
-			nil,
-			adapterFromMetadata(doc.Metadata),
-		); err != nil {
-			return fmt.Errorf("insert pituitary doc record %s: %w", doc.Ref, err)
-		}
-	}
 	return nil
 }
 
@@ -691,52 +642,21 @@ func probeStagingDatabaseContext(ctx context.Context, stagePath string, dimensio
 }
 
 func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
+	_ = dimension
 	statements := []string{
-		`CREATE TABLE records (
+		`CREATE TABLE artifacts (
 			ref           TEXT PRIMARY KEY,
 			kind          TEXT NOT NULL,
 			title         TEXT,
+			status        TEXT,
+			domain        TEXT,
 			source_ref    TEXT NOT NULL,
-			body_format   TEXT NOT NULL,
-			body_text     TEXT NOT NULL,
+			adapter       TEXT NOT NULL DEFAULT 'filesystem',
 			content_hash  TEXT NOT NULL,
-			metadata_json TEXT NOT NULL
+			metadata_json TEXT NOT NULL,
+			valid_from    TEXT,
+			valid_to      TEXT
 		)`,
-		`CREATE TABLE chunks (
-			id            INTEGER PRIMARY KEY AUTOINCREMENT,
-			record_ref    TEXT NOT NULL,
-			chunk_index   INTEGER NOT NULL,
-			heading       TEXT,
-			content       TEXT NOT NULL,
-			FOREIGN KEY (record_ref) REFERENCES records(ref) ON DELETE CASCADE
-		)`,
-		fmt.Sprintf(`CREATE VIRTUAL TABLE chunks_vec USING vec0(
-			chunk_id INTEGER PRIMARY KEY,
-			embedding float[%d] distance_metric=cosine
-		)`, dimension),
-		`CREATE TABLE pituitary_records (
-			record_ref TEXT PRIMARY KEY,
-			status     TEXT,
-			domain     TEXT,
-			adapter    TEXT NOT NULL DEFAULT 'filesystem',
-			FOREIGN KEY (record_ref) REFERENCES records(ref) ON DELETE CASCADE
-		)`,
-		`CREATE VIEW artifacts AS
-			SELECT
-				r.ref,
-				r.kind,
-				r.title,
-				pr.status,
-				pr.domain,
-				r.source_ref,
-				COALESCE(pr.adapter, 'filesystem') AS adapter,
-				r.body_format,
-				r.content_hash,
-				r.metadata_json,
-				NULL AS valid_from,
-				NULL AS valid_to
-			FROM records r
-			LEFT JOIN pituitary_records pr ON pr.record_ref = r.ref`,
 		`CREATE TABLE edges (
 			from_ref         TEXT NOT NULL,
 			to_ref           TEXT NOT NULL,
@@ -758,10 +678,8 @@ func createSchemaContext(ctx context.Context, db *sql.DB, dimension int) error {
 			key           TEXT PRIMARY KEY,
 			value         TEXT NOT NULL
 		)`,
-		`CREATE INDEX idx_records_kind ON records(kind)`,
-		`CREATE INDEX idx_chunks_record_ref ON chunks(record_ref)`,
 		`CREATE INDEX idx_artifacts_kind_status_domain
-			ON pituitary_records(status, domain, record_ref)`,
+			ON artifacts(kind, status, domain)`,
 		`CREATE INDEX idx_edges_from_ref_type
 			ON edges(from_ref, edge_type)`,
 		`CREATE INDEX idx_edges_to_ref_type
@@ -783,21 +701,22 @@ func insertSpecArtifactContext(ctx context.Context, tx *sql.Tx, spec model.SpecR
 	}
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO records (ref, kind, title, source_ref, body_format, body_text, content_hash, metadata_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO artifacts (ref, kind, title, status, domain, source_ref, adapter, content_hash, metadata_json, valid_from, valid_to)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
 		spec.Ref,
 		spec.Kind,
 		spec.Title,
+		nullableString(strings.TrimSpace(spec.Status)),
+		nullableString(strings.TrimSpace(spec.Domain)),
 		spec.SourceRef,
-		spec.BodyFormat,
-		spec.BodyText,
+		adapterFromMetadata(spec.Metadata),
 		spec.ContentHash,
 		string(metadataJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("insert spec artifact %s: %w", spec.Ref, err)
 	}
-	return insertPituitaryRecordContext(ctx, tx, spec.Ref, nullableString(strings.TrimSpace(spec.Status)), nullableString(strings.TrimSpace(spec.Domain)), adapterFromMetadata(spec.Metadata))
+	return nil
 }
 
 func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocRecord) error {
@@ -807,33 +726,18 @@ func insertDocArtifactContext(ctx context.Context, tx *sql.Tx, doc model.DocReco
 	}
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO records (ref, kind, title, source_ref, body_format, body_text, content_hash, metadata_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO artifacts (ref, kind, title, status, domain, source_ref, adapter, content_hash, metadata_json, valid_from, valid_to)
+		 VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL)`,
 		doc.Ref,
 		doc.Kind,
 		doc.Title,
 		doc.SourceRef,
-		doc.BodyFormat,
-		doc.BodyText,
+		adapterFromMetadata(doc.Metadata),
 		doc.ContentHash,
 		string(metadataJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("insert doc artifact %s: %w", doc.Ref, err)
-	}
-	return insertPituitaryRecordContext(ctx, tx, doc.Ref, nil, nil, adapterFromMetadata(doc.Metadata))
-}
-
-func insertPituitaryRecordContext(ctx context.Context, tx *sql.Tx, ref string, status any, domain any, adapter string) error {
-	if _, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO pituitary_records (record_ref, status, domain, adapter) VALUES (?, ?, ?, ?)`,
-		ref,
-		status,
-		domain,
-		adapter,
-	); err != nil {
-		return fmt.Errorf("insert pituitary record %s: %w", ref, err)
 	}
 	return nil
 }
