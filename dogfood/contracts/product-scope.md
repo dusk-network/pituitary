@@ -1,6 +1,10 @@
 Ref: DOG-001
 Status: accepted
 Domain: product
+Applies To:
+- doc://README
+- doc://ARCHITECTURE
+- doc://docs/development/architecture-guide
 
 # Pituitary Product Scope Contract
 

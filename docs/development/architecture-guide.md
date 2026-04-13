@@ -2,13 +2,14 @@
 
 This guide is the contributor-friendly version of [ARCHITECTURE.md](../../ARCHITECTURE.md). It focuses on how the current codebase is actually organized and how data moves through it.
 
-For product boundaries and full contract details, read `ARCHITECTURE.md`. Use this file when you want to understand where code should go.
+For canonical product boundaries and full contract details, read `ARCHITECTURE.md`. This guide keeps a short summary of the current shipped slice because contributors still need that context when deciding where code should go.
 
 ## What Pituitary Does
 
 Pituitary indexes a local workspace of:
 
 - spec bundles: `spec.toml` plus `body.md`
+- inferred Markdown contracts
 - Markdown docs
 
 It then answers questions over that indexed corpus:
@@ -100,6 +101,7 @@ Loads configured sources from disk and normalizes them into canonical records.
 Responsibilities:
 
 - discover `spec.toml` bundles
+- discover Markdown contracts
 - discover Markdown docs
 - validate malformed bundles
 - derive canonical refs and `source_ref` values
@@ -173,6 +175,8 @@ The repo includes a small fixture workspace:
 - `docs/`
 - `pituitary.toml`
 - `testdata/bootstrap_expectations.json`
+
+The repo also includes a self-dogfood contract slice under `dogfood/contracts/` that governs the README and contributor docs.
 
 That workspace is used across tests and benchmarks. When changing behavior, prefer extending the existing fixtures and expectations instead of inventing parallel test-only worlds unless the case is truly isolated.
 

@@ -1,6 +1,11 @@
 Ref: DOG-002
 Status: accepted
 Domain: developer-experience
+Applies To:
+- doc://docs/development/adding-a-command
+- doc://docs/development/architecture-guide
+- doc://docs/development/prerequisites
+- doc://docs/development/testing-guide
 
 # Pituitary Contributor Workflow Contract
 
