@@ -9,6 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/openaicompat"
+	stembed "github.com/dusk-network/stroma/embed"
 )
 
 const (
@@ -29,6 +30,9 @@ type openAICompatibleEmbedder struct {
 	mu        sync.Mutex
 	dimension int
 }
+
+var _ Embedder = (*openAICompatibleEmbedder)(nil)
+var _ stembed.ContextualEmbedder = (*openAICompatibleEmbedder)(nil)
 
 func newOpenAICompatibleEmbedder(provider config.RuntimeProvider) (Embedder, error) {
 	client, err := openaicompat.NewClient(provider, openAICompatibleEmbedderRuntime)
@@ -68,6 +72,12 @@ func (e *openAICompatibleEmbedder) EmbedDocuments(ctx context.Context, texts []s
 
 func (e *openAICompatibleEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
 	return e.embedTexts(ctx, "query", texts)
+}
+
+func (e *openAICompatibleEmbedder) EmbedDocumentChunks(ctx context.Context, _ string, chunks []string) ([][]float64, error) {
+	// Current OpenAI-compatible providers embed each chunk independently, so
+	// document context is intentionally unused.
+	return e.embedTexts(ctx, "document", chunks)
 }
 
 func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose string, texts []string) ([][]float64, error) {

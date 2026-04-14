@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	stembed "github.com/dusk-network/stroma/embed"
 )
 
 func TestOpenAICompatibleEmbedderUsesNomicSearchPrefixes(t *testing.T) {
@@ -65,6 +66,14 @@ func TestOpenAICompatibleEmbedderUsesNomicSearchPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EmbedQueries() error = %v", err)
 	}
+	contextualEmbedder, ok := embedder.(stembed.ContextualEmbedder)
+	if !ok {
+		t.Fatalf("embedder type %T does not implement ContextualEmbedder", embedder)
+	}
+	chunkVectors, err := contextualEmbedder.EmbedDocumentChunks(context.Background(), "full document", []string{"gamma"})
+	if err != nil {
+		t.Fatalf("EmbedDocumentChunks() error = %v", err)
+	}
 	dimension, err := embedder.Dimension(context.Background())
 	if err != nil {
 		t.Fatalf("Dimension() error = %v", err)
@@ -76,6 +85,9 @@ func TestOpenAICompatibleEmbedderUsesNomicSearchPrefixes(t *testing.T) {
 	if len(queryVectors) != 1 || len(queryVectors[0]) != 3 {
 		t.Fatalf("query vectors = %+v, want one 3d vector", queryVectors)
 	}
+	if len(chunkVectors) != 1 || len(chunkVectors[0]) != 3 {
+		t.Fatalf("chunk vectors = %+v, want one 3d vector", chunkVectors)
+	}
 	if dimension != 3 {
 		t.Fatalf("Dimension() = %d, want 3", dimension)
 	}
@@ -84,6 +96,9 @@ func TestOpenAICompatibleEmbedderUsesNomicSearchPrefixes(t *testing.T) {
 	}
 	if !slices.Equal(inputs[1], []string{"search_query: beta"}) {
 		t.Fatalf("query input = %v, want search_query prefix", inputs[1])
+	}
+	if !slices.Equal(inputs[2], []string{"search_document: gamma"}) {
+		t.Fatalf("contextual chunk input = %v, want search_document prefix", inputs[2])
 	}
 	if got, want := embedder.Fingerprint(), "openai_compatible|nomic-embed-text-v1.5|nomic_search_prefix_v1"; got != want {
 		t.Fatalf("Fingerprint() = %q, want %q", got, want)

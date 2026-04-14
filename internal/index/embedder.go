@@ -115,6 +115,8 @@ type fixtureEmbedder struct {
 	model string
 }
 
+var _ stembed.ContextualEmbedder = (*fixtureEmbedder)(nil)
+
 func (e *fixtureEmbedder) Fingerprint() string {
 	return embedderFingerprint(config.RuntimeProviderFixture, e.model, "plain_v1")
 }
@@ -129,6 +131,12 @@ func (e *fixtureEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([
 
 func (e *fixtureEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
 	return e.base.EmbedQueries(ctx, texts)
+}
+
+func (e *fixtureEmbedder) EmbedDocumentChunks(ctx context.Context, _ string, chunks []string) ([][]float64, error) {
+	// Current fixture embeddings treat each chunk independently, so document
+	// context is intentionally unused.
+	return e.base.EmbedDocuments(ctx, chunks)
 }
 
 func embedderFingerprint(provider, model, strategy string) string {

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/dusk-network/pituitary/internal/ast"
-	"github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
@@ -108,7 +107,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +139,16 @@ func prepareDryRunPreflightContext(ctx context.Context, indexPath string, dimens
 	return probeStagingDatabaseContext(ctx, probePath, dimension)
 }
 
+func validateBusinessIndexPublishPreflight(indexPath string) error {
+	if _, err := ensureIndexDirectory(indexPath); err != nil {
+		return err
+	}
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return err
+	}
+	return validateStaleStagePath(indexPath + ".new")
+}
+
 // RebuildContext writes a fresh staging database and atomically swaps it into place.
 func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
 	return RebuildContextWithOptions(ctx, cfg, records, RebuildOptions{})
@@ -169,15 +178,14 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
 
 	contentFP := contentFingerprint(records)
 	snapshotPath := stromaSnapshotPathForContent(indexPath, contentFP)
-	stagePath, err := prepareStagingPath(indexPath)
-	if err != nil {
+	if err := validateBusinessIndexPublishPreflight(indexPath); err != nil {
 		return nil, err
 	}
 
@@ -186,13 +194,6 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		return nil, err
 	}
 	emitPlannedRebuildProgress(records, reuseState, reporter)
-
-	success := false
-	defer func() {
-		if !success {
-			_ = os.Remove(stagePath)
-		}
-	}()
 
 	stromaOptions := stindex.BuildOptions{
 		Path:     snapshotPath,
@@ -207,34 +208,13 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		return nil, fmt.Errorf("build stroma snapshot: %w", err)
 	}
 
-	db, err := openReadWriteContext(ctx, stagePath)
-	if err != nil {
-		return nil, fmt.Errorf("open staging database: %w", err)
-	}
-	if err := createSchemaContext(ctx, db, dimension); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("create staging schema: %w", err)
-	}
-
 	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.ContentFingerprint = contentFP
 	result.IndexPath = indexPath
 
-	if err := finalizeBusinessIndexContext(ctx, db, cfg, records, result, snapshotPath); err != nil {
-		_ = db.Close()
+	if err := publishBusinessIndexContext(ctx, cfg, records, result, snapshotPath); err != nil {
 		return nil, err
 	}
-
-	if err := db.Close(); err != nil {
-		return nil, fmt.Errorf("close staging database: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(stagePath, indexPath); err != nil {
-		return nil, fmt.Errorf("swap staging database into place: %w", err)
-	}
-	success = true
 	return result, nil
 }
 
@@ -287,6 +267,45 @@ func corpusRecordFromDoc(doc model.DocRecord) (stcorpus.Record, error) {
 		ContentHash: doc.ContentHash,
 		Metadata:    cloneMetadata(doc.Metadata),
 	}.Normalized()
+}
+
+func publishBusinessIndexContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, result *RebuildResult, snapshotPath string) error {
+	indexPath := cfg.Workspace.ResolvedIndexPath
+	stagePath, err := prepareStagingPath(indexPath)
+	if err != nil {
+		return err
+	}
+
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(stagePath)
+		}
+	}()
+
+	db, err := openReadWriteContext(ctx, stagePath)
+	if err != nil {
+		return fmt.Errorf("open staging database: %w", err)
+	}
+	if err := createSchemaContext(ctx, db, result.EmbedderDimension); err != nil {
+		_ = db.Close()
+		return fmt.Errorf("create staging schema: %w", err)
+	}
+	if err := finalizeBusinessIndexContext(ctx, db, cfg, records, result, snapshotPath); err != nil {
+		_ = db.Close()
+		return err
+	}
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("close staging database: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(stagePath, indexPath); err != nil {
+		return fmt.Errorf("swap staging database into place: %w", err)
+	}
+	success = true
+	return nil
 }
 
 func cloneMetadata(metadata map[string]string) map[string]string {
@@ -751,120 +770,11 @@ func adapterFromMetadata(metadata map[string]string) string {
 	return config.AdapterFilesystem
 }
 
-func insertArtifactChunksContext(ctx context.Context, chunkStmt, vectorStmt *sql.Stmt, embedder Embedder, artifactRef, title string, plan artifactChunkPlan, event RebuildProgressEvent, reporter RebuildProgressReporter) (int, int, int, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, 0, 0, err
-	}
-	sections := plan.sections
-	event.Phase = "chunking"
-	event.ChunkCount = len(sections)
-	reportRebuildProgress(reporter, event)
-	if len(sections) == 0 {
-		return 0, 0, 0, nil
-	}
-
-	texts := make([]string, 0, len(sections))
-	sectionKeys := make([]string, 0, len(sections))
-	for _, section := range sections {
-		if err := ctx.Err(); err != nil {
-			return 0, 0, 0, err
-		}
-		key := reuseChunkKey(title, section.Heading, section.Body)
-		sectionKeys = append(sectionKeys, key)
-		if _, ok := plan.reusedEmbeddings[key]; ok {
-			continue
-		}
-		texts = append(texts, textForEmbedding(title, section))
-	}
-
-	vectors := make([][]float64, 0, len(texts))
-	if len(texts) > 0 {
-		var err error
-		event.Phase = "embedding"
-		event.ChunkCount = len(texts)
-		reportRebuildProgress(reporter, event)
-		vectors, err = embedder.EmbedDocuments(ctx, texts)
-		if err != nil {
-			return 0, 0, 0, fmt.Errorf("embed chunks for %s: %w", artifactRef, err)
-		}
-		if len(vectors) != len(texts) {
-			return 0, 0, 0, fmt.Errorf("embed chunks for %s: returned %d vector(s) for %d new section(s)", artifactRef, len(vectors), len(texts))
-		}
-	}
-
-	newVectorIndex := 0
-	for i, section := range sections {
-		if err := ctx.Err(); err != nil {
-			return 0, 0, 0, err
-		}
-		chunkID, err := insertChunkContext(ctx, chunkStmt, artifactRef, i, section.Heading, section.Body)
-		if err != nil {
-			return 0, 0, 0, err
-		}
-		if embeddingBlob, ok := plan.reusedEmbeddings[sectionKeys[i]]; ok {
-			if err := insertChunkVectorBlobContext(ctx, vectorStmt, chunkID, embeddingBlob); err != nil {
-				return 0, 0, 0, err
-			}
-			continue
-		}
-		if newVectorIndex >= len(vectors) {
-			return 0, 0, 0, fmt.Errorf("embed chunks for %s: missing vector for section %q", artifactRef, section.Heading)
-		}
-		if err := insertChunkVectorContext(ctx, vectorStmt, chunkID, len(vectors[newVectorIndex]), vectors[newVectorIndex]); err != nil {
-			return 0, 0, 0, err
-		}
-		newVectorIndex++
-	}
-
-	return len(sections), plan.reusedChunkCount, plan.embeddedChunkCount, nil
-}
-
 func reportRebuildProgress(reporter RebuildProgressReporter, event RebuildProgressEvent) {
 	if reporter == nil {
 		return
 	}
 	reporter(event)
-}
-
-func insertChunkContext(ctx context.Context, stmt *sql.Stmt, artifactRef string, chunkIndex int, section, content string) (int64, error) {
-	result, err := stmt.ExecContext(ctx, artifactRef, chunkIndex, section, content)
-	if err != nil {
-		return 0, fmt.Errorf("insert chunk for %s: %w", artifactRef, err)
-	}
-	chunkID, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("read chunk id for %s: %w", artifactRef, err)
-	}
-	return chunkID, nil
-}
-
-func insertChunkVectorContext(ctx context.Context, stmt *sql.Stmt, chunkID int64, _ int, vector []float64) error {
-	embeddingBlob, err := encodeVectorBlob(vector)
-	if err != nil {
-		return fmt.Errorf("encode chunk vector %d: %w", chunkID, err)
-	}
-	return insertChunkVectorBlobContext(ctx, stmt, chunkID, embeddingBlob)
-}
-
-func insertChunkVectorBlobContext(ctx context.Context, stmt *sql.Stmt, chunkID int64, embeddingBlob []byte) error {
-	if _, err := stmt.ExecContext(ctx, chunkID, embeddingBlob); err != nil {
-		return fmt.Errorf("insert chunk vector %d: %w", chunkID, err)
-	}
-	return nil
-}
-
-func textForEmbedding(title string, section chunk.Section) string {
-	parts := make([]string, 0, 3)
-	if trimmed := strings.TrimSpace(title); trimmed != "" {
-		parts = append(parts, trimmed)
-	}
-	if trimmed := strings.TrimSpace(section.Heading); trimmed != "" && trimmed != strings.TrimSpace(title) {
-		parts = append(parts, trimmed)
-	}
-	if trimmed := strings.TrimSpace(section.Body); trimmed != "" {
-		parts = append(parts, trimmed)
-	}
-	return strings.Join(parts, "\n\n")
 }
 
 // EdgeConfidence describes the confidence tier and score for an edge.

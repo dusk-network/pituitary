@@ -20,23 +20,17 @@ type reuseState struct {
 type storedArtifact struct {
 	contentHash string
 	title       string
-	chunks      map[string]storedChunk
-}
-
-type storedChunk struct {
-	embedding []byte
+	chunks      map[string]struct{}
 }
 
 type artifactChunkPlan struct {
 	sections           []chunk.Section
-	reusedEmbeddings   map[string][]byte
 	reusedChunkCount   int
 	embeddedChunkCount int
 	artifactUnchanged  bool
 }
 
-func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, currentSourceFingerprint string, options RebuildOptions) (*reuseState, error) {
-	_ = currentSourceFingerprint
+func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, options RebuildOptions) (*reuseState, error) {
 	if options.Full {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
@@ -79,7 +73,7 @@ func loadStoredArtifactsContext(ctx context.Context, snapshot *stindex.Snapshot)
 		state.artifacts[record.Ref] = storedArtifact{
 			contentHash: record.ContentHash,
 			title:       record.Title,
-			chunks:      map[string]storedChunk{},
+			chunks:      map[string]struct{}{},
 		}
 	}
 
@@ -90,7 +84,7 @@ func loadStoredArtifactsContext(ctx context.Context, snapshot *stindex.Snapshot)
 
 	for _, section := range sections {
 		artifact := state.artifacts[section.Ref]
-		artifact.chunks[reuseChunkKey(artifact.title, section.Heading, section.Content)] = storedChunk{}
+		artifact.chunks[reuseChunkKey(artifact.title, section.Heading, section.Content)] = struct{}{}
 		state.artifacts[section.Ref] = artifact
 	}
 
@@ -99,10 +93,7 @@ func loadStoredArtifactsContext(ctx context.Context, snapshot *stindex.Snapshot)
 
 func planArtifactReuse(title, contentHash, body string, stored storedArtifact) artifactChunkPlan {
 	sections := chunk.Markdown(title, body)
-	plan := artifactChunkPlan{
-		sections:         sections,
-		reusedEmbeddings: make(map[string][]byte),
-	}
+	plan := artifactChunkPlan{sections: sections}
 	if stored.contentHash == "" {
 		plan.embeddedChunkCount = len(sections)
 		return plan
@@ -110,8 +101,7 @@ func planArtifactReuse(title, contentHash, body string, stored storedArtifact) a
 
 	for _, section := range sections {
 		key := reuseChunkKey(title, section.Heading, section.Body)
-		if storedChunk, ok := stored.chunks[key]; ok {
-			plan.reusedEmbeddings[key] = storedChunk.embedding
+		if _, ok := stored.chunks[key]; ok {
 			plan.reusedChunkCount++
 		}
 	}
