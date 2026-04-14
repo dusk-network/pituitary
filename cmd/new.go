@@ -235,7 +235,7 @@ func pathWithinRootNew(root, path string) bool {
 }
 
 func checkNewSpecOverlap(ctx context.Context, cfg *config.Config, title string) []source.NewSpecBundleWarning {
-	searchResult, err := index.SearchSpecsContext(ctx, cfg, index.SearchSpecQuery{
+	searchResult, err := index.SearchSpecsBySemanticSimilarityContext(ctx, cfg, index.SearchSpecQuery{
 		Query:    title,
 		Kind:     "spec",
 		Statuses: []string{"draft", "review", "accepted"},
@@ -251,7 +251,7 @@ func checkNewSpecOverlap(ctx context.Context, cfg *config.Config, title string) 
 		if match.Score >= overlapThreshold {
 			warnings = append(warnings, source.NewSpecBundleWarning{
 				Code:    "similar_spec_exists",
-				Message: fmt.Sprintf("existing spec %s %q has %.0f%% semantic similarity; review before proceeding", match.Ref, match.Title, match.Score*100),
+				Message: fmt.Sprintf("existing spec %s %q has %.0f%% semantic similarity to this title; review before proceeding", match.Ref, match.Title, match.Score*100),
 			})
 		}
 	}

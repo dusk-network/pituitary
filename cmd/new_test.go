@@ -110,3 +110,51 @@ func TestRunNewDefaultsDomainToUnknown(t *testing.T) {
 		t.Fatalf("warnings = %+v, want placeholder domain warning", payload.Warnings)
 	}
 }
+
+func TestRunNewWarnsOnSemanticallySimilarExistingSpec(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return 0
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runNew([]string{
+			"--title", "Per-Tenant Rate Limiting for Public API Endpoints",
+			"--domain", "api",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runNew() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runNew() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Warnings []cliIssue `json:"warnings"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal new payload: %v", err)
+	}
+
+	var found bool
+	for _, warning := range payload.Warnings {
+		if warning.Code != "similar_spec_exists" {
+			continue
+		}
+		found = true
+		if !strings.Contains(warning.Message, "semantic similarity to this title") {
+			t.Fatalf("warning message = %q, want semantic similarity wording", warning.Message)
+		}
+	}
+	if !found {
+		t.Fatalf("warnings = %+v, want similar_spec_exists warning", payload.Warnings)
+	}
+}

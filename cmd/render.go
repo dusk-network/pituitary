@@ -760,6 +760,9 @@ func renderSearchSpecsResult(w io.Writer, result *index.SearchSpecResult) {
 		fmt.Fprintln(w, "no matches")
 		return
 	}
+	if note := searchSpecScoreNote(result); note != "" {
+		fmt.Fprintf(w, "score semantics: %s\n\n", note)
+	}
 
 	for i, match := range result.Matches {
 		fmt.Fprintf(w, "%d. %s | %s | %.3f\n", i+1, match.Ref, match.SectionHeading, match.Score)
@@ -780,9 +783,12 @@ func renderSearchSpecsTable(w io.Writer, result *index.SearchSpecResult) {
 		fmt.Fprintln(w, "no matches")
 		return
 	}
+	if note := searchSpecScoreNote(result); note != "" {
+		fmt.Fprintf(w, "score semantics: %s\n\n", note)
+	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "REF\tREPO\tTITLE\tSECTION\tSOURCE\tSCORE")
+	fmt.Fprintf(tw, "REF\tREPO\tTITLE\tSECTION\tSOURCE\t%s\n", index.SearchSpecScoreColumnLabel(result.ScoreKind))
 	for _, match := range result.Matches {
 		fmt.Fprintf(
 			tw,
@@ -825,6 +831,16 @@ func searchMatchDetailLine(match index.SearchSpecMatch) string {
 		parts = append(parts, "source: "+displaySourcePath(match.SourceRef))
 	}
 	return strings.Join(parts, " | ")
+}
+
+func searchSpecScoreNote(result *index.SearchSpecResult) string {
+	if result == nil {
+		return ""
+	}
+	if note := strings.TrimSpace(result.ScoreDescription); note != "" {
+		return note
+	}
+	return index.SearchSpecScoreDescription(result.ScoreKind)
 }
 
 func renderIndexRepoCoverage(w io.Writer, repos []index.RepoCoverage) {
