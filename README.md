@@ -88,7 +88,7 @@ pituitary status                       # index health and governance hotspots at
 | Debug why a file is in or out of scope | `pituitary explain-file PATH` |
 | Full spec review | `pituitary review-spec --path specs/X` |
 | Auto-fix deterministic drift | `pituitary fix --scope all --dry-run` |
-| Search specs semantically | `pituitary search-specs --query "rate limiting"` |
+| Search specs by hybrid relevance | `pituitary search-specs --query "rate limiting"` |
 | Trace impact of a spec change | `pituitary analyze-impact --path specs/X` |
 | Compare two specs | `pituitary compare-specs --path specs/A --path specs/B` |
 | Detect stale specs | `pituitary check-spec-freshness --scope all` |

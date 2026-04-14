@@ -36,7 +36,7 @@ func commandRegistry() map[string]commandSpec {
 		"version":              {Description: "show Pituitary and Go runtime versions", Formats: commandFormats(), Run: runVersionContext},
 		"preview-sources":      {Description: "preview indexed files per source and selector diagnostics", Formats: commandFormats(), Run: runPreviewSourcesContext},
 		"explain-file":         {Description: "debug why one file is in or out of scope for configured sources", Formats: commandFormats(), Run: runExplainFileContext},
-		"search-specs":         {Description: "search spec sections semantically", Formats: commandFormats(commandFormatTable), Run: runSearchSpecsContext},
+		"search-specs":         {Description: "search spec sections by hybrid relevance", Formats: commandFormats(commandFormatTable), Run: runSearchSpecsContext},
 		"check-overlap":        {Description: "find overlapping specs", Formats: commandFormats(), Run: runCheckOverlapContext},
 		"compare-specs":        {Description: "compare design tradeoffs across specs", Formats: commandFormats(), Run: runCompareSpecsContext},
 		"analyze-impact":       {Description: "report affected specs and docs", Formats: commandFormats(), Run: runAnalyzeImpactContext},

@@ -20,6 +20,16 @@ const (
 	maxSearchLimit     = 50
 )
 
+const (
+	// SearchSpecScoreKindHybridRelevance indicates scores from hybrid retrieval
+	// that blends vector and lexical matches into a fused relevance rank.
+	SearchSpecScoreKindHybridRelevance = "hybrid_relevance"
+
+	// SearchSpecScoreKindSemanticSimilarity indicates scores from vector-only
+	// retrieval where the score remains cosine-similarity-like.
+	SearchSpecScoreKindSemanticSimilarity = "semantic_similarity"
+)
+
 // SearchSpecFilters captures the optional search filters exposed by transports.
 type SearchSpecFilters struct {
 	Domain   string   `json:"domain,omitempty"`
@@ -59,8 +69,10 @@ type SearchSpecMatch struct {
 
 // SearchSpecResult is the ranked retrieval output.
 type SearchSpecResult struct {
-	Matches      []SearchSpecMatch        `json:"matches"`
-	ContentTrust *resultmeta.ContentTrust `json:"content_trust,omitempty"`
+	Matches          []SearchSpecMatch        `json:"matches"`
+	ScoreKind        string                   `json:"score_kind,omitempty"`
+	ScoreDescription string                   `json:"score_description,omitempty"`
+	ContentTrust     *resultmeta.ContentTrust `json:"content_trust,omitempty"`
 }
 
 type chunkCandidate struct {
@@ -126,6 +138,40 @@ func SearchSpecs(cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, 
 
 // SearchSpecsContext executes semantic retrieval over the indexed spec corpus.
 func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, error) {
+	return searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loadRankedCandidatesContext)
+}
+
+// SearchSpecsBySemanticSimilarityContext executes vector-only retrieval over
+// the indexed spec corpus and returns cosine-similarity-like scores.
+func SearchSpecsBySemanticSimilarityContext(ctx context.Context, cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, error) {
+	return searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindSemanticSimilarity, loadSemanticSimilarityCandidatesContext)
+}
+
+// SearchSpecScoreColumnLabel returns the user-facing score column name for one
+// search result score kind.
+func SearchSpecScoreColumnLabel(kind string) string {
+	switch kind {
+	case SearchSpecScoreKindSemanticSimilarity:
+		return "SIMILARITY"
+	default:
+		return "RELEVANCE"
+	}
+}
+
+// SearchSpecScoreDescription returns a user-facing description of what the
+// search score represents for one search result score kind.
+func SearchSpecScoreDescription(kind string) string {
+	switch kind {
+	case SearchSpecScoreKindSemanticSimilarity:
+		return "cosine-style semantic similarity from vector-only retrieval"
+	default:
+		return "hybrid relevance from fused vector and lexical retrieval; not a cosine similarity percentage"
+	}
+}
+
+type candidateLoader func(context.Context, *sql.DB, *stindex.Snapshot, Embedder, SearchSpecQuery) ([]chunkCandidate, error)
+
+func searchSpecsContextWithScoreKind(ctx context.Context, cfg *config.Config, query SearchSpecQuery, scoreKind string, loader candidateLoader) (*SearchSpecResult, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -143,52 +189,18 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 		return nil, err
 	}
 
-	db, err := OpenReadOnlyContext(ctx, cfg.Workspace.ResolvedIndexPath)
-	if err != nil {
-		return nil, fmt.Errorf("open index %s: %w", cfg.Workspace.ResolvedIndexPath, err)
-	}
-	defer db.Close()
-
-	snapshot, err := OpenStromaSnapshotContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
+	searchCtx, err := openSearchContext(ctx, cfg, embedder)
 	if err != nil {
 		return nil, err
 	}
-	defer snapshot.Close()
+	defer searchCtx.Close()
 
-	dimension, err := embedder.Dimension(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("resolve embedder dimension: %w", err)
-	}
-	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), dimension); err != nil {
-		return nil, err
-	}
-
-	candidates, err := loadRankedCandidatesContext(ctx, db, snapshot, embedder, query)
+	candidates, err := loader(ctx, searchCtx.db, searchCtx.snapshot, searchCtx.embedder, query)
 	if err != nil {
 		return nil, err
 	}
 
-	result := &SearchSpecResult{
-		Matches:      make([]SearchSpecMatch, 0, len(candidates)),
-		ContentTrust: resultmeta.UntrustedWorkspaceText(),
-	}
-	for _, candidate := range candidates {
-		result.Matches = append(result.Matches, SearchSpecMatch{
-			Ref:            candidate.Ref,
-			Title:          candidate.Title,
-			SectionHeading: candidate.SectionHeading,
-			Excerpt:        excerpt(candidate.Content),
-			Repo:           candidate.Repo,
-			SourceRef:      candidate.SourceRef,
-			Kind:           candidate.Kind,
-			Status:         candidate.Status,
-			Domain:         candidate.Domain,
-			Score:          candidate.Score,
-			Inference:      candidate.Inference,
-		})
-	}
-
-	return result, nil
+	return buildSearchSpecResult(candidates, scoreKind), nil
 }
 
 func normalizeSearchSpecQuery(query SearchSpecQuery) (SearchSpecQuery, error) {
@@ -277,6 +289,54 @@ func validateStoredEmbedderContext(ctx context.Context, db *sql.DB, fingerprint 
 	return nil
 }
 
+type searchContext struct {
+	db       *sql.DB
+	snapshot *stindex.Snapshot
+	embedder Embedder
+}
+
+func openSearchContext(ctx context.Context, cfg *config.Config, embedder Embedder) (*searchContext, error) {
+	db, err := OpenReadOnlyContext(ctx, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return nil, fmt.Errorf("open index %s: %w", cfg.Workspace.ResolvedIndexPath, err)
+	}
+
+	snapshot, err := OpenStromaSnapshotContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	dimension, err := embedder.Dimension(ctx)
+	if err != nil {
+		_ = snapshot.Close()
+		_ = db.Close()
+		return nil, fmt.Errorf("resolve embedder dimension: %w", err)
+	}
+	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), dimension); err != nil {
+		_ = snapshot.Close()
+		_ = db.Close()
+		return nil, err
+	}
+	return &searchContext{
+		db:       db,
+		snapshot: snapshot,
+		embedder: embedder,
+	}, nil
+}
+
+func (s *searchContext) Close() {
+	if s == nil {
+		return
+	}
+	if s.snapshot != nil {
+		_ = s.snapshot.Close()
+	}
+	if s.db != nil {
+		_ = s.db.Close()
+	}
+}
+
 func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
 	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
@@ -290,6 +350,33 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stin
 		return nil, fmt.Errorf("query search candidates: %w", err)
 	}
 
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+}
+
+func loadSemanticSimilarityCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
+	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
+
+	vectors, err := embedder.EmbedQueries(ctx, []string{query.Query})
+	if err != nil {
+		return nil, fmt.Errorf("embed search query: %w", err)
+	}
+	if len(vectors) != 1 {
+		return nil, fmt.Errorf("embedder returned %d query vectors, want 1", len(vectors))
+	}
+
+	hits, err := snapshot.SearchVector(ctx, stindex.VectorSearchQuery{
+		Embedding: vectors[0],
+		Limit:     searchCandidateLimit(query.Limit),
+		Kinds:     []string{query.Kind},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query semantic similarity candidates: %w", err)
+	}
+
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+}
+
+func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stindex.SearchHit, query SearchSpecQuery, preferHistorical bool) ([]chunkCandidate, error) {
 	states, err := loadSearchArtifactStateContext(ctx, db, refsForSearchHits(hits))
 	if err != nil {
 		return nil, err
@@ -341,6 +428,31 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stin
 		candidates = candidates[:query.Limit]
 	}
 	return candidates, nil
+}
+
+func buildSearchSpecResult(candidates []chunkCandidate, scoreKind string) *SearchSpecResult {
+	result := &SearchSpecResult{
+		Matches:          make([]SearchSpecMatch, 0, len(candidates)),
+		ScoreKind:        scoreKind,
+		ScoreDescription: SearchSpecScoreDescription(scoreKind),
+		ContentTrust:     resultmeta.UntrustedWorkspaceText(),
+	}
+	for _, candidate := range candidates {
+		result.Matches = append(result.Matches, SearchSpecMatch{
+			Ref:            candidate.Ref,
+			Title:          candidate.Title,
+			SectionHeading: candidate.SectionHeading,
+			Excerpt:        excerpt(candidate.Content),
+			Repo:           candidate.Repo,
+			SourceRef:      candidate.SourceRef,
+			Kind:           candidate.Kind,
+			Status:         candidate.Status,
+			Domain:         candidate.Domain,
+			Score:          candidate.Score,
+			Inference:      candidate.Inference,
+		})
+	}
+	return result
 }
 
 type searchArtifactState struct {

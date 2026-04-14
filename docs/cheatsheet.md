@@ -32,7 +32,7 @@ pituitary schema review-spec --format json      # machine-readable command contr
 ## Analysis
 
 ```sh
-pituitary search-specs --query "rate limiting"  # semantic search
+pituitary search-specs --query "rate limiting"  # hybrid relevance search
 pituitary search-specs --query "auth" --family 0  # search within a spec family
 pituitary check-overlap --path specs/X          # find overlapping specs
 pituitary compare-specs --path specs/A --path specs/B  # side-by-side tradeoff

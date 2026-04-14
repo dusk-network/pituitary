@@ -33,6 +33,12 @@ func TestSearchSpecsReturnsRankedSections(t *testing.T) {
 	if len(result.Matches) == 0 {
 		t.Fatal("SearchSpecs() returned no matches")
 	}
+	if got, want := result.ScoreKind, SearchSpecScoreKindHybridRelevance; got != want {
+		t.Fatalf("result.ScoreKind = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.ScoreDescription, "hybrid relevance") {
+		t.Fatalf("result.ScoreDescription = %q, want hybrid relevance guidance", result.ScoreDescription)
+	}
 	if result.Matches[0].Ref == "" || result.Matches[0].SectionHeading == "" {
 		t.Fatalf("top match = %+v, want stable ref and section heading", result.Matches[0])
 	}
@@ -51,6 +57,40 @@ func TestSearchSpecsReturnsRankedSections(t *testing.T) {
 	}
 	if !found042 {
 		t.Fatalf("SearchSpecs() matches = %+v, want SPEC-042 among results", result.Matches)
+	}
+}
+
+func TestSearchSpecsBySemanticSimilarityReturnsSimilarityScores(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	result, err := SearchSpecsBySemanticSimilarityContext(context.Background(), cfg, SearchSpecQuery{
+		Query:    "Per-Tenant Rate Limiting for Public API Endpoints",
+		Statuses: []string{model.StatusDraft, model.StatusReview, model.StatusAccepted},
+		Limit:    3,
+	})
+	if err != nil {
+		t.Fatalf("SearchSpecsBySemanticSimilarityContext() error = %v", err)
+	}
+	if got, want := result.ScoreKind, SearchSpecScoreKindSemanticSimilarity; got != want {
+		t.Fatalf("result.ScoreKind = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.ScoreDescription, "cosine-style semantic similarity") {
+		t.Fatalf("result.ScoreDescription = %q, want semantic similarity guidance", result.ScoreDescription)
+	}
+	if len(result.Matches) == 0 {
+		t.Fatal("SearchSpecsBySemanticSimilarityContext() returned no matches")
+	}
+	if result.Matches[0].Score < 0.50 {
+		t.Fatalf("top similarity score = %f, want a cosine-similarity-like value", result.Matches[0].Score)
 	}
 }
 

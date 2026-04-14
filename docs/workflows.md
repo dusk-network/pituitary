@@ -46,7 +46,7 @@ Text output now also promotes the strongest per-finding guidance into a short `T
 | `index --dry-run` | Validate config and sources without writing |
 | `status [--check-runtime all] [--show-families]` | Report index state, config, freshness, runtime readiness, spec families |
 | `version` | Print version info |
-| `search-specs --query "..."` | Semantic search across indexed spec sections |
+| `search-specs --query "..."` | Hybrid relevance search across indexed spec sections |
 | `check-overlap --path SPEC` | Detect specs that cover overlapping ground |
 | `compare-specs --path A --path B` | Side-by-side tradeoff analysis |
 | `analyze-impact --path SPEC` | Trace what is affected by a change |

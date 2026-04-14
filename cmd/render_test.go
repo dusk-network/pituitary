@@ -280,11 +280,12 @@ func TestRenderCommandTableSearchSpecs(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"pituitary search-specs: search spec sections semantically",
+		"pituitary search-specs: search spec sections by hybrid relevance",
+		"score semantics: hybrid relevance from fused vector and lexical retrieval; not a cosine similarity percentage",
 		"REF",
 		"TITLE",
 		"SECTION",
-		"SCORE",
+		"RELEVANCE",
 		"SPEC-042",
 		"Tenant-aware rate limiting",
 		"Per-tenant quotas",

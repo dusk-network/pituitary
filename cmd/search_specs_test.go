@@ -37,7 +37,9 @@ func TestRunSearchSpecsJSON(t *testing.T) {
 			} `json:"filters"`
 		} `json:"request"`
 		Result struct {
-			Matches []struct {
+			ScoreKind        string `json:"score_kind"`
+			ScoreDescription string `json:"score_description"`
+			Matches          []struct {
 				Ref            string `json:"ref"`
 				SectionHeading string `json:"section_heading"`
 			} `json:"matches"`
@@ -59,6 +61,12 @@ func TestRunSearchSpecsJSON(t *testing.T) {
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("payload errors = %+v, want none", payload.Errors)
+	}
+	if payload.Result.ScoreKind != "hybrid_relevance" {
+		t.Fatalf("payload result.score_kind = %q, want hybrid_relevance", payload.Result.ScoreKind)
+	}
+	if !strings.Contains(payload.Result.ScoreDescription, "hybrid relevance") {
+		t.Fatalf("payload result.score_description = %q, want hybrid relevance guidance", payload.Result.ScoreDescription)
 	}
 	if len(payload.Result.Matches) == 0 {
 		t.Fatal("payload returned no matches")
@@ -138,11 +146,12 @@ func TestRunSearchSpecsTable(t *testing.T) {
 
 	out := stdout.String()
 	for _, want := range []string{
-		"pituitary search-specs: search spec sections semantically",
+		"pituitary search-specs: search spec sections by hybrid relevance",
+		"score semantics: hybrid relevance from fused vector and lexical retrieval; not a cosine similarity percentage",
 		"REF",
 		"TITLE",
 		"SECTION",
-		"SCORE",
+		"RELEVANCE",
 		"SPEC-008",
 	} {
 		if !strings.Contains(out, want) {
