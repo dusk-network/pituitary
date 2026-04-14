@@ -5,11 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
+	stindex "github.com/dusk-network/stroma/index"
+	ststore "github.com/dusk-network/stroma/store"
 )
 
 // UpdatePreconditionError reports that the existing index is structurally
@@ -37,25 +41,32 @@ type UpdateOptions struct {
 	ComputeDelta bool
 }
 
-// UpdateContextWithOptions performs an update using a rebuild-backed flow that
-// preserves update diff reporting against the existing database.
+// UpdateContextWithOptions performs an index update, using Stroma incremental
+// snapshot updates when the existing index is structurally compatible and
+// falling back to a full rebuild otherwise.
 func UpdateContextWithOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, UpdateOptions{}, nil)
 }
 
-// UpdateWithProgressContextAndOptions performs a rebuild-backed update with
-// progress reporting.
+// UpdateWithProgressContextAndOptions performs an update with progress
+// reporting.
 func UpdateWithProgressContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, UpdateOptions{}, reporter)
 }
 
-// UpdateWithDeltaContextAndOptions performs a rebuild-backed update with
-// progress reporting and governance delta computation.
+// UpdateWithDeltaContextAndOptions performs an update with progress reporting
+// and governance delta computation.
 func UpdateWithDeltaContextAndOptions(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
 	return updateContext(ctx, cfg, records, options, reporter)
 }
 
 func updateContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, options UpdateOptions, reporter RebuildProgressReporter) (*RebuildResult, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	if records == nil {
+		return nil, fmt.Errorf("records are required")
+	}
 	indexPath := cfg.Workspace.ResolvedIndexPath
 
 	info, err := os.Stat(indexPath)
@@ -85,6 +96,20 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	}
 	diff := computeArtifactDiff(storedRefs, records)
 
+	embedder, err := prepareRebuildContext(ctx, cfg, records)
+	if err != nil {
+		return nil, err
+	}
+	dimension, err := embedder.Dimension(ctx)
+	if err != nil {
+		return nil, err
+	}
+	currentSnapshotPath, err := validateIncrementalUpdateEligibilityContext(ctx, db, cfg, embedder, dimension)
+	if err != nil && !IsUpdatePrecondition(err) {
+		return nil, err
+	}
+	shouldFallback := IsUpdatePrecondition(err)
+
 	var oldEdges []snapshotEdge
 	var oldArtifacts []snapshotArtifact
 	if options.ComputeDelta {
@@ -103,33 +128,44 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	closeDB = false
 	db = nil
 
-	result, err := rebuildContext(ctx, cfg, records, RebuildOptions{}, reporter)
+	if shouldFallback {
+		return rebuildUpdateContext(ctx, cfg, records, diff, options, reporter, oldArtifacts, oldEdges)
+	}
+
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), RebuildOptions{})
 	if err != nil {
 		return nil, err
 	}
+	result := summarizeRebuild(records, dimension, reuseState, RebuildOptions{})
+	result.IndexPath = indexPath
 	result.Update = true
-	result.FullRebuild = true
+	result.FullRebuild = false
 	result.AddedCount = len(diff.added)
 	result.UpdatedCount = len(diff.updated)
 	result.RemovedCount = len(diff.removed)
 	result.UnchangedCount = len(diff.unchanged)
 
-	if options.ComputeDelta {
-		newDB, err := OpenReadOnlyContext(ctx, indexPath)
-		if err != nil {
-			return nil, fmt.Errorf("reopen rebuilt index %s: %w", indexPath, err)
+	snapshotPath, cleanupSnapshot, err := updateStromaSnapshotContext(ctx, cfg, records, diff, embedder, reuseState, reporter)
+	if err != nil {
+		if IsUpdatePrecondition(err) {
+			return rebuildUpdateContext(ctx, cfg, records, diff, options, reporter, oldArtifacts, oldEdges)
 		}
-		defer newDB.Close()
+		return nil, err
+	}
+	snapshotPublished := false
+	defer func() {
+		if !snapshotPublished && cleanupSnapshot != nil {
+			cleanupSnapshot()
+		}
+	}()
 
-		newEdges, err := snapshotEdgesContext(ctx, newDB)
-		if err != nil {
-			return nil, fmt.Errorf("snapshot new edges: %w", err)
-		}
-		newArtifacts, err := snapshotSpecArtifactsContext(ctx, newDB)
-		if err != nil {
-			return nil, fmt.Errorf("snapshot new artifacts: %w", err)
-		}
-		result.Delta = computeGovernanceDelta(oldArtifacts, newArtifacts, oldEdges, newEdges)
+	result.ContentFingerprint = contentFingerprint(records)
+	if err := publishBusinessIndexContext(ctx, cfg, records, result, snapshotPath); err != nil {
+		return nil, err
+	}
+	snapshotPublished = true
+	if err := loadUpdateDeltaContext(ctx, indexPath, result, options, oldArtifacts, oldEdges); err != nil {
+		return nil, err
 	}
 
 	return result, nil
@@ -203,7 +239,255 @@ func computeArtifactDiff(stored []storedArtifactRef, records *source.LoadResult)
 		}
 	}
 
+	sort.Strings(diff.added)
+	sort.Strings(diff.updated)
+	sort.Strings(diff.removed)
+	sort.Strings(diff.unchanged)
+
 	return diff
+}
+
+func rebuildUpdateContext(
+	ctx context.Context,
+	cfg *config.Config,
+	records *source.LoadResult,
+	diff artifactDiff,
+	options UpdateOptions,
+	reporter RebuildProgressReporter,
+	oldArtifacts []snapshotArtifact,
+	oldEdges []snapshotEdge,
+) (*RebuildResult, error) {
+	result, err := rebuildContext(ctx, cfg, records, RebuildOptions{}, reporter)
+	if err != nil {
+		return nil, err
+	}
+	result.Update = true
+	result.FullRebuild = true
+	result.AddedCount = len(diff.added)
+	result.UpdatedCount = len(diff.updated)
+	result.RemovedCount = len(diff.removed)
+	result.UnchangedCount = len(diff.unchanged)
+	if err := loadUpdateDeltaContext(ctx, cfg.Workspace.ResolvedIndexPath, result, options, oldArtifacts, oldEdges); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func loadUpdateDeltaContext(ctx context.Context, indexPath string, result *RebuildResult, options UpdateOptions, oldArtifacts []snapshotArtifact, oldEdges []snapshotEdge) error {
+	if !options.ComputeDelta {
+		return nil
+	}
+
+	newDB, err := OpenReadOnlyContext(ctx, indexPath)
+	if err != nil {
+		return fmt.Errorf("reopen rebuilt index %s: %w", indexPath, err)
+	}
+	defer newDB.Close()
+
+	newEdges, err := snapshotEdgesContext(ctx, newDB)
+	if err != nil {
+		return fmt.Errorf("snapshot new edges: %w", err)
+	}
+	newArtifacts, err := snapshotSpecArtifactsContext(ctx, newDB)
+	if err != nil {
+		return fmt.Errorf("snapshot new artifacts: %w", err)
+	}
+	result.Delta = computeGovernanceDelta(oldArtifacts, newArtifacts, oldEdges, newEdges)
+	return nil
+}
+
+func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB, cfg *config.Config, embedder Embedder, dimension int) (string, error) {
+	storedSchemaVersion, err := readRequiredMetadataValueContext(ctx, db, "schema_version")
+	if err != nil {
+		return "", &UpdatePreconditionError{Reason: err.Error()}
+	}
+	if strings.TrimSpace(storedSchemaVersion) != fmt.Sprintf("%d", schemaVersion) {
+		return "", &UpdatePreconditionError{
+			Reason: fmt.Sprintf("index schema_version %q does not match expected schema_version %d", strings.TrimSpace(storedSchemaVersion), schemaVersion),
+			Action: "run `pituitary index --rebuild`",
+		}
+	}
+	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), dimension); err != nil {
+		return "", &UpdatePreconditionError{Reason: err.Error()}
+	}
+
+	snapshotPath, err := stromaSnapshotPathFromDBContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return "", &UpdatePreconditionError{Reason: err.Error()}
+	}
+	info, err := os.Stat(snapshotPath)
+	switch {
+	case os.IsNotExist(err):
+		return "", &UpdatePreconditionError{
+			Reason: fmt.Sprintf("stroma snapshot %s does not exist", snapshotPath),
+			Action: "run `pituitary index --rebuild`",
+		}
+	case err != nil:
+		return "", fmt.Errorf("stat stroma snapshot %s: %w", snapshotPath, err)
+	case info.IsDir():
+		return "", &UpdatePreconditionError{
+			Reason: fmt.Sprintf("stroma snapshot path %s is a directory", snapshotPath),
+			Action: "run `pituitary index --rebuild`",
+		}
+	default:
+		return snapshotPath, nil
+	}
+}
+
+func readRequiredMetadataValueContext(ctx context.Context, db *sql.DB, key string) (string, error) {
+	value, err := readOptionalMetadataValueContext(ctx, db, key)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("index metadata is missing %s; run `pituitary index --rebuild`", key)
+	}
+	return value, nil
+}
+
+func updateStromaSnapshotContext(
+	ctx context.Context,
+	cfg *config.Config,
+	records *source.LoadResult,
+	diff artifactDiff,
+	embedder Embedder,
+	reuseState *reuseState,
+	reporter RebuildProgressReporter,
+) (string, func(), error) {
+	currentSnapshotPath, err := currentStromaSnapshotPathContext(ctx, cfg.Workspace.ResolvedIndexPath)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(diff.added) == 0 && len(diff.updated) == 0 && len(diff.removed) == 0 {
+		return currentSnapshotPath, nil, nil
+	}
+
+	targetSnapshotPath := stromaSnapshotPathForContent(cfg.Workspace.ResolvedIndexPath, contentFingerprint(records))
+	cleanupSnapshot, err := prepareSnapshotUpdateTarget(currentSnapshotPath, targetSnapshotPath)
+	if err != nil {
+		return "", nil, err
+	}
+
+	selected := selectedLoadResultForRefs(records, append(append([]string{}, diff.added...), diff.updated...))
+	emitPlannedRebuildProgress(selected, reuseState, reporter)
+	selectedRecords, err := corpusRecordsFromLoadResult(selected)
+	if err != nil {
+		if cleanupSnapshot != nil {
+			cleanupSnapshot()
+		}
+		return "", nil, err
+	}
+	if _, err := stindex.Update(ctx, selectedRecords, diff.removed, stindex.UpdateOptions{
+		Path:     targetSnapshotPath,
+		Embedder: embedder,
+	}); err != nil {
+		if cleanupSnapshot != nil {
+			cleanupSnapshot()
+		}
+		return "", nil, normalizeStromaUpdateError(currentSnapshotPath, err)
+	}
+	return targetSnapshotPath, cleanupSnapshot, nil
+}
+
+func selectedLoadResultForRefs(records *source.LoadResult, refs []string) *source.LoadResult {
+	selected := &source.LoadResult{}
+	if records == nil || len(refs) == 0 {
+		return selected
+	}
+
+	selected.Sources = append(selected.Sources, records.Sources...)
+	refSet := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		refSet[ref] = struct{}{}
+	}
+	for _, spec := range records.Specs {
+		if _, ok := refSet[spec.Ref]; ok {
+			selected.Specs = append(selected.Specs, spec)
+		}
+	}
+	for _, doc := range records.Docs {
+		if _, ok := refSet[doc.Ref]; ok {
+			selected.Docs = append(selected.Docs, doc)
+		}
+	}
+	return selected
+}
+
+func prepareSnapshotUpdateTarget(currentSnapshotPath, targetSnapshotPath string) (func(), error) {
+	if strings.TrimSpace(currentSnapshotPath) == "" {
+		return nil, &UpdatePreconditionError{
+			Reason: "stroma snapshot metadata is missing",
+			Action: "run `pituitary index --rebuild`",
+		}
+	}
+	if currentSnapshotPath == targetSnapshotPath {
+		return nil, nil
+	}
+	if err := os.Remove(targetSnapshotPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove stale stroma snapshot %s: %w", targetSnapshotPath, err)
+	}
+	if err := copyFile(currentSnapshotPath, targetSnapshotPath); err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = os.Remove(targetSnapshotPath)
+	}, nil
+}
+
+func copyFile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open stroma snapshot %s: %w", srcPath, err)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat stroma snapshot %s: %w", srcPath, err)
+	}
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode())
+	if err != nil {
+		return fmt.Errorf("create stroma snapshot %s: %w", dstPath, err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(dstPath)
+		return fmt.Errorf("copy stroma snapshot to %s: %w", dstPath, err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(dstPath)
+		return fmt.Errorf("close copied stroma snapshot %s: %w", dstPath, err)
+	}
+	return nil
+}
+
+func normalizeStromaUpdateError(snapshotPath string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ststore.IsMissingIndex(err) {
+		return &UpdatePreconditionError{
+			Reason: fmt.Sprintf("stroma snapshot %s does not exist", snapshotPath),
+			Action: "run `pituitary index --rebuild`",
+		}
+	}
+	message := strings.TrimSpace(err.Error())
+	for _, marker := range []string{
+		"schema version mismatch",
+		"embedder fingerprint mismatch",
+		"embedder dimension mismatch",
+		"quantization mismatch",
+		"update embedder is required when adding records",
+	} {
+		if strings.Contains(message, marker) {
+			return &UpdatePreconditionError{
+				Reason: message,
+				Action: "run `pituitary index --rebuild`",
+			}
+		}
+	}
+	return err
 }
 
 // upsertMetadataContext inserts or replaces a metadata key-value pair.

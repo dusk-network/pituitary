@@ -32,6 +32,9 @@ func TestUpdateNoOp(t *testing.T) {
 	if !result.Update {
 		t.Fatal("result.Update should be true")
 	}
+	if result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental update path", result)
+	}
 	if result.AddedCount != 0 {
 		t.Fatalf("added_count = %d, want 0", result.AddedCount)
 	}
@@ -83,6 +86,10 @@ include = ["guides/*.md"]
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalSnapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext() error = %v", err)
+	}
 
 	// Add a new doc.
 	mustWriteFile(t, filepath.Join(repoDir, "docs", "guides", "new-doc.md"), "# New Doc\n\nJust added.\n")
@@ -100,8 +107,24 @@ include = ["guides/*.md"]
 	if result.AddedCount != 1 {
 		t.Fatalf("added_count = %d, want 1", result.AddedCount)
 	}
+	if result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental update path", result)
+	}
 	if result.ArtifactCount != 2 {
 		t.Fatalf("artifact_count = %d, want 2", result.ArtifactCount)
+	}
+	updatedSnapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext() after update error = %v", err)
+	}
+	if updatedSnapshotPath == originalSnapshotPath {
+		t.Fatalf("updated snapshot path = %q, want new content-addressed snapshot", updatedSnapshotPath)
+	}
+	if _, err := os.Stat(originalSnapshotPath); err != nil {
+		t.Fatalf("stat original snapshot %s: %v", originalSnapshotPath, err)
+	}
+	if _, err := os.Stat(updatedSnapshotPath); err != nil {
+		t.Fatalf("stat updated snapshot %s: %v", updatedSnapshotPath, err)
 	}
 
 	db := mustOpenReadOnly(t, indexPath)
@@ -159,6 +182,9 @@ include = ["guides/*.md"]
 
 	if result.RemovedCount != 1 {
 		t.Fatalf("removed_count = %d, want 1", result.RemovedCount)
+	}
+	if result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental update path", result)
 	}
 	if result.ArtifactCount != 1 {
 		t.Fatalf("artifact_count = %d, want 1", result.ArtifactCount)
@@ -218,6 +244,9 @@ include = ["guides/*.md"]
 
 	if result.UpdatedCount != 1 {
 		t.Fatalf("updated_count = %d, want 1", result.UpdatedCount)
+	}
+	if result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental update path", result)
 	}
 	if result.AddedCount != 0 {
 		t.Fatalf("added_count = %d, want 0", result.AddedCount)
@@ -424,6 +453,10 @@ include = ["guides/*.md"]
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalSnapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext() error = %v", err)
+	}
 
 	// Change the source config without changing actual content.
 	cfg.Sources[0].Include = []string{"guides/*.md", "runbooks/*.md"}
@@ -442,6 +475,9 @@ include = ["guides/*.md"]
 	if result.UnchangedCount != 1 {
 		t.Fatalf("unchanged_count = %d, want 1", result.UnchangedCount)
 	}
+	if result.FullRebuild {
+		t.Fatalf("result = %+v, want incremental update path", result)
+	}
 
 	db := mustOpenReadOnly(t, indexPath)
 	defer db.Close()
@@ -456,6 +492,13 @@ include = ["guides/*.md"]
 	}
 	if status.State != "fresh" {
 		t.Fatalf("freshness state = %q after update, want fresh", status.State)
+	}
+	currentSnapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext() after update error = %v", err)
+	}
+	if currentSnapshotPath != originalSnapshotPath {
+		t.Fatalf("snapshot path = %q, want unchanged %q when only source fingerprint changed", currentSnapshotPath, originalSnapshotPath)
 	}
 }
 

@@ -6,12 +6,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
+	stindex "github.com/dusk-network/stroma/index"
 )
 
 func TestSearchSpecsReturnsRankedSections(t *testing.T) {
@@ -389,6 +391,29 @@ Locality continuity kernel semantics governed earlier drafts.
 	}
 	if !strings.Contains(strings.ToLower(historicalResult.Matches[0].SectionHeading), "historical provenance") {
 		t.Fatalf("historical top match = %+v, want historical provenance section when query asks for history", historicalResult.Matches[0])
+	}
+}
+
+func TestHistoricalSectionRerankerDownranksHistoricalCandidates(t *testing.T) {
+	t.Parallel()
+
+	candidates := []stindex.SearchHit{
+		{ChunkID: 2, Ref: "SPEC-LOCALITY", Heading: "Historical provenance", Score: 0.9},
+		{ChunkID: 1, Ref: "SPEC-LOCALITY", Heading: "Requirements", Score: 0.8},
+	}
+
+	reranked, err := historicalSectionReranker{}.Rerank(context.Background(), "locality continuity semantics", candidates)
+	if err != nil {
+		t.Fatalf("Rerank() error = %v", err)
+	}
+	if got := reranked[0].Heading; got != "Requirements" {
+		t.Fatalf("top reranked heading = %q, want active section ahead of historical provenance", got)
+	}
+	if !reflect.DeepEqual(reranked, []stindex.SearchHit{
+		{ChunkID: 1, Ref: "SPEC-LOCALITY", Heading: "Requirements", Score: 0.8},
+		{ChunkID: 2, Ref: "SPEC-LOCALITY", Heading: "Historical provenance", Score: 0.9},
+	}) {
+		t.Fatalf("reranked candidates = %+v", reranked)
 	}
 }
 

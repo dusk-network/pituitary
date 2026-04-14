@@ -90,6 +90,29 @@ type chunkCandidate struct {
 	Inference      *model.InferenceConfidence
 }
 
+type historicalSectionReranker struct {
+	preferHistorical bool
+}
+
+func (r historicalSectionReranker) Rerank(_ context.Context, _ string, candidates []stindex.SearchHit) ([]stindex.SearchHit, error) {
+	reranked := append([]stindex.SearchHit(nil), candidates...)
+	sort.SliceStable(reranked, func(i, j int) bool {
+		leftScore := ranking.AdjustHistoricalSectionScore(reranked[i].Score, reranked[i].Heading, r.preferHistorical)
+		rightScore := ranking.AdjustHistoricalSectionScore(reranked[j].Score, reranked[j].Heading, r.preferHistorical)
+		switch {
+		case leftScore != rightScore:
+			return leftScore > rightScore
+		case reranked[i].Ref != reranked[j].Ref:
+			return reranked[i].Ref < reranked[j].Ref
+		case reranked[i].Heading != reranked[j].Heading:
+			return reranked[i].Heading < reranked[j].Heading
+		default:
+			return reranked[i].ChunkID < reranked[j].ChunkID
+		}
+	})
+	return reranked, nil
+}
+
 // ToQuery normalizes the transport request into an executable search query.
 func (r SearchSpecRequest) ToQuery() (SearchSpecQuery, error) {
 	statuses, err := NormalizeSearchStatuses(r.Filters.Statuses)
@@ -345,6 +368,7 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stin
 		Limit:    searchCandidateLimit(query.Limit),
 		Kinds:    []string{query.Kind},
 		Embedder: embedder,
+		Reranker: historicalSectionReranker{preferHistorical: preferHistorical},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("query search candidates: %w", err)
