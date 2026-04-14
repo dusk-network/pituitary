@@ -280,7 +280,7 @@ func loadUpdateDeltaContext(ctx context.Context, indexPath string, result *Rebui
 
 	newDB, err := OpenReadOnlyContext(ctx, indexPath)
 	if err != nil {
-		return fmt.Errorf("reopen rebuilt index %s: %w", indexPath, err)
+		return fmt.Errorf("reopen updated index %s: %w", indexPath, err)
 	}
 	defer newDB.Close()
 
@@ -381,7 +381,7 @@ func updateStromaSnapshotContext(
 		if cleanupSnapshot != nil {
 			cleanupSnapshot()
 		}
-		return "", nil, normalizeStromaUpdateError(currentSnapshotPath, err)
+		return "", nil, normalizeStromaUpdateError(targetSnapshotPath, err)
 	}
 	return targetSnapshotPath, cleanupSnapshot, nil
 }
