@@ -75,6 +75,8 @@ func (e *openAICompatibleEmbedder) EmbedQueries(ctx context.Context, texts []str
 }
 
 func (e *openAICompatibleEmbedder) EmbedDocumentChunks(ctx context.Context, _ string, chunks []string) ([][]float64, error) {
+	// Current OpenAI-compatible providers embed each chunk independently, so
+	// document context is intentionally unused.
 	return e.embedTexts(ctx, "document", chunks)
 }
 

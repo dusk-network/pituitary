@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
+	ststore "github.com/dusk-network/stroma/store"
 )
 
 func TestUpdateNoOp(t *testing.T) {
@@ -526,15 +528,59 @@ func TestUpdatePreservesDBOnFailure(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 
-	// Verify the DB was restored from backup.
+	// Verify the staged rebuild never replaced the live DB.
 	hashAfter := fileHash(t, cfg.Workspace.ResolvedIndexPath)
 	if hashBefore != hashAfter {
-		t.Fatal("DB file hash changed after failed update; backup should have been restored")
+		t.Fatal("DB file hash changed after failed update; live DB should remain unchanged")
 	}
 
-	// Verify no .bak file left behind.
+	// Verify no legacy .bak file was left behind.
 	if _, err := os.Stat(cfg.Workspace.ResolvedIndexPath + ".bak"); !os.IsNotExist(err) {
 		t.Fatal(".bak file should not exist after cleanup")
+	}
+}
+
+func TestNormalizeStromaUpdateErrorTreatsMissingSnapshotAsPrecondition(t *testing.T) {
+	t.Parallel()
+
+	err := normalizeStromaUpdateError("snapshot.db", &ststore.MissingIndexError{Path: "other.db"})
+	if !IsUpdatePrecondition(err) {
+		t.Fatalf("expected UpdatePreconditionError, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot.db") {
+		t.Fatalf("normalized error = %q, want snapshot path", err)
+	}
+	if !strings.Contains(err.Error(), "pituitary index --rebuild") {
+		t.Fatalf("normalized error = %q, want rebuild guidance", err)
+	}
+}
+
+func TestNormalizeStromaUpdateErrorTreatsCompatibilityErrorsAsPreconditions(t *testing.T) {
+	t.Parallel()
+
+	markers := []string{
+		"schema version mismatch",
+		"embedder fingerprint mismatch",
+		"embedder dimension mismatch",
+		"quantization mismatch",
+		"update embedder is required when adding records",
+	}
+	for _, marker := range markers {
+		marker := marker
+		t.Run(marker, func(t *testing.T) {
+			t.Parallel()
+
+			err := normalizeStromaUpdateError("snapshot.db", fmt.Errorf("stroma update failed: %s", marker))
+			if !IsUpdatePrecondition(err) {
+				t.Fatalf("expected UpdatePreconditionError, got %v", err)
+			}
+			if !strings.Contains(err.Error(), marker) {
+				t.Fatalf("normalized error = %q, want marker %q", err, marker)
+			}
+			if !strings.Contains(err.Error(), "pituitary index --rebuild") {
+				t.Fatalf("normalized error = %q, want rebuild guidance", err)
+			}
+		})
 	}
 }
 

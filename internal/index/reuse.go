@@ -30,8 +30,7 @@ type artifactChunkPlan struct {
 	artifactUnchanged  bool
 }
 
-func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, currentSourceFingerprint string, options RebuildOptions) (*reuseState, error) {
-	_ = currentSourceFingerprint
+func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, options RebuildOptions) (*reuseState, error) {
 	if options.Full {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}

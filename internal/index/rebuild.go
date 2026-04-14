@@ -107,7 +107,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +139,16 @@ func prepareDryRunPreflightContext(ctx context.Context, indexPath string, dimens
 	return probeStagingDatabaseContext(ctx, probePath, dimension)
 }
 
+func validateBusinessIndexPublishPreflight(indexPath string) error {
+	if _, err := ensureIndexDirectory(indexPath); err != nil {
+		return err
+	}
+	if err := validateIndexTargetPath(indexPath); err != nil {
+		return err
+	}
+	return validateStaleStagePath(indexPath + ".new")
+}
+
 // RebuildContext writes a fresh staging database and atomically swaps it into place.
 func RebuildContext(ctx context.Context, cfg *config.Config, records *source.LoadResult) (*RebuildResult, error) {
 	return RebuildContextWithOptions(ctx, cfg, records, RebuildOptions{})
@@ -168,14 +178,14 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
 
 	contentFP := contentFingerprint(records)
 	snapshotPath := stromaSnapshotPathForContent(indexPath, contentFP)
-	if _, err := prepareStagingPath(indexPath); err != nil {
+	if err := validateBusinessIndexPublishPreflight(indexPath); err != nil {
 		return nil, err
 	}
 

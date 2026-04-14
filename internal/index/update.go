@@ -132,7 +132,7 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 		return rebuildUpdateContext(ctx, cfg, records, diff, options, reporter, oldArtifacts, oldEdges)
 	}
 
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, sourceFingerprint(cfg), RebuildOptions{})
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, RebuildOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	result.RemovedCount = len(diff.removed)
 	result.UnchangedCount = len(diff.unchanged)
 
-	snapshotPath, cleanupSnapshot, err := updateStromaSnapshotContext(ctx, cfg, records, diff, embedder, reuseState, reporter)
+	snapshotPath, cleanupSnapshot, err := updateStromaSnapshotContext(ctx, cfg, records, diff, currentSnapshotPath, embedder, reuseState, reporter)
 	if err != nil {
 		if IsUpdatePrecondition(err) {
 			return rebuildUpdateContext(ctx, cfg, records, diff, options, reporter, oldArtifacts, oldEdges)
@@ -350,14 +350,11 @@ func updateStromaSnapshotContext(
 	cfg *config.Config,
 	records *source.LoadResult,
 	diff artifactDiff,
+	currentSnapshotPath string,
 	embedder Embedder,
 	reuseState *reuseState,
 	reporter RebuildProgressReporter,
 ) (string, func(), error) {
-	currentSnapshotPath, err := currentStromaSnapshotPathContext(ctx, cfg.Workspace.ResolvedIndexPath)
-	if err != nil {
-		return "", nil, err
-	}
 	if len(diff.added) == 0 && len(diff.updated) == 0 && len(diff.removed) == 0 {
 		return currentSnapshotPath, nil, nil
 	}

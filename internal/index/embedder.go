@@ -134,6 +134,8 @@ func (e *fixtureEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][
 }
 
 func (e *fixtureEmbedder) EmbedDocumentChunks(ctx context.Context, _ string, chunks []string) ([][]float64, error) {
+	// Current fixture embeddings treat each chunk independently, so document
+	// context is intentionally unused.
 	return e.base.EmbedDocuments(ctx, chunks)
 }
 
