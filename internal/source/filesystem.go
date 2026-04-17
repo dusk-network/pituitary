@@ -11,9 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/sdk"
@@ -229,17 +229,17 @@ func isNestedBundle(parent, child string) bool {
 }
 
 type rawSpecBundle struct {
-	ID         string
-	Title      string
-	Status     string
-	Domain     string
-	Authors    []string
-	Tags       []string
-	Body       string
-	DependsOn  []string
-	Supersedes []string
-	RelatesTo  []string
-	AppliesTo  []string
+	ID         string   `toml:"id"`
+	Title      string   `toml:"title"`
+	Status     string   `toml:"status"`
+	Domain     string   `toml:"domain"`
+	Authors    []string `toml:"authors"`
+	Tags       []string `toml:"tags"`
+	Body       string   `toml:"body"`
+	DependsOn  []string `toml:"depends_on"`
+	Supersedes []string `toml:"supersedes"`
+	RelatesTo  []string `toml:"relates_to"`
+	AppliesTo  []string `toml:"applies_to"`
 }
 
 func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string) (model.SpecRecord, error) {
@@ -828,197 +828,46 @@ func repoScopedArtifactRef(prefix, relativePath, repoID, primaryRepoID string) s
 
 func parseSpecBundle(contents []byte) (rawSpecBundle, error) {
 	var spec rawSpecBundle
-	var activeArrayKey string
-	seenKeys := map[string]int{}
-
-	scanner := bufio.NewScanner(bytes.NewReader(contents))
-	scanner.Buffer(make([]byte, 0, 64*1024), maxScannerTokenSize(len(contents)))
-	for lineNo := 1; scanner.Scan(); lineNo++ {
-		line := strings.TrimSpace(stripComment(scanner.Text()))
-		if line == "" {
-			continue
-		}
-
-		if activeArrayKey != "" {
-			if line == "]" {
-				activeArrayKey = ""
-				continue
-			}
-			values, err := parseQuotedValues(line)
-			if err != nil {
-				return rawSpecBundle{}, fmt.Errorf("line %d: %s: %w", lineNo, activeArrayKey, err)
-			}
-			if err := assignSpecArrayField(&spec, activeArrayKey, values); err != nil {
-				return rawSpecBundle{}, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return rawSpecBundle{}, fmt.Errorf("line %d: expected key = value", lineNo)
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if err := markSpecDuplicateKey(seenKeys, key, lineNo); err != nil {
-			return rawSpecBundle{}, err
-		}
-
-		if value == "[" {
-			if !isSpecArrayField(key) {
-				return rawSpecBundle{}, fmt.Errorf("line %d: unsupported array field %q", lineNo, key)
-			}
-			activeArrayKey = key
-			if err := assignSpecArrayField(&spec, key, nil); err != nil {
-				return rawSpecBundle{}, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-			continue
-		}
-		if strings.HasPrefix(value, "[") {
-			if !isSpecArrayField(key) {
-				return rawSpecBundle{}, fmt.Errorf("line %d: unsupported array field %q", lineNo, key)
-			}
-			values, err := parseQuotedValues(value)
-			if err != nil {
-				return rawSpecBundle{}, fmt.Errorf("line %d: %s: %w", lineNo, key, err)
-			}
-			if err := assignSpecArrayField(&spec, key, values); err != nil {
-				return rawSpecBundle{}, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-			continue
-		}
-
-		parsed, err := parseQuotedString(value)
-		if err != nil {
-			return rawSpecBundle{}, fmt.Errorf("line %d: %s: %w", lineNo, key, err)
-		}
-		if err := assignSpecScalarField(&spec, key, parsed); err != nil {
-			return rawSpecBundle{}, fmt.Errorf("line %d: %w", lineNo, err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	metadata, err := toml.NewDecoder(bytes.NewReader(contents)).Decode(&spec)
+	if err != nil {
 		return rawSpecBundle{}, err
 	}
-	if activeArrayKey != "" {
-		return rawSpecBundle{}, fmt.Errorf("unterminated array for %q", activeArrayKey)
+	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
+		return rawSpecBundle{}, unknownSpecBundleFieldError(metadata, undecoded)
 	}
-
 	return spec, nil
 }
 
-func markSpecDuplicateKey(seen map[string]int, key string, lineNo int) error {
-	if firstLine, ok := seen[key]; ok {
-		return fmt.Errorf("line %d: duplicate %s; first defined at line %d", lineNo, key, firstLine)
-	}
-	seen[key] = lineNo
-	return nil
-}
-
-func assignSpecScalarField(spec *rawSpecBundle, key, value string) error {
-	switch key {
-	case "id":
-		spec.ID = value
-	case "title":
-		spec.Title = value
-	case "status":
-		spec.Status = value
-	case "domain":
-		spec.Domain = value
-	case "body":
-		spec.Body = value
-	default:
-		return fmt.Errorf("unsupported field %q", key)
-	}
-	return nil
-}
-
-func isSpecArrayField(key string) bool {
-	switch key {
-	case "authors", "tags", "depends_on", "supersedes", "relates_to", "applies_to":
-		return true
-	default:
-		return false
-	}
-}
-
-func assignSpecArrayField(spec *rawSpecBundle, key string, values []string) error {
-	switch key {
-	case "authors":
-		spec.Authors = append(spec.Authors, values...)
-	case "tags":
-		spec.Tags = append(spec.Tags, values...)
-	case "depends_on":
-		spec.DependsOn = append(spec.DependsOn, values...)
-	case "supersedes":
-		spec.Supersedes = append(spec.Supersedes, values...)
-	case "relates_to":
-		spec.RelatesTo = append(spec.RelatesTo, values...)
-	case "applies_to":
-		spec.AppliesTo = append(spec.AppliesTo, values...)
-	default:
-		return fmt.Errorf("unsupported array field %q", key)
-	}
-	return nil
-}
-
-func parseQuotedValues(value string) ([]string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, fmt.Errorf("expected quoted string")
-	}
-	if strings.HasPrefix(value, "[") {
-		if !strings.HasSuffix(value, "]") {
-			return nil, fmt.Errorf("unterminated array")
-		}
-		value = strings.TrimSpace(value[1 : len(value)-1])
-	}
-
-	var values []string
-	for {
-		value = strings.TrimSpace(value)
-		switch {
-		case value == "":
-			return values, nil
-		case strings.HasPrefix(value, ","):
-			value = value[1:]
+// unknownSpecBundleFieldError returns a stable error for the lexicographically
+// first unknown field in a spec.toml bundle, distinguishing arrays from
+// scalars via metadata.Type so downstream messages match pre-refactor UX.
+func unknownSpecBundleFieldError(metadata toml.MetaData, keys []toml.Key) error {
+	names := make([]string, 0, len(keys))
+	types := map[string]string{}
+	for _, key := range keys {
+		if len(key) == 0 {
 			continue
-		case strings.HasPrefix(value, "]"):
-			value = strings.TrimSpace(value[1:])
-			if value != "" {
-				return nil, fmt.Errorf("unexpected trailing content %q", value)
-			}
-			return values, nil
-		case !strings.HasPrefix(value, "\""):
-			return nil, fmt.Errorf("expected quoted string")
 		}
-
-		quoted := nextQuotedString(value)
-		parsed, err := strconv.Unquote(quoted)
-		if err != nil {
-			return nil, err
+		name := strings.Join(key, ".")
+		if _, seen := types[name]; seen {
+			continue
 		}
-		values = append(values, parsed)
-		value = value[len(quoted):]
+		names = append(names, name)
+		types[name] = metadata.Type(key...)
 	}
-}
-
-func nextQuotedString(value string) string {
-	escaped := false
-	for i := 1; i < len(value); i++ {
-		switch {
-		case escaped:
-			escaped = false
-		case value[i] == '\\':
-			escaped = true
-		case value[i] == '"':
-			return value[:i+1]
-		}
+	if len(names) == 0 {
+		// Defensive: reachable only if the decoder reports undecoded keys that
+		// are all empty, which BurntSushi/toml should never produce. Keep the
+		// diagnostic explicit so the root cause is traceable rather than
+		// silently emitting a blank field name.
+		return fmt.Errorf("internal: decoder returned undecoded keys with no name components")
 	}
-	return value
-}
-
-func parseQuotedString(value string) (string, error) {
-	return strconv.Unquote(value)
+	sort.Strings(names)
+	first := names[0]
+	if types[first] == "Array" {
+		return fmt.Errorf("unsupported array field %q", first)
+	}
+	return fmt.Errorf("unsupported field %q", first)
 }
 
 func fileSourceRef(workspaceRoot, path string) string {
@@ -1046,30 +895,6 @@ func joinedContentHash(parts ...[]byte) string {
 
 func contentHash(body []byte) string {
 	return joinedContentHash(body)
-}
-
-func stripComment(line string) string {
-	var builder strings.Builder
-	inString := false
-	escaped := false
-	for _, r := range line {
-		switch {
-		case escaped:
-			builder.WriteRune(r)
-			escaped = false
-		case r == '\\':
-			builder.WriteRune(r)
-			escaped = true
-		case r == '"':
-			builder.WriteRune(r)
-			inString = !inString
-		case r == '#' && !inString:
-			return builder.String()
-		default:
-			builder.WriteRune(r)
-		}
-	}
-	return builder.String()
 }
 
 func pathWithinRoot(root, path string) bool {
