@@ -46,13 +46,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 			InlineFlagsSet: func(_ *flag.FlagSet) bool {
 				return strings.TrimSpace(specRef) != "" || strings.TrimSpace(specPath) != ""
 			},
-			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.AnalyzeImpactRequest, error) {
-				req, err := loadWorkspaceScopedJSONFile[analysis.AnalyzeImpactRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
-				if err != nil {
-					return nil, err
-				}
-				return &req, nil
-			},
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.AnalyzeImpactRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.AnalyzeImpactRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)

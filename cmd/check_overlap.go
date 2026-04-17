@@ -47,13 +47,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 					strings.TrimSpace(specPath) != "" ||
 					strings.TrimSpace(specRecordFile) != ""
 			},
-			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.OverlapRequest, error) {
-				req, err := loadWorkspaceScopedJSONFile[analysis.OverlapRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
-				if err != nil {
-					return nil, err
-				}
-				return &req, nil
-			},
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.OverlapRequest],
 			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.OverlapRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)

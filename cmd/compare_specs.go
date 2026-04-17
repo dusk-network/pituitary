@@ -50,13 +50,7 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 			InlineFlagsSet: func(_ *flag.FlagSet) bool {
 				return len(specRefs) > 0 || len(specPaths) > 0
 			},
-			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.CompareRequest, error) {
-				req, err := loadWorkspaceScopedJSONFile[analysis.CompareRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
-				if err != nil {
-					return nil, err
-				}
-				return &req, nil
-			},
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.CompareRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.CompareRequest, error) {
 				req := analysis.CompareRequest{}
 				switch {

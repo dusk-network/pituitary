@@ -42,13 +42,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 					strings.TrimSpace(specPath) != "" ||
 					strings.TrimSpace(specRecordFile) != ""
 			},
-			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.ReviewRequest, error) {
-				req, err := loadWorkspaceScopedJSONFile[analysis.ReviewRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
-				if err != nil {
-					return nil, err
-				}
-				return &req, nil
-			},
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.ReviewRequest],
 			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.ReviewRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
