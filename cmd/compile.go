@@ -59,11 +59,9 @@ func runCompileContext(ctx context.Context, args []string, stdout, stderr io.Wri
 				return req, nil
 			},
 			Execute: func(ctx context.Context, cfgPath string, req compileCLIRequest, format string) (compileCLIRequest, *app.CompileResult, *app.Issue) {
+				// Normalize already gates non-text runs that lack both flags,
+				// so text-mode without --yes is the dry-run default.
 				apply := req.Yes && !req.DryRun
-				// In text mode without --dry-run or --yes, default to dry-run behavior with a hint.
-				if format == commandFormatText && !req.DryRun && !req.Yes {
-					apply = false
-				}
 				response := app.CompileTerminology(ctx, cfgPath, app.CompileRequest{
 					Scope: req.Scope,
 					Apply: apply,

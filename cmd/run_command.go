@@ -48,8 +48,10 @@ type commandRun[Req any, Res any] struct {
 	LoadRequestFile func(ctx context.Context, cfg *config.Config, trimmedPath string) (*Req, error)
 
 	// BuildRequest builds the request from the inline flags. cfg is non-nil
-	// iff Options.ConfigForFlags is true. positional holds any positional args
-	// captured under Options.ExactPositional. Required.
+	// iff Options.ConfigForFlags is true. positional holds all remaining
+	// positional args after flag parsing; Options.ExactPositional and
+	// Options.AcceptsPositional only constrain how many are allowed.
+	// Required.
 	BuildRequest func(ctx context.Context, cfg *config.Config, resolvedConfigPath string, positional []string) (Req, error)
 
 	// Normalize (optional) runs after the request is composed, before Execute,
@@ -84,8 +86,8 @@ type commandRunOptions struct {
 	// ExactPositional is set.
 	AcceptsPositional bool
 	// ExactPositional, when > 0, requires exactly that many positional
-	// arguments. Mutually exclusive with AcceptsPositional; takes precedence
-	// when both are set. The captured args are passed to BuildRequest.
+	// arguments and takes precedence over AcceptsPositional when both are
+	// set. The captured args are passed to BuildRequest.
 	ExactPositional int
 	// Standalone, when true, disables the shared --config flag and omits the
 	// "shared config resolution" help line. The resolved config path is still
