@@ -11,6 +11,37 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 )
 
+func TestRunCheckOverlapRejectsSpecRefAndPath(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runCheckOverlap([]string{
+			"--spec-ref", "SPEC-042",
+			"--path", "some/spec.toml",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckOverlap() exit code = %d, want 2", exitCode)
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal mutex payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if !strings.Contains(payload.Errors[0].Message, "exactly one of --path, --spec-ref") {
+		t.Fatalf("errors[0].message = %q, want mutex guard message", payload.Errors[0].Message)
+	}
+}
+
 func TestRunCheckOverlapWithSpecRefJSON(t *testing.T) {
 	repo := writeSearchWorkspace(t)
 

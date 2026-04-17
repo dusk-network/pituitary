@@ -22,111 +22,61 @@ func runCheckOverlap(args []string, stdout, stderr io.Writer) int {
 }
 
 func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("check-overlap", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-overlap", "pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]")
-
 	var (
 		specRef        string
 		specPath       string
 		specRecordFile string
-		requestFile    string
-		format         string
-		configPath     string
 	)
-	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
-	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
-	fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
-	fs.StringVar(&requestFile, "request-file", "", "path to overlap request JSON, or - for stdin")
-	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
-	fs.StringVar(&configPath, "config", "", "path to workspace config")
 
-	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	} else if handled {
-		return 0
-	}
-	if fs.NArg() != 0 {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
-		}, 2)
-	}
-
-	if err := validateCLIFormat("check-overlap", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	trimmedSpecRef := strings.TrimSpace(specRef)
-	trimmedSpecPath := strings.TrimSpace(specPath)
-	trimmedSpecRecordFile := strings.TrimSpace(specRecordFile)
-	trimmedRequestFile := strings.TrimSpace(requestFile)
-	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedSpecRecordFile, trimmedRequestFile) > 1 {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: "exactly one of --path, --spec-ref, --spec-record-file, or --request-file is allowed",
-		}, 2)
-	}
-	var cfg *config.Config
-	if trimmedSpecPath != "" || trimmedSpecRecordFile != "" || trimmedRequestFile != "" {
-		cfg, err = config.Load(resolvedConfigPath)
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
-		}
-	}
-	if trimmedRequestFile != "" {
-		request, err := loadWorkspaceScopedJSONFile[analysis.OverlapRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-				Code:    "validation_error",
-				Message: err.Error(),
-			}, 2)
-		}
-		operation := app.CheckOverlap(ctx, resolvedConfigPath, request)
-		if operation.Issue != nil {
-			return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
-		}
-		return writeCLISuccess(stdout, stderr, format, "check-overlap", operation.Request, operation.Result, nil)
-	}
-	if trimmedSpecPath != "" {
-		trimmedSpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
-		if err != nil {
-			return writeSpecPathResolutionError(stdout, stderr, format, "check-overlap", nil, err)
-		}
-	}
-	workspaceRoot := ""
-	if cfg != nil {
-		workspaceRoot = cfg.Workspace.RootPath
-	}
-	request, err := overlapRequestFromFlagsContext(workspaceRoot, trimmedSpecRef, trimmedSpecRecordFile)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-
-	operation := app.CheckOverlap(ctx, resolvedConfigPath, request)
-	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "check-overlap", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
-	}
-
-	return writeCLISuccess(stdout, stderr, format, "check-overlap", operation.Request, operation.Result, nil)
+	return runCommand[analysis.OverlapRequest, analysis.OverlapResult](
+		ctx, args, stdout, stderr,
+		commandRun[analysis.OverlapRequest, analysis.OverlapResult]{
+			Name:  "check-overlap",
+			Usage: "pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]",
+			Options: commandRunOptions{
+				RequestFile:    true,
+				ConfigForFile:  true,
+				ConfigForFlags: true,
+			},
+			BindFlags: func(fs *flag.FlagSet) {
+				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
+				fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
+				fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
+			},
+			InlineFlagsSet: func(_ *flag.FlagSet) bool {
+				return strings.TrimSpace(specRef) != "" ||
+					strings.TrimSpace(specPath) != "" ||
+					strings.TrimSpace(specRecordFile) != ""
+			},
+			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.OverlapRequest, error) {
+				req, err := loadWorkspaceScopedJSONFile[analysis.OverlapRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
+				if err != nil {
+					return nil, err
+				}
+				return &req, nil
+			},
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.OverlapRequest, error) {
+				trimmedSpecRef := strings.TrimSpace(specRef)
+				trimmedSpecPath := strings.TrimSpace(specPath)
+				trimmedRecord := strings.TrimSpace(specRecordFile)
+				if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedRecord) > 1 {
+					return analysis.OverlapRequest{}, fmt.Errorf("exactly one of --path, --spec-ref, --spec-record-file, or --request-file is allowed")
+				}
+				if trimmedSpecPath != "" {
+					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
+					if err != nil {
+						return analysis.OverlapRequest{}, specPathResolutionError(err)
+					}
+					trimmedSpecRef = resolved
+				}
+				return overlapRequestFromFlagsContext(cfg.Workspace.RootPath, trimmedSpecRef, trimmedRecord)
+			},
+			Execute: func(ctx context.Context, cfgPath string, req analysis.OverlapRequest) (analysis.OverlapRequest, *analysis.OverlapResult, *app.Issue) {
+				op := app.CheckOverlap(ctx, cfgPath, req)
+				return op.Request, op.Result, op.Issue
+			},
+		},
+	)
 }
 
 func overlapRequestFromFlagsContext(workspaceRoot, specRef, specRecordFile string) (analysis.OverlapRequest, error) {
