@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	htemplate "html/template"
 	"io"
 	"strings"
 
@@ -128,6 +129,256 @@ summary {
   border-left: 3px solid #eadfca;
 }
 </style>`
+
+func renderReviewResult(w io.Writer, result *analysis.ReviewResult) {
+	p := presentationForWriter(w)
+	headerSuffix := " · " + p.cyan(result.SpecRef)
+	fmt.Fprintln(w, p.headerLine("review-spec", headerSuffix))
+	if result.Overlap != nil && strings.TrimSpace(result.Overlap.Candidate.Title) != "" {
+		fmt.Fprintf(w, "    %s\n", p.dim(result.Overlap.Candidate.Title))
+	}
+	fmt.Fprintln(w)
+
+	if result.Overlap != nil {
+		fmt.Fprintf(w, "  %s   %d specs · recommendation: %s\n", p.white("OVERLAP"), len(result.Overlap.Overlaps), result.Overlap.Recommendation)
+		if len(result.Overlap.Overlaps) == 0 {
+			fmt.Fprintf(w, "  %s %s\n", p.treeLast(), p.dim("no overlapping specs detected"))
+		} else {
+			for i, overlap := range result.Overlap.Overlaps {
+				fmt.Fprintf(w, "  %s %s  %s  %s\n", p.treeBranch(i == len(result.Overlap.Overlaps)-1), p.cyan(overlap.Ref), fmt.Sprintf("%.3f", overlap.Score), overlap.Relationship)
+			}
+		}
+		fmt.Fprintln(w)
+	}
+
+	if result.Impact != nil {
+		fmt.Fprintf(w, "  %s    %d specs · %d refs · %d docs\n", p.white("IMPACT"), len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs))
+		items := reviewImpactLines(result.Impact)
+		for i, item := range items {
+			fmt.Fprintf(w, "  %s %s\n", p.treeBranch(i == len(items)-1), item)
+		}
+		fmt.Fprintln(w)
+	}
+
+	driftAssessments := reviewDocDriftAssessments(result.DocDrift)
+	fmt.Fprintf(w, "  %s %d item%s · %d remediation%s\n", p.white("DOC DRIFT"), len(driftAssessments), pluralSuffix(len(driftAssessments)), reviewRemediationSuggestionCount(result.DocRemediation), pluralSuffix(reviewRemediationSuggestionCount(result.DocRemediation)))
+	if len(driftAssessments) == 0 {
+		fmt.Fprintf(w, "  %s %s\n", p.treeLast(), p.dim("no drifting docs detected"))
+	} else {
+		for i, assessment := range driftAssessments {
+			fmt.Fprintf(w, "  %s %s  %s\n", p.treeBranch(i == len(driftAssessments)-1), p.cyan(repoPathLabel(assessment.Repo, preferredDocLabel(assessment.DocRef, assessment.SourceRef))), driftAssessmentBadge(p, assessment.Status))
+			if suggestions := remediationItemsByDocRef(result.DocRemediation)[assessment.DocRef]; len(suggestions) > 0 {
+				fmt.Fprintf(w, "     %s %d suggested edits %s\n", p.arrow(), len(suggestions), p.dim("(see check-doc-drift for detail)"))
+			}
+		}
+	}
+	fmt.Fprintln(w)
+
+	if result.Comparison != nil {
+		fmt.Fprintf(w, "  %s  prefer %s as the primary reference\n", p.white("COMPARISON"), p.cyan(result.SpecRef))
+	} else {
+		fmt.Fprintf(w, "  %s  %s\n", p.white("COMPARISON"), p.dim("none"))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %s  run review-spec --format html for the full evidence report\n", p.info())
+}
+
+func renderReviewMarkdown(w io.Writer, result *analysis.ReviewResult) {
+	renderReviewMarkdownSpecSection(w, result)
+	renderReviewMarkdownSummarySection(w, result)
+	renderReviewMarkdownActionsSection(w, result)
+	renderReviewMarkdownOverlapSection(w, result)
+	renderReviewMarkdownComparisonSection(w, result)
+	renderReviewMarkdownImpactSection(w, result)
+	renderReviewMarkdownDocDriftSection(w, result)
+	renderReviewMarkdownDocRemediationSection(w, result)
+}
+
+func renderReviewHTML(w io.Writer, result *analysis.ReviewResult) {
+	escape := htemplate.HTMLEscapeString
+	driftAssessments := reviewDocDriftAssessments(result.DocDrift)
+
+	renderReviewHTMLDocumentStart(w, result, escape)
+	renderReviewHTMLHeroSection(w, result, escape)
+	renderReviewHTMLSummaryGrid(w, result, escape)
+	renderReviewHTMLStatsSection(w, result, driftAssessments, escape)
+	renderReviewHTMLOverlapSection(w, result, escape)
+	renderReviewHTMLComparisonSection(w, result, escape)
+	renderReviewHTMLImpactSection(w, result, escape)
+	renderReviewHTMLDocDriftSection(w, result, driftAssessments, escape)
+	renderReviewHTMLDocRemediationSection(w, result, escape)
+	renderReviewHTMLWarningsSection(w, result, escape)
+	renderReviewHTMLDocumentEnd(w)
+}
+
+func reviewHTMLDriftEvidence(evidence *analysis.DriftEvidence) string {
+	if evidence == nil {
+		return ""
+	}
+	escape := htemplate.HTMLEscapeString
+	parts := make([]string, 0, 4)
+	if evidence.SpecRef != "" {
+		spec := "<strong>Spec</strong> " + escape(evidence.SpecRef)
+		if evidence.SpecSection != "" {
+			spec += " | " + escape(evidence.SpecSection)
+		}
+		if evidence.SpecExcerpt != "" {
+			spec += "<br><span class=\"subtle\">" + escape(evidence.SpecExcerpt) + "</span>"
+		}
+		parts = append(parts, spec)
+	}
+	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
+		doc := "<strong>Doc</strong> "
+		if evidence.DocSection != "" {
+			doc += escape(evidence.DocSection)
+		} else {
+			doc += "matching section"
+		}
+		if evidence.DocExcerpt != "" {
+			doc += "<br><span class=\"subtle\">" + escape(evidence.DocExcerpt) + "</span>"
+		}
+		parts = append(parts, doc)
+	}
+	return strings.Join(parts, "<br>")
+}
+
+func reviewHTMLRemediationEvidence(evidence analysis.DocRemediationEvidence) string {
+	escape := htemplate.HTMLEscapeString
+	parts := make([]string, 0, 3)
+	if evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
+		spec := "<strong>Spec</strong> "
+		if evidence.SpecSection != "" {
+			spec += escape(evidence.SpecSection)
+		} else {
+			spec += "matched section"
+		}
+		if evidence.SpecSourceRef != "" {
+			spec += "<br><span class=\"subtle\">" + escape(evidence.SpecSourceRef) + "</span>"
+		}
+		if evidence.SpecExcerpt != "" {
+			spec += "<br><span class=\"subtle\">" + escape(evidence.SpecExcerpt) + "</span>"
+		}
+		parts = append(parts, spec)
+	}
+	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
+		doc := "<strong>Doc</strong> "
+		if evidence.DocSection != "" {
+			doc += escape(evidence.DocSection)
+		} else {
+			doc += "matched section"
+		}
+		if evidence.DocSourceRef != "" {
+			doc += "<br><span class=\"subtle\">" + escape(evidence.DocSourceRef) + "</span>"
+		}
+		if evidence.DocExcerpt != "" {
+			doc += "<br><span class=\"subtle\">" + escape(evidence.DocExcerpt) + "</span>"
+		}
+		parts = append(parts, doc)
+	}
+	if evidence.LinkReason != "" {
+		parts = append(parts, "<strong>Link</strong><br><span class=\"subtle\">"+escape(evidence.LinkReason)+"</span>")
+	}
+	return strings.Join(parts, "<br>")
+}
+
+func reviewMarkdownSummary(result *analysis.ReviewResult) []string {
+	lines := []string{fmt.Sprintf("Spec under review: `%s`.", result.SpecRef)}
+	if result.Overlap == nil {
+		lines = append(lines, "Overlap posture: no overlap analysis generated.")
+	} else if len(result.Overlap.Overlaps) == 0 {
+		lines = append(lines, "Overlap posture: no competing accepted spec was shortlisted.")
+	} else {
+		primary := result.Overlap.Overlaps[0]
+		posture := result.Overlap.Recommendation
+		if detail := humanizeOverlapRecommendation(result.Overlap.Recommendation); detail != "" {
+			posture += " (" + detail + ")"
+		}
+		lines = append(lines, fmt.Sprintf("Overlap posture: `%s`; closest neighbor is `%s` %s at %.3f.", posture, primary.Ref, primary.Title, primary.Score))
+	}
+	if result.Comparison == nil {
+		lines = append(lines, "Comparison posture: no primary comparison target was generated.")
+	} else {
+		lines = append(lines, fmt.Sprintf("Comparison posture: `%s`.", result.Comparison.Comparison.Recommendation))
+	}
+	if result.Impact == nil {
+		lines = append(lines, "Impact footprint: no impact analysis generated.")
+	} else {
+		lines = append(lines, fmt.Sprintf("Impact footprint: %d impacted spec(s), %d governed ref(s), %d impacted doc(s).", len(result.Impact.AffectedSpecs), len(result.Impact.AffectedRefs), len(result.Impact.AffectedDocs)))
+	}
+	driftAssessments := reviewDocDriftAssessments(result.DocDrift)
+	switch {
+	case len(driftAssessments) == 0:
+		lines = append(lines, "Documentation posture: no drift follow-up identified.")
+	case reviewRemediationSuggestionCount(result.DocRemediation) > 0:
+		lines = append(lines, fmt.Sprintf("Documentation posture: %d doc(s) need follow-up with %d suggested remediation edit(s).", len(driftAssessments), reviewRemediationSuggestionCount(result.DocRemediation)))
+	default:
+		lines = append(lines, fmt.Sprintf("Documentation posture: %d doc(s) need follow-up.", len(driftAssessments)))
+	}
+	if len(result.Warnings) > 0 {
+		lines = append(lines, fmt.Sprintf("Warnings: %d warning(s) require manual judgment.", len(result.Warnings)))
+	}
+	return lines
+}
+
+func reviewMarkdownActions(result *analysis.ReviewResult) []string {
+	actions := make([]string, 0, 4)
+	if result.Overlap != nil && len(result.Overlap.Overlaps) > 0 {
+		primary := result.Overlap.Overlaps[0]
+		switch result.Overlap.Recommendation {
+		case "proceed_with_supersedes":
+			actions = append(actions, fmt.Sprintf("Proceed with the supersedes path against `%s`, and keep the replacement scope explicit in the spec body.", primary.Ref))
+		case "merge_into_existing":
+			actions = append(actions, fmt.Sprintf("Treat `%s` as the primary merge target before accepting further downstream changes.", primary.Ref))
+		case "review_boundaries":
+			actions = append(actions, fmt.Sprintf("Review the boundary with `%s` before accepting wording or scope changes.", primary.Ref))
+		}
+	}
+	if result.Impact != nil && len(result.Impact.AffectedSpecs) > 0 {
+		refs := make([]string, 0, minInt(len(result.Impact.AffectedSpecs), 3))
+		for _, item := range topImpactedSpecs(result.Impact.AffectedSpecs, 3) {
+			refs = append(refs, "`"+item.Ref+"`")
+		}
+		actions = append(actions, fmt.Sprintf("Review downstream spec impact first: %s.", strings.Join(refs, ", ")))
+	}
+	driftAssessments := reviewDocDriftAssessments(result.DocDrift)
+	if len(driftAssessments) > 0 {
+		docRefs := make([]string, 0, minInt(len(driftAssessments), 3))
+		for _, item := range driftAssessments[:minInt(len(driftAssessments), 3)] {
+			docRefs = append(docRefs, "`"+item.DocRef+"`")
+		}
+		actions = append(actions, fmt.Sprintf("Update documentation that still needs follow-up: %s.", strings.Join(docRefs, ", ")))
+	}
+	if count := reviewRemediationSuggestionCount(result.DocRemediation); count > 0 {
+		actions = append(actions, fmt.Sprintf("Apply or adapt the %d suggested remediation edit(s) before treating the review as complete.", count))
+	}
+	return actions
+}
+
+func renderReviewMarkdownDriftEvidence(w io.Writer, evidence *analysis.DriftEvidence) {
+	if evidence == nil {
+		return
+	}
+	if evidence.SpecRef != "" || evidence.SpecSection != "" || evidence.SpecExcerpt != "" {
+		fmt.Fprintf(w, "  - Spec evidence: `%s`", evidence.SpecRef)
+		if evidence.SpecSection != "" {
+			fmt.Fprintf(w, " | %s", evidence.SpecSection)
+		}
+		fmt.Fprintln(w)
+		if evidence.SpecExcerpt != "" {
+			fmt.Fprintf(w, "    - %s\n", evidence.SpecExcerpt)
+		}
+	}
+	if evidence.DocSection != "" || evidence.DocExcerpt != "" {
+		docSection := evidence.DocSection
+		if docSection == "" {
+			docSection = "matching section"
+		}
+		fmt.Fprintf(w, "  - Doc evidence: %s\n", docSection)
+		if evidence.DocExcerpt != "" {
+			fmt.Fprintf(w, "    - %s\n", evidence.DocExcerpt)
+		}
+	}
+}
 
 func renderReviewMarkdownSpecSection(w io.Writer, result *analysis.ReviewResult) {
 	fmt.Fprintf(w, "# Review Spec Report\n\n")

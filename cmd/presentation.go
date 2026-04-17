@@ -142,6 +142,15 @@ func (p renderPresentation) treeLast() string {
 	}
 	return p.dim("\\-")
 }
+func (p renderPresentation) treeBranch(last bool) string {
+	if last {
+		return p.treeLast()
+	}
+	return p.treeMid()
+}
+func (p renderPresentation) treeItem(last bool) string {
+	return p.treeBranch(last)
+}
 func (p renderPresentation) blockHigh() string {
 	if p.utf8 {
 		return p.red("██")
