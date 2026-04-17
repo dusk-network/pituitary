@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -243,8 +244,7 @@ type rawSpecBundle struct {
 
 func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string) (model.SpecRecord, error) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
-	// #nosec G304 -- specPath is the fixed spec.toml file within a discovered bundle directory under the workspace.
-	specBytes, err := os.ReadFile(specPath)
+	specBytes, err := readBoundedFile(specPath, maxSpecTOMLBytes)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read spec.toml: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), err)
 	}
@@ -269,8 +269,7 @@ func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q body %q does not exist", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath))
 	}
 
-	// #nosec G304 -- bodyPath is validated to remain within the selected bundle directory.
-	bodyBytes, err := os.ReadFile(bodyPath)
+	bodyBytes, err := readBoundedFile(bodyPath, maxMarkdownBodyBytes)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read body %q: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath), err)
 	}
@@ -352,8 +351,7 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		return nil, err
 	}
 	for _, match := range matches {
-		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
-		bodyBytes, err := os.ReadFile(match.AbsolutePath)
+		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
@@ -385,8 +383,7 @@ func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.
 		return nil, err
 	}
 	for _, match := range matches {
-		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
-		bodyBytes, err := os.ReadFile(match.AbsolutePath)
+		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
@@ -1076,11 +1073,52 @@ func stripComment(line string) string {
 }
 
 func pathWithinRoot(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
+	realRoot, err := EvalSymlinksBestEffort(root)
 	if err != nil {
 		return false
 	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	realPath, err := EvalSymlinksBestEffort(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// EvalSymlinksBestEffort resolves symlinks along the longest existing prefix of
+// path and re-appends any remaining components. It lets callers perform a
+// symlink-safe containment check even when path does not yet exist on disk
+// (e.g., a file that is about to be created). Exported so cmd/ and
+// internal/app/ share one canonical implementation.
+func EvalSymlinksBestEffort(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var tail []string
+	for {
+		if _, statErr := os.Lstat(current); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return current, nil
+		}
+		tail = append([]string{filepath.Base(current)}, tail...)
+		current = parent
+	}
+	resolved, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", err
+	}
+	for _, seg := range tail {
+		resolved = filepath.Join(resolved, seg)
+	}
+	return filepath.Clean(resolved), nil
 }
 
 func maxScannerTokenSize(size int) int {
@@ -1088,4 +1126,40 @@ func maxScannerTokenSize(size int) int {
 		return 64 * 1024
 	}
 	return size + 1
+}
+
+// Size caps for indexed content. These bound the memory cost of reading any
+// single spec/body so a crafted input in a shared workspace cannot trigger an
+// OOM during `pituitary index`.
+const (
+	maxSpecTOMLBytes     = 1 * 1024 * 1024  // 1 MiB
+	maxMarkdownBodyBytes = 10 * 1024 * 1024 // 10 MiB
+)
+
+// readBoundedFile reads path in full but rejects files larger than maxBytes.
+// The read itself is wrapped in an io.LimitReader, so a file that is swapped
+// or grows between open-time and read-time still cannot trigger an unbounded
+// allocation.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	// #nosec G304 -- callers validate path containment; LimitReader enforces the allocation bound.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readAllLimited(f, maxBytes, filepath.ToSlash(path))
+}
+
+// readAllLimited reads up to maxBytes+1 bytes from r and returns an error when
+// the source exceeds maxBytes. The extra byte is the "one past the limit"
+// sentinel that tells us the source was longer than allowed.
+func readAllLimited(r io.Reader, maxBytes int64, label string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d-byte size limit", label, maxBytes)
+	}
+	return data, nil
 }

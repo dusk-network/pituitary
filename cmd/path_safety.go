@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 func validateCLIPathValue(rawPath, label string) (string, error) {
@@ -62,7 +64,15 @@ func resolveWorkspaceScopedCLIPath(workspaceRoot, rawPath, label string) (string
 }
 
 func cliPathWithinRoot(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
+	realRoot, err := source.EvalSymlinksBestEffort(root)
+	if err != nil {
+		return false
+	}
+	realPath, err := source.EvalSymlinksBestEffort(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
 	if err != nil {
 		return false
 	}

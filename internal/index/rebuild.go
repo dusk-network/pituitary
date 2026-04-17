@@ -821,6 +821,9 @@ func runIntegrityChecksContext(ctx context.Context, db *sql.DB) error {
 		}
 		return fmt.Errorf("foreign_key_check failed for table %s row %d parent %s fk %d", table, rowID, parent, fkid)
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate foreign_key_check result: %w", err)
+	}
 	return nil
 }
 

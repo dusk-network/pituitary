@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -210,6 +211,11 @@ func (v *validationErrors) err() error {
 	return errors.New(strings.Join(v.items, "\n"))
 }
 
+// maxConfigBytes caps pituitary.toml at 1 MiB. A realistic config is well under
+// ten kilobytes; the limit exists only to keep a crafted or corrupted file from
+// exhausting memory during Load.
+const maxConfigBytes = 1 * 1024 * 1024
+
 // Load parses and validates a repo-local pituitary.toml file.
 func Load(path string) (*Config, error) {
 	configPath, err := filepath.Abs(path)
@@ -217,13 +223,29 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("resolve config path: %w", err)
 	}
 
-	// #nosec G304 -- configPath is the explicit config file selected by the caller.
-	data, err := os.ReadFile(configPath)
+	data, err := readBoundedConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", configPath, err)
 	}
 
 	return loadFromData(data, configPath)
+}
+
+func readBoundedConfig(configPath string) ([]byte, error) {
+	// #nosec G304 -- configPath is the explicit config file selected by the caller; LimitReader enforces the allocation bound.
+	f, err := os.Open(configPath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxConfigBytes {
+		return nil, fmt.Errorf("config file exceeds %d-byte size limit", maxConfigBytes)
+	}
+	return data, nil
 }
 
 // DeclaresMultirepoRepos reports whether the config file at path declares
@@ -236,8 +258,7 @@ func DeclaresMultirepoRepos(path string) (bool, error) {
 		return false, fmt.Errorf("resolve config path: %w", err)
 	}
 
-	// #nosec G304 -- configPath is the explicit config file selected by the caller.
-	data, err := os.ReadFile(configPath)
+	data, err := readBoundedConfig(configPath)
 	if err != nil {
 		return false, fmt.Errorf("open %s: %w", configPath, err)
 	}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 type plannedEdit struct {
@@ -60,7 +62,33 @@ func resolveSourceFilePath(workspaceRoot, sourceRef string) (string, error) {
 	if relative == "" {
 		return "", fmt.Errorf("source_ref is empty")
 	}
-	return filepath.Join(workspaceRoot, filepath.FromSlash(relative)), nil
+	rootClean := filepath.Clean(workspaceRoot)
+	resolved := filepath.Clean(filepath.Join(rootClean, filepath.FromSlash(relative)))
+
+	// Lexical containment catches simple ../ traversals regardless of
+	// filesystem state, including cases where the target does not yet exist.
+	rel, err := filepath.Rel(rootClean, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source_ref %q resolves outside workspace root", sourceRef)
+	}
+
+	// Symlink-safe containment catches a workspace-local symlink that points
+	// outside the root. Shares the helper with cmd/ so both CLI and MCP/fix
+	// paths apply the same guard.
+	realRoot, err := source.EvalSymlinksBestEffort(rootClean)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	realResolved, err := source.EvalSymlinksBestEffort(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve source_ref %q: %w", sourceRef, err)
+	}
+	realRel, err := filepath.Rel(realRoot, realResolved)
+	if err != nil || realRel == ".." || strings.HasPrefix(realRel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source_ref %q resolves outside workspace root (symlink escape)", sourceRef)
+	}
+
+	return resolved, nil
 }
 
 func applyEdits(path, expectedContent, expectedChecksum string, edits []plannedEdit) error {

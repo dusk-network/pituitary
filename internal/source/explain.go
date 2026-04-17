@@ -91,6 +91,11 @@ func ExplainFile(cfg *config.Config, path string) (*ExplainFileResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
+	absolutePath = filepath.Clean(absolutePath)
+
+	if !explainFilePathWithinConfiguredRoots(cfg, absolutePath) {
+		return nil, fmt.Errorf("%s resolves outside the configured workspace and repo roots", path)
+	}
 
 	info, err := os.Stat(absolutePath)
 	switch {
@@ -426,6 +431,21 @@ func relationRefs(relations []model.Relation, typ model.RelationType) []string {
 		}
 	}
 	return refs
+}
+
+func explainFilePathWithinConfiguredRoots(cfg *config.Config, absPath string) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Workspace.RootPath != "" && pathWithinRoot(cfg.Workspace.RootPath, absPath) {
+		return true
+	}
+	for _, repo := range cfg.Workspace.Repos {
+		if repo.RootPath != "" && pathWithinRoot(repo.RootPath, absPath) {
+			return true
+		}
+	}
+	return false
 }
 
 func findTargetSpecBundleDir(candidateDirs []string, absolutePath string) string {

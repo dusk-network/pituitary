@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
@@ -182,19 +181,18 @@ func loadComplianceDiffFile(workspaceRoot, path string) (string, error) {
 		err  error
 	)
 	if path == "-" {
-		data, err = io.ReadAll(cliStdin)
+		data, err = readBoundedStdin("diff")
 		if err != nil {
-			return "", fmt.Errorf("read diff from stdin: %w", err)
+			return "", err
 		}
 	} else {
 		absPath, err := resolveWorkspaceScopedCLIPath(workspaceRoot, path, "diff file")
 		if err != nil {
 			return "", err
 		}
-		// #nosec G304 -- absPath is validated to remain under the configured workspace root.
-		data, err = os.ReadFile(absPath)
+		data, err = readBoundedRequestFile(absPath, "diff")
 		if err != nil {
-			return "", fmt.Errorf("read diff file %q: %w", path, err)
+			return "", err
 		}
 	}
 	if strings.TrimSpace(string(data)) == "" {
