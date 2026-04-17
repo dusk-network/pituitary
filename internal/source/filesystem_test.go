@@ -327,6 +327,58 @@ authors = [
 	})
 }
 
+// TestParseSpecBundleRejectsNestedTables locks the post-refactor error path
+// for TOML table headers. The old hand-rolled parser rejected them at the
+// tokenizer ("expected key = value"); the library decodes them as nested
+// tables, after which metadata.Undecoded() surfaces each leaf key and the
+// helper rewrites it as an "unsupported field" diagnostic. Either way the
+// bundle is rejected, but the error shape changed — this test pins the new
+// one so a future decoder swap cannot regress to silent acceptance.
+func TestParseSpecBundleRejectsNestedTables(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseSpecBundle([]byte(`
+id = "SPEC-100"
+title = "Example"
+status = "draft"
+domain = "api"
+body = "body.md"
+
+[metadata]
+owner = "team"
+`))
+	if err == nil {
+		t.Fatal("parseSpecBundle() error = nil, want rejection of nested table")
+	}
+	if !strings.Contains(err.Error(), "unsupported field") || !strings.Contains(err.Error(), "metadata") {
+		t.Fatalf("parseSpecBundle() error = %q, want unsupported-field error referencing the nested key", err)
+	}
+}
+
+// TestParseSpecBundleIsCaseInsensitive documents and locks the behavior
+// change introduced by delegating to BurntSushi/toml: TOML-library key
+// matching is case-insensitive, so `Title = "..."` in a spec.toml now
+// populates the Title field. The hand-rolled parser rejected this as an
+// unsupported field. This is a spec-compliance improvement (TOML keys are
+// conventionally lowercase but the spec does not force it), not a regression.
+func TestParseSpecBundleIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	spec, err := parseSpecBundle([]byte(`
+id = "SPEC-100"
+Title = "Capitalized"
+status = "draft"
+domain = "api"
+body = "body.md"
+`))
+	if err != nil {
+		t.Fatalf("parseSpecBundle() error = %v, want nil", err)
+	}
+	if spec.Title != "Capitalized" {
+		t.Fatalf("spec.Title = %q, want %q", spec.Title, "Capitalized")
+	}
+}
+
 func TestLoadFromConfigRejectsMalformedSpecArrays(t *testing.T) {
 	t.Parallel()
 

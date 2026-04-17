@@ -826,10 +826,6 @@ func repoScopedArtifactRef(prefix, relativePath, repoID, primaryRepoID string) s
 	return prefix + repoID + "/" + relativePath
 }
 
-// parseSpecBundle decodes a spec.toml bundle manifest using the shared
-// BurntSushi/toml decoder and reports unknown fields with the same
-// "unsupported field" / "unsupported array field" shape that the rest of
-// pituitary uses for TOML schema errors.
 func parseSpecBundle(contents []byte) (rawSpecBundle, error) {
 	var spec rawSpecBundle
 	metadata, err := toml.NewDecoder(bytes.NewReader(contents)).Decode(&spec)
@@ -860,7 +856,11 @@ func unknownSpecBundleFieldError(metadata toml.MetaData, keys []toml.Key) error 
 		types[name] = metadata.Type(key...)
 	}
 	if len(names) == 0 {
-		return fmt.Errorf("unsupported field")
+		// Defensive: reachable only if the decoder reports undecoded keys that
+		// are all empty, which BurntSushi/toml should never produce. Keep the
+		// diagnostic explicit so the root cause is traceable rather than
+		// silently emitting a blank field name.
+		return fmt.Errorf("internal: decoder returned undecoded keys with no name components")
 	}
 	sort.Strings(names)
 	first := names[0]
