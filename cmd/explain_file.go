@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/dusk-network/pituitary/internal/app"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
 )
@@ -22,75 +22,42 @@ func runExplainFile(args []string, stdout, stderr io.Writer) int {
 }
 
 func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	args = reorderExplainFileArgs(args)
-
-	fs := flag.NewFlagSet("explain-file", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	help := newCommandHelp("explain-file", "pituitary [--config PATH] explain-file PATH [--format FORMAT]")
-
-	var (
-		format     string
-		configPath string
+	return runCommand[explainFileRequest, source.ExplainFileResult](
+		ctx, reorderExplainFileArgs(args), stdout, stderr,
+		commandRun[explainFileRequest, source.ExplainFileResult]{
+			Name:  "explain-file",
+			Usage: "pituitary [--config PATH] explain-file PATH [--format FORMAT]",
+			Options: commandRunOptions{
+				ExactPositional: 1,
+			},
+			BuildRequest: func(_ context.Context, _ *config.Config, _ string, positional []string) (explainFileRequest, error) {
+				return explainFileRequest{Path: positional[0]}, nil
+			},
+			Execute: func(_ context.Context, cfgPath string, req explainFileRequest, _ string) (explainFileRequest, *source.ExplainFileResult, *app.Issue) {
+				cfg, err := config.Load(cfgPath)
+				if err != nil {
+					return req, nil, &app.Issue{
+						Code:     "config_error",
+						Message:  "invalid config:\n" + err.Error(),
+						ExitCode: 2,
+					}
+				}
+				targetPath, err := resolveExplainPath(cfg, req.Path)
+				if err != nil {
+					return req, nil, plainIssue(err, "validation_error")
+				}
+				result, err := source.ExplainFile(cfg, targetPath)
+				if err != nil {
+					return req, nil, &app.Issue{
+						Code:     "source_error",
+						Message:  "file explanation failed:\n" + err.Error(),
+						ExitCode: 2,
+					}
+				}
+				return req, result, nil
+			},
+		},
 	)
-	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
-	fs.StringVar(&configPath, "config", "", "path to workspace config")
-
-	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	} else if handled {
-		return 0
-	}
-	if err := validateCLIFormat("explain-file", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	if fs.NArg() != 1 {
-		return writeCLIError(stdout, stderr, format, "explain-file", nil, cliIssue{
-			Code:    "validation_error",
-			Message: "exactly one file path is required",
-		}, 2)
-	}
-
-	request := explainFileRequest{Path: fs.Arg(0)}
-
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
-	}
-
-	cfg, err := config.Load(resolvedConfigPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
-			Code:    "config_error",
-			Message: "invalid config:\n" + err.Error(),
-		}, 2)
-	}
-
-	targetPath, err := resolveExplainPath(cfg, request.Path)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-
-	result, err := source.ExplainFile(cfg, targetPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "explain-file", request, cliIssue{
-			Code:    "source_error",
-			Message: "file explanation failed:\n" + err.Error(),
-		}, 2)
-	}
-
-	return writeCLISuccess(stdout, stderr, format, "explain-file", request, result, nil)
 }
 
 func reorderExplainFileArgs(args []string) []string {
