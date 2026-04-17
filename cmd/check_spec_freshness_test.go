@@ -80,6 +80,37 @@ func TestRunCheckSpecFreshnessText(t *testing.T) {
 	}
 }
 
+func TestRunCheckSpecFreshnessRejectsPathAndSpecRef(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runCheckSpecFreshness([]string{
+			"--path", "some/path.md",
+			"--spec-ref", "SPEC-042",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runCheckSpecFreshness() exit code = %d, want 2", exitCode)
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal mutex payload: %v", err)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if payload.Errors[0].Message != "at most one of --path or --spec-ref may be specified" {
+		t.Fatalf("errors[0].message = %q, want mutex guard message", payload.Errors[0].Message)
+	}
+}
+
 func TestRunCheckSpecFreshnessHelpFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

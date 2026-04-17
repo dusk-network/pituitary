@@ -53,7 +53,7 @@ func runCheckSpecFreshnessContext(ctx context.Context, args []string, stdout, st
 				resolvedSpecRef := strings.TrimSpace(specRef)
 				trimmedPath := strings.TrimSpace(specPath)
 				if resolvedSpecRef != "" && trimmedPath != "" {
-					return req, fmt.Errorf("exactly one of --path or --spec-ref is allowed")
+					return req, fmt.Errorf("at most one of --path or --spec-ref may be specified")
 				}
 				if trimmedPath != "" {
 					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
