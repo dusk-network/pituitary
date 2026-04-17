@@ -350,6 +350,43 @@ func TestRunExplainFileRejectsMissingPath(t *testing.T) {
 	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
 		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
 	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "exactly 1 positional argument(s) required") {
+		t.Fatalf("error message = %q, want ExactPositional enforcement message", got)
+	}
+}
+
+// TestRunExplainFileRejectsExtraPositional verifies the ExactPositional=1
+// upper bound: supplying more than one positional argument must fail with
+// validation_error exit 2 from the runCommand helper, not drop the extras
+// silently into BuildRequest.
+func TestRunExplainFileRejectsExtraPositional(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := runExplainFile([]string{"first.md", "second.md", "--format", "json"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("runExplainFile() exit code = %d, want 2", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runExplainFile() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Result any        `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal explain error payload: %v", err)
+	}
+	if payload.Result != nil {
+		t.Fatalf("result = %#v, want nil", payload.Result)
+	}
+	if len(payload.Errors) != 1 || payload.Errors[0].Code != "validation_error" {
+		t.Fatalf("errors = %+v, want one validation_error", payload.Errors)
+	}
+	if got := payload.Errors[0].Message; !strings.Contains(got, "exactly 1 positional argument(s) required") {
+		t.Fatalf("error message = %q, want ExactPositional enforcement message", got)
+	}
 }
 
 func TestResolveExplainPathResolvesRelativePathFromCWD(t *testing.T) {

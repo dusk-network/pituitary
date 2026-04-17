@@ -7,7 +7,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/internal/app"
 )
+
+// TestRenderFixResultNilPlanFallback protects the contract that cmd/fix.go's
+// nil-plan branch relies on: when the interactive planner returns a nil plan
+// with no issue, fix.go substitutes an empty *FixResult so renderFixResult
+// emits the "no deterministic doc-drift edits available" line instead of
+// panicking on a typed-nil result.
+func TestRenderFixResultNilPlanFallback(t *testing.T) {
+	var buf bytes.Buffer
+	renderFixResult(&buf, &app.FixResult{})
+
+	out := buf.String()
+	if !strings.Contains(out, "no deterministic doc-drift edits available") {
+		t.Fatalf("renderFixResult(&FixResult{}) output %q does not contain fallback guidance", out)
+	}
+	if !strings.Contains(out, "━━◈ fix") {
+		t.Fatalf("renderFixResult(&FixResult{}) output %q does not contain fix header", out)
+	}
+}
 
 func TestRunFixDryRunJSONPlansDeterministicEdits(t *testing.T) {
 	repo := writeSearchWorkspace(t)
