@@ -46,7 +46,8 @@ type commandRun[Req any, Res any] struct {
 	// iff Options.ConfigForFlags is true. Required.
 	BuildRequest func(ctx context.Context, cfg *config.Config, resolvedConfigPath string) (Req, error)
 
-	// Normalize (optional) runs after the request is composed, before Execute.
+	// Normalize (optional) runs after the request is composed, before Execute,
+	// and fires for both the --request-file path and the inline-flags path.
 	// On error, the runner writes the returned Req into the envelope, so
 	// Normalize can return a pre- or post-normalize request as appropriate.
 	Normalize func(ctx context.Context, req Req) (Req, error)
@@ -54,8 +55,11 @@ type commandRun[Req any, Res any] struct {
 	// Execute calls the app layer. Required.
 	Execute func(ctx context.Context, resolvedConfigPath string, req Req) (Req, *Res, *app.Issue)
 
-	// PostProcess (optional) runs after Execute succeeds.
-	PostProcess func(ctx context.Context, resolvedConfigPath string, req Req, res *Res) (*Res, *cliIssue)
+	// PostProcess (optional) runs after Execute succeeds. When it returns a
+	// non-nil cliIssue, the runner writes it with the returned exit code. An
+	// exit code of 0 is treated as the default 2 so the common "validation
+	// error" case stays terse at the call site.
+	PostProcess func(ctx context.Context, resolvedConfigPath string, req Req, res *Res) (*Res, *cliIssue, int)
 }
 
 // commandRunOptions toggles the shared flags and config-loading behavior the
@@ -84,9 +88,6 @@ type cliIssueError struct {
 }
 
 func (e *cliIssueError) Error() string {
-	if e == nil {
-		return ""
-	}
 	return e.issue.Message
 }
 
@@ -111,6 +112,15 @@ func runCommand[Req any, Res any](
 	stdout, stderr io.Writer,
 	plan commandRun[Req, Res],
 ) int {
+	if plan.BuildRequest == nil {
+		panic("commandRun.BuildRequest is required for " + plan.Name)
+	}
+	if plan.Execute == nil {
+		panic("commandRun.Execute is required for " + plan.Name)
+	}
+	if plan.Options.RequestFile && (plan.LoadRequestFile == nil || plan.InlineFlagsSet == nil) {
+		panic("commandRun.LoadRequestFile and InlineFlagsSet are required when RequestFile is enabled for " + plan.Name)
+	}
 	fs := flag.NewFlagSet(plan.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	help := newCommandHelp(plan.Name, plan.Usage)
@@ -247,9 +257,12 @@ func runCommand[Req any, Res any](
 	}
 
 	if plan.PostProcess != nil {
-		postResult, postIssue := plan.PostProcess(execCtx, resolvedConfigPath, enrichedReq, result)
+		postResult, postIssue, postExit := plan.PostProcess(execCtx, resolvedConfigPath, enrichedReq, result)
 		if postIssue != nil {
-			return writeCLIError(stdout, stderr, format, plan.Name, enrichedReq, *postIssue, 2)
+			if postExit == 0 {
+				postExit = 2
+			}
+			return writeCLIError(stdout, stderr, format, plan.Name, enrichedReq, *postIssue, postExit)
 		}
 		result = postResult
 	}
