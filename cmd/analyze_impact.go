@@ -54,13 +54,18 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 				return &req, nil
 			},
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.AnalyzeImpactRequest, error) {
+				trimmedSpecRef := strings.TrimSpace(specRef)
+				trimmedSpecPath := strings.TrimSpace(specPath)
 				req := analysis.AnalyzeImpactRequest{
 					ChangeType: strings.TrimSpace(changeType),
 					Summary:    summary,
-					SpecRef:    strings.TrimSpace(specRef),
+					SpecRef:    trimmedSpecRef,
 				}
-				if trimmedPath := strings.TrimSpace(specPath); trimmedPath != "" {
-					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
+				if trimmedSpecRef != "" && trimmedSpecPath != "" {
+					return req, fmt.Errorf("exactly one of --path or --spec-ref is allowed")
+				}
+				if trimmedSpecPath != "" {
+					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
 					if err != nil {
 						return req, specPathResolutionError(err)
 					}
@@ -81,9 +86,9 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 				op := app.AnalyzeImpact(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},
-			PostProcess: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest, res *analysis.AnalyzeImpactResult) (*analysis.AnalyzeImpactResult, *cliIssue) {
+			PostProcess: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest, res *analysis.AnalyzeImpactResult) (*analysis.AnalyzeImpactResult, *cliIssue, int) {
 				annotateCrossFamilyImpact(ctx, cfgPath, req.SpecRef, res)
-				return res, nil
+				return res, nil, 0
 			},
 		},
 	)
