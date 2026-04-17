@@ -54,7 +54,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string) (analysis.OverlapRequest, error) {
+			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.OverlapRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
 				trimmedRecord := strings.TrimSpace(specRecordFile)
@@ -82,7 +82,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return overlapRequestFromFlagsContext(workspaceRoot, trimmedSpecRef, trimmedRecord)
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.OverlapRequest) (analysis.OverlapRequest, *analysis.OverlapResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.OverlapRequest, _ string) (analysis.OverlapRequest, *analysis.OverlapResult, *app.Issue) {
 				op := app.CheckOverlap(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

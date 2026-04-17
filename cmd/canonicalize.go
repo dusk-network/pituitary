@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/analysis"
+	"github.com/dusk-network/pituitary/internal/app"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
 )
@@ -25,76 +26,52 @@ func runCanonicalize(args []string, stdout, stderr io.Writer) int {
 }
 
 func runCanonicalizeContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("canonicalize", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	help := newStandaloneCommandHelp("canonicalize", "pituitary canonicalize --path PATH [--bundle-dir PATH] [--write] [--format FORMAT]")
-
 	var (
 		path      string
 		bundleDir string
 		write     bool
-		format    string
 	)
-	fs.StringVar(&path, "path", "", "workspace-relative or absolute path to a markdown contract")
-	fs.StringVar(&bundleDir, "bundle-dir", "", "bundle directory to preview or write")
-	fs.BoolVar(&write, "write", false, "write the generated bundle")
-	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
 
-	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
-		return writeCLIError(stdout, stderr, format, "canonicalize", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	} else if handled {
-		return 0
-	}
-	if fs.NArg() != 0 {
-		return writeCLIError(stdout, stderr, format, "canonicalize", nil, cliIssue{
-			Code:    "validation_error",
-			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
-		}, 2)
-	}
-	if err := validateCLIFormat("canonicalize", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "canonicalize", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	if strings.TrimSpace(path) == "" {
-		return writeCLIError(stdout, stderr, format, "canonicalize", nil, cliIssue{
-			Code:    "validation_error",
-			Message: "--path is required",
-		}, 2)
-	}
+	return runCommand[canonicalizeRequest, source.CanonicalizeResult](
+		ctx, args, stdout, stderr,
+		commandRun[canonicalizeRequest, source.CanonicalizeResult]{
+			Name:  "canonicalize",
+			Usage: "pituitary canonicalize --path PATH [--bundle-dir PATH] [--write] [--format FORMAT]",
+			Options: commandRunOptions{
+				Standalone: true,
+			},
+			BindFlags: func(fs *flag.FlagSet) {
+				fs.StringVar(&path, "path", "", "workspace-relative or absolute path to a markdown contract")
+				fs.StringVar(&bundleDir, "bundle-dir", "", "bundle directory to preview or write")
+				fs.BoolVar(&write, "write", false, "write the generated bundle")
+			},
+			BuildRequest: func(_ context.Context, _ *config.Config, _ string, _ []string) (canonicalizeRequest, error) {
+				if strings.TrimSpace(path) == "" {
+					return canonicalizeRequest{}, fmt.Errorf("--path is required")
+				}
+				return canonicalizeRequest{
+					Path:      path,
+					BundleDir: strings.TrimSpace(bundleDir),
+					Write:     write,
+				}, nil
+			},
+			Execute: func(ctx context.Context, cfgPath string, req canonicalizeRequest, _ string) (canonicalizeRequest, *source.CanonicalizeResult, *app.Issue) {
+				// Run semantic metadata inference if runtime.analysis is configured.
+				var metadataInference *source.CanonicalizeInference
+				if cfg, err := config.Load(cfgPath); err == nil {
+					metadataInference = runCanonicalizeInference(ctx, cfg, req.Path)
+				}
 
-	request := canonicalizeRequest{
-		Path:      path,
-		BundleDir: strings.TrimSpace(bundleDir),
-		Write:     write,
-	}
-
-	// Run semantic metadata inference if runtime.analysis is configured.
-	var metadataInference *source.CanonicalizeInference
-	if configPath, err := resolveCommandConfigPath(ctx, ""); err == nil {
-		if cfg, err := config.Load(configPath); err == nil {
-			metadataInference = runCanonicalizeInference(ctx, cfg, request.Path)
-		}
-	}
-
-	result, err := source.CanonicalizeMarkdownContract(source.CanonicalizeOptions{
-		Path:              request.Path,
-		BundleDir:         request.BundleDir,
-		Write:             request.Write,
-		MetadataInference: metadataInference,
-	})
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "canonicalize", request, cliIssue{
-			Code:    "canonicalize_error",
-			Message: err.Error(),
-		}, 2)
-	}
-
-	return writeCLISuccess(stdout, stderr, format, "canonicalize", request, result, nil)
+				result, err := source.CanonicalizeMarkdownContract(source.CanonicalizeOptions{
+					Path:              req.Path,
+					BundleDir:         req.BundleDir,
+					Write:             req.Write,
+					MetadataInference: metadataInference,
+				})
+				return req, result, plainIssue(err, "canonicalize_error")
+			},
+		},
+	)
 }
 
 // runCanonicalizeInference calls the analysis runtime to infer metadata from

@@ -63,7 +63,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 				}
 				return &req, nil
 			},
-			BuildRequest: func(_ context.Context, _ *config.Config, _ string) (index.SearchSpecRequest, error) {
+			BuildRequest: func(_ context.Context, _ *config.Config, _ string, _ []string) (index.SearchSpecRequest, error) {
 				return index.SearchSpecRequest{
 					Query: strings.TrimSpace(query),
 					Filters: index.SearchSpecFilters{
@@ -73,7 +73,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 					Limit: &limit,
 				}, nil
 			},
-			Normalize: func(_ context.Context, req index.SearchSpecRequest) (index.SearchSpecRequest, error) {
+			Normalize: func(_ context.Context, req index.SearchSpecRequest, _ string) (index.SearchSpecRequest, error) {
 				queryArgs, err := req.ToQuery()
 				if err != nil {
 					return req, err
@@ -88,7 +88,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req index.SearchSpecRequest) (index.SearchSpecRequest, *index.SearchSpecResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req index.SearchSpecRequest, _ string) (index.SearchSpecRequest, *index.SearchSpecResult, *app.Issue) {
 				op := app.SearchSpecs(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

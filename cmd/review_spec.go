@@ -49,7 +49,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string) (analysis.ReviewRequest, error) {
+			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.ReviewRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
 				trimmedRecord := strings.TrimSpace(specRecordFile)
@@ -77,7 +77,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 				}
 				return reviewRequestFromFlags(workspaceRoot, trimmedSpecRef, trimmedRecord)
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.ReviewRequest) (analysis.ReviewRequest, *analysis.ReviewResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.ReviewRequest, _ string) (analysis.ReviewRequest, *analysis.ReviewResult, *app.Issue) {
 				op := app.ReviewSpec(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

@@ -73,7 +73,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.DocDriftRequest, error) {
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.DocDriftRequest, error) {
 				resolvedDocRefs := append([]string(nil), docRefs...)
 				if len(docPaths) > 0 {
 					resolvedPaths, err := resolveIndexedDocRefsWithConfigContext(ctx, cfg, []string(docPaths))
@@ -84,7 +84,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 				}
 				return docDriftRequestFromFlags(cfg.Workspace.RootPath, resolvedDocRefs, strings.TrimSpace(scope), strings.TrimSpace(diffFile))
 			},
-			Normalize: func(_ context.Context, req analysis.DocDriftRequest) (analysis.DocDriftRequest, error) {
+			Normalize: func(_ context.Context, req analysis.DocDriftRequest, _ string) (analysis.DocDriftRequest, error) {
 				if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
 					req.AtDate = trimmedAt
 				}
@@ -93,7 +93,7 @@ func runCheckDocDriftContext(ctx context.Context, args []string, stdout, stderr 
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.DocDriftRequest) (analysis.DocDriftRequest, *analysis.DocDriftResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.DocDriftRequest, _ string) (analysis.DocDriftRequest, *analysis.DocDriftResult, *app.Issue) {
 				op := app.CheckDocDrift(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

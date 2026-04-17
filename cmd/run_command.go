@@ -48,17 +48,22 @@ type commandRun[Req any, Res any] struct {
 	LoadRequestFile func(ctx context.Context, cfg *config.Config, trimmedPath string) (*Req, error)
 
 	// BuildRequest builds the request from the inline flags. cfg is non-nil
-	// iff Options.ConfigForFlags is true. Required.
-	BuildRequest func(ctx context.Context, cfg *config.Config, resolvedConfigPath string) (Req, error)
+	// iff Options.ConfigForFlags is true. positional holds any positional args
+	// captured under Options.ExactPositional. Required.
+	BuildRequest func(ctx context.Context, cfg *config.Config, resolvedConfigPath string, positional []string) (Req, error)
 
 	// Normalize (optional) runs after the request is composed, before Execute,
 	// and fires for both the --request-file path and the inline-flags path.
-	// On error, the runner writes the returned Req into the envelope, so
-	// Normalize can return a pre- or post-normalize request as appropriate.
-	Normalize func(ctx context.Context, req Req) (Req, error)
+	// format is the resolved output format so Normalize can reject
+	// format-incompatible request shapes. On error, the runner writes the
+	// returned Req into the envelope, so Normalize can return a pre- or
+	// post-normalize request as appropriate.
+	Normalize func(ctx context.Context, req Req, format string) (Req, error)
 
-	// Execute calls the app layer. Required.
-	Execute func(ctx context.Context, resolvedConfigPath string, req Req) (Req, *Res, *app.Issue)
+	// Execute calls the app layer. format is the resolved output format so
+	// Execute can dispatch on it (e.g. for interactive text-mode paths).
+	// Required.
+	Execute func(ctx context.Context, resolvedConfigPath string, req Req, format string) (Req, *Res, *app.Issue)
 
 	// PostProcess (optional) runs after Execute succeeds. When it returns a
 	// non-nil cliIssue, the runner writes it with the returned exit code. An
@@ -75,8 +80,18 @@ type commandRunOptions struct {
 	RequestFile bool
 	// Timings enables the --timings flag (JSON-only timing metadata).
 	Timings bool
-	// AcceptsPositional, when false (default), rejects fs.NArg() != 0.
+	// AcceptsPositional, when false (default), rejects fs.NArg() != 0 unless
+	// ExactPositional is set.
 	AcceptsPositional bool
+	// ExactPositional, when > 0, requires exactly that many positional
+	// arguments. Mutually exclusive with AcceptsPositional; takes precedence
+	// when both are set. The captured args are passed to BuildRequest.
+	ExactPositional int
+	// Standalone, when true, disables the shared --config flag and omits the
+	// "shared config resolution" help line. The resolved config path is still
+	// computed from the project default, so Execute callbacks can load a
+	// config opportunistically when present.
+	Standalone bool
 	// ConfigForFlags loads config before calling BuildRequest.
 	ConfigForFlags bool
 	// ConfigForFile loads config before calling LoadRequestFile.
@@ -103,6 +118,20 @@ func configLoadError(err error) error {
 	return &cliIssueError{
 		issue:    cliIssue{Code: "config_error", Message: err.Error()},
 		exitCode: 2,
+	}
+}
+
+// plainIssue wraps a bare error as an *app.Issue with the given code and a
+// default exit code of 2. Returns nil when err is nil, so Execute callbacks
+// can pipe `return req, nil, plainIssue(err, "foo_error")` without a branch.
+func plainIssue(err error, code string) *app.Issue {
+	if err == nil {
+		return nil
+	}
+	return &app.Issue{
+		Code:     code,
+		Message:  err.Error(),
+		ExitCode: 2,
 	}
 }
 
@@ -138,7 +167,12 @@ func runCommand[Req any, Res any](
 	}
 	fs := flag.NewFlagSet(plan.Name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	help := newCommandHelp(plan.Name, plan.Usage)
+	var help commandHelp
+	if plan.Options.Standalone {
+		help = newStandaloneCommandHelp(plan.Name, plan.Usage)
+	} else {
+		help = newCommandHelp(plan.Name, plan.Usage)
+	}
 
 	var (
 		configPath  string
@@ -147,7 +181,9 @@ func runCommand[Req any, Res any](
 		requestFile string
 	)
 	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
-	fs.StringVar(&configPath, "config", "", "path to workspace config")
+	if !plan.Options.Standalone {
+		fs.StringVar(&configPath, "config", "", "path to workspace config")
+	}
 	if plan.Options.Timings {
 		fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 	}
@@ -167,12 +203,23 @@ func runCommand[Req any, Res any](
 		return 0
 	}
 
-	if !plan.Options.AcceptsPositional && fs.NArg() != 0 {
-		return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
-			Code:    "validation_error",
-			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
-		}, 2)
+	switch {
+	case plan.Options.ExactPositional > 0:
+		if fs.NArg() != plan.Options.ExactPositional {
+			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
+				Code:    "validation_error",
+				Message: fmt.Sprintf("exactly %d positional argument(s) required", plan.Options.ExactPositional),
+			}, 2)
+		}
+	case !plan.Options.AcceptsPositional:
+		if fs.NArg() != 0 {
+			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
+				Code:    "validation_error",
+				Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
+			}, 2)
+		}
 	}
+	positional := fs.Args()
 
 	if err := validateCLIFormat(plan.Name, format); err != nil {
 		return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
@@ -183,10 +230,15 @@ func runCommand[Req any, Res any](
 
 	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
+		// Standalone commands tolerate a missing workspace config; callbacks
+		// that can opportunistically use a config must handle an empty path.
+		if !plan.Options.Standalone {
+			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
+				Code:    "config_error",
+				Message: err.Error(),
+			}, 2)
+		}
+		resolvedConfigPath = ""
 	}
 
 	trimmedRequestFile := strings.TrimSpace(requestFile)
@@ -245,7 +297,7 @@ func runCommand[Req any, Res any](
 			}
 			cfg = loaded
 		}
-		request, err = plan.BuildRequest(ctx, cfg, resolvedConfigPath)
+		request, err = plan.BuildRequest(ctx, cfg, resolvedConfigPath, positional)
 		if err != nil {
 			if issue, exitCode, ok := asCliIssue(err); ok {
 				return writeCLIError(stdout, stderr, format, plan.Name, nil, issue, exitCode)
@@ -258,7 +310,7 @@ func runCommand[Req any, Res any](
 	}
 
 	if plan.Normalize != nil {
-		normalized, normErr := plan.Normalize(ctx, request)
+		normalized, normErr := plan.Normalize(ctx, request, format)
 		if normErr != nil {
 			if issue, exitCode, ok := asCliIssue(normErr); ok {
 				return writeCLIError(stdout, stderr, format, plan.Name, normalized, issue, exitCode)
@@ -273,7 +325,7 @@ func runCommand[Req any, Res any](
 
 	execCtx, tracker, started := withCommandTimings(ctx, plan.Options.Timings && timings && format == commandFormatJSON)
 
-	enrichedReq, result, issue := plan.Execute(execCtx, resolvedConfigPath, request)
+	enrichedReq, result, issue := plan.Execute(execCtx, resolvedConfigPath, request, format)
 	if issue != nil {
 		return writeCLIError(stdout, stderr, format, plan.Name, enrichedReq, cliIssueFromAppIssue(issue), issue.ExitCode)
 	}
