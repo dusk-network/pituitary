@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -85,6 +86,71 @@ func TestRunCanonicalizeWriteProducesBundle(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("generated file %s missing: %v", path, err)
 		}
+	}
+}
+
+// TestRunCanonicalizeRejectsConfigFlag verifies that Standalone commands do
+// not register the shared --config flag: passing it must fail with a
+// validation_error from the flag parser, not silently accept it.
+//
+// Flag parsing fails before --format is processed, so the error is emitted
+// in the default format. PITUITARY_FORMAT is cleared so the default is
+// deterministically text (routed to stderr) rather than whatever the host
+// environment sets.
+func TestRunCanonicalizeRejectsConfigFlag(t *testing.T) {
+	t.Setenv("PITUITARY_FORMAT", "")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCanonicalize([]string{"--config", "pituitary.toml", "--path", "note.md"}, &stdout, &stderr)
+	if exitCode != 2 {
+		t.Fatalf("runCanonicalize(--config) exit code = %d, want 2", exitCode)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("runCanonicalize(--config) wrote unexpected stdout: %q", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "flag provided but not defined: -config") {
+		t.Fatalf("stderr = %q, want flag-not-defined message mentioning -config", got)
+	}
+}
+
+// TestRunCanonicalizeToleratesMissingConfig verifies that Standalone commands
+// tolerate an unresolvable workspace config: when resolveCommandConfigPath
+// fails (no pituitary.toml discoverable and PITUITARY_CONFIG unset), the
+// runner passes an empty cfgPath to Execute rather than aborting with
+// config_error, so canonicalize can still process the markdown file.
+func TestRunCanonicalizeToleratesMissingConfig(t *testing.T) {
+	t.Setenv("PITUITARY_CONFIG", "")
+
+	repo := t.TempDir()
+	mustWriteFileCmd(t, filepath.Join(repo, "note.md"), "# Note\n\nBody paragraph.\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		// Precondition: prove resolveCommandConfigPath actually fails here,
+		// so we know the success below exercises the Standalone tolerance
+		// branch and not an accidentally-discovered config.
+		if _, err := resolveCommandConfigPath(context.Background(), ""); err == nil {
+			t.Fatalf("resolveCommandConfigPath() err = nil, want error to exercise Standalone tolerance branch")
+		}
+		return runCanonicalize([]string{"--path", "note.md", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runCanonicalize() exit code = %d, want 0 (stderr: %q, stdout: %q)", exitCode, stderr.String(), stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runCanonicalize() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal canonicalize payload: %v", err)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
 	}
 }
 
