@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 // maxCLIRequestBytes caps how much a CLI command will buffer from a request
@@ -45,6 +48,22 @@ func readBoundedRequestFile(absPath, label string) ([]byte, error) {
 		return nil, fmt.Errorf("%s file %q exceeds %d-byte size limit", label, absPath, maxCLIRequestBytes)
 	}
 	return data, nil
+}
+
+// autoLoadWorkspaceRequest returns a LoadRequestFile callback for commands
+// whose --request-file contents are a bare workspace-scoped JSON document
+// that unmarshals directly into Req, with no post-load enrichment. Commands
+// that need additional resolution after the JSON parse (e.g. resolving a
+// diff-file reference inside the parsed request) should keep their own
+// callback rather than reaching for this helper.
+func autoLoadWorkspaceRequest[Req any]() func(context.Context, *config.Config, string) (*Req, error) {
+	return func(_ context.Context, cfg *config.Config, trimmedPath string) (*Req, error) {
+		req, err := loadWorkspaceScopedJSONFile[Req](cfg.Workspace.RootPath, trimmedPath, "request file")
+		if err != nil {
+			return nil, err
+		}
+		return &req, nil
+	}
 }
 
 func loadWorkspaceScopedJSONFile[T any](workspaceRoot, rawPath, label string) (T, error) {
