@@ -55,8 +55,8 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 				fs.StringVar(&scope, "scope", "all", "artifact scope: all, docs, or specs")
 			},
 			InlineFlagsSet: func(fs *flag.FlagSet) bool {
-				return countNonEmptyStrings(terms) > 0 ||
-					countNonEmptyStrings(canonicalTerms) > 0 ||
+				return countNonEmptyStrings([]string(terms)) > 0 ||
+					countNonEmptyStrings([]string(canonicalTerms)) > 0 ||
 					strings.TrimSpace(specRef) != "" ||
 					strings.TrimSpace(specPath) != "" ||
 					flagWasSet(fs, "scope")

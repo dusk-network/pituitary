@@ -34,9 +34,8 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 			Name:  "check-overlap",
 			Usage: "pituitary [--config PATH] check-overlap (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]",
 			Options: commandRunOptions{
-				RequestFile:    true,
-				ConfigForFile:  true,
-				ConfigForFlags: true,
+				RequestFile:   true,
+				ConfigForFile: true,
 			},
 			BindFlags: func(fs *flag.FlagSet) {
 				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
@@ -55,12 +54,24 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.OverlapRequest, error) {
+			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string) (analysis.OverlapRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
 				trimmedRecord := strings.TrimSpace(specRecordFile)
 				if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedRecord) > 1 {
-					return analysis.OverlapRequest{}, fmt.Errorf("exactly one of --path, --spec-ref, --spec-record-file, or --request-file is allowed")
+					return analysis.OverlapRequest{}, fmt.Errorf("exactly one of --path, --spec-ref, or --spec-record-file is allowed")
+				}
+				var (
+					cfg           *config.Config
+					workspaceRoot string
+				)
+				if trimmedSpecPath != "" || trimmedRecord != "" {
+					loaded, cfgErr := config.Load(resolvedConfigPath)
+					if cfgErr != nil {
+						return analysis.OverlapRequest{}, configLoadError(cfgErr)
+					}
+					cfg = loaded
+					workspaceRoot = cfg.Workspace.RootPath
 				}
 				if trimmedSpecPath != "" {
 					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
@@ -69,7 +80,7 @@ func runCheckOverlapContext(ctx context.Context, args []string, stdout, stderr i
 					}
 					trimmedSpecRef = resolved
 				}
-				return overlapRequestFromFlagsContext(cfg.Workspace.RootPath, trimmedSpecRef, trimmedRecord)
+				return overlapRequestFromFlagsContext(workspaceRoot, trimmedSpecRef, trimmedRecord)
 			},
 			Execute: func(ctx context.Context, cfgPath string, req analysis.OverlapRequest) (analysis.OverlapRequest, *analysis.OverlapResult, *app.Issue) {
 				op := app.CheckOverlap(ctx, cfgPath, req)

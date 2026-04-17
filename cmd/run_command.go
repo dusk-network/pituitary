@@ -96,6 +96,16 @@ func (e *cliIssueError) Error() string {
 	return e.issue.Message
 }
 
+// configLoadError wraps a config.Load failure surfaced from a BuildRequest
+// callback so the runner classifies it as a config_error rather than the
+// default validation_error.
+func configLoadError(err error) error {
+	return &cliIssueError{
+		issue:    cliIssue{Code: "config_error", Message: err.Error()},
+		exitCode: 2,
+	}
+}
+
 // asCliIssue unwraps a cliIssueError chain into its (issue, exitCode) pair.
 func asCliIssue(err error) (cliIssue, int, bool) {
 	var wrap *cliIssueError
