@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -92,16 +93,16 @@ func TestRunCanonicalizeWriteProducesBundle(t *testing.T) {
 // not register the shared --config flag: passing it must fail with a
 // validation_error from the flag parser, not silently accept it.
 //
-// Note: flag parsing fails before --format is processed, so the error is
-// emitted in the default (text) format to stderr.
+// Flag parsing fails before --format is processed, so the error is emitted
+// in the default format. PITUITARY_FORMAT is cleared so the default is
+// deterministically text (routed to stderr) rather than whatever the host
+// environment sets.
 func TestRunCanonicalizeRejectsConfigFlag(t *testing.T) {
-	repo := writeDiscoveryWorkspace(t)
+	t.Setenv("PITUITARY_FORMAT", "")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := withWorkingDir(t, repo, func() int {
-		return runCanonicalize([]string{"--config", "pituitary.toml", "--path", "rfcs/service-sla.md"}, &stdout, &stderr)
-	})
+	exitCode := runCanonicalize([]string{"--config", "pituitary.toml", "--path", "note.md"}, &stdout, &stderr)
 	if exitCode != 2 {
 		t.Fatalf("runCanonicalize(--config) exit code = %d, want 2", exitCode)
 	}
@@ -127,6 +128,12 @@ func TestRunCanonicalizeToleratesMissingConfig(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := withWorkingDir(t, repo, func() int {
+		// Precondition: prove resolveCommandConfigPath actually fails here,
+		// so we know the success below exercises the Standalone tolerance
+		// branch and not an accidentally-discovered config.
+		if _, err := resolveCommandConfigPath(context.Background(), ""); err == nil {
+			t.Fatalf("resolveCommandConfigPath() err = nil, want error to exercise Standalone tolerance branch")
+		}
 		return runCanonicalize([]string{"--path", "note.md", "--format", "json"}, &stdout, &stderr)
 	})
 	if exitCode != 0 {
