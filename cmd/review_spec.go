@@ -29,9 +29,8 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 			Name:  "review-spec",
 			Usage: "pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]",
 			Options: commandRunOptions{
-				RequestFile:    true,
-				ConfigForFile:  true,
-				ConfigForFlags: true,
+				RequestFile:   true,
+				ConfigForFile: true,
 			},
 			BindFlags: func(fs *flag.FlagSet) {
 				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
@@ -50,12 +49,24 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.ReviewRequest, error) {
+			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string) (analysis.ReviewRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
 				trimmedRecord := strings.TrimSpace(specRecordFile)
 				if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedRecord) > 1 {
-					return analysis.ReviewRequest{}, fmt.Errorf("exactly one of --path, --spec-ref, --spec-record-file, or --request-file is allowed")
+					return analysis.ReviewRequest{}, fmt.Errorf("exactly one of --path, --spec-ref, or --spec-record-file is allowed")
+				}
+				var (
+					cfg           *config.Config
+					workspaceRoot string
+				)
+				if trimmedSpecPath != "" || trimmedRecord != "" {
+					loaded, cfgErr := config.Load(resolvedConfigPath)
+					if cfgErr != nil {
+						return analysis.ReviewRequest{}, configLoadError(cfgErr)
+					}
+					cfg = loaded
+					workspaceRoot = cfg.Workspace.RootPath
 				}
 				if trimmedSpecPath != "" {
 					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
@@ -64,7 +75,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 					}
 					trimmedSpecRef = resolved
 				}
-				return reviewRequestFromFlags(cfg.Workspace.RootPath, trimmedSpecRef, trimmedRecord)
+				return reviewRequestFromFlags(workspaceRoot, trimmedSpecRef, trimmedRecord)
 			},
 			Execute: func(ctx context.Context, cfgPath string, req analysis.ReviewRequest) (analysis.ReviewRequest, *analysis.ReviewResult, *app.Issue) {
 				op := app.ReviewSpec(ctx, cfgPath, req)

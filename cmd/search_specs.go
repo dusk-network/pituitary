@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -83,7 +84,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 				requestLimit := queryArgs.Limit
 				req.Limit = &requestLimit
 				if req.Query == "" {
-					return req, fmt.Errorf("query is required")
+					return req, errors.New("query is required")
 				}
 				return req, nil
 			},
