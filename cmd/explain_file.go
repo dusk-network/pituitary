@@ -29,7 +29,6 @@ func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io
 			Usage: "pituitary [--config PATH] explain-file PATH [--format FORMAT]",
 			Options: commandRunOptions{
 				ExactPositional: 1,
-				ConfigForFlags:  true,
 			},
 			BuildRequest: func(_ context.Context, _ *config.Config, _ string, positional []string) (explainFileRequest, error) {
 				return explainFileRequest{Path: positional[0]}, nil
