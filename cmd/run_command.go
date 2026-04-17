@@ -35,11 +35,16 @@ type commandRun[Req any, Res any] struct {
 	// Options.RequestFile is true.
 	InlineFlagsSet func(fs *flag.FlagSet) bool
 
-	// LoadRequestFile parses the request JSON and may run follow-up reads. It
-	// returns a pointer to the parsed request: nil means no request should
-	// surface in the error envelope (e.g., JSON parse failure); non-nil means
-	// write the pointee into the envelope. Required when Options.RequestFile
-	// is true.
+	// LoadRequestFile parses the request JSON and may run follow-up reads.
+	// Contract:
+	//   - On success (nil error), the returned pointer MUST be non-nil; the
+	//     runner dereferences it to build the request passed to Normalize and
+	//     Execute. Returning (nil, nil) is a programmer error.
+	//   - On error, nil means no request should surface in the envelope (e.g.
+	//     JSON parse failure). Non-nil means the pointee is a partial request
+	//     (e.g. JSON parsed but a follow-up diff-file resolution failed) and
+	//     the runner writes it into the error envelope.
+	// Required when Options.RequestFile is true.
 	LoadRequestFile func(ctx context.Context, cfg *config.Config, trimmedPath string) (*Req, error)
 
 	// BuildRequest builds the request from the inline flags. cfg is non-nil
@@ -208,9 +213,16 @@ func runCommand[Req any, Res any](
 				Message: loadErr.Error(),
 			}, 2)
 		}
-		if loaded != nil {
-			request = *loaded
+		if loaded == nil {
+			// Programmer error: LoadRequestFile returned (nil, nil). Surface as
+			// internal_error so the bug is visible in the envelope instead of
+			// letting Execute run against a zero-valued request.
+			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
+				Code:    "internal_error",
+				Message: plan.Name + ": request file loader returned no request",
+			}, 2)
 		}
+		request = *loaded
 	default:
 		var cfg *config.Config
 		if plan.Options.ConfigForFlags {
