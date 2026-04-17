@@ -46,7 +46,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 			InlineFlagsSet: func(_ *flag.FlagSet) bool {
 				return strings.TrimSpace(specRef) != "" || strings.TrimSpace(specPath) != ""
 			},
-			LoadRequestFile: autoLoadWorkspaceRequest[analysis.AnalyzeImpactRequest](),
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.AnalyzeImpactRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.AnalyzeImpactRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)

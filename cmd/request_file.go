@@ -50,28 +50,29 @@ func readBoundedRequestFile(absPath, label string) ([]byte, error) {
 	return data, nil
 }
 
-// autoLoadWorkspaceRequest returns a LoadRequestFile callback for commands
-// whose --request-file contents are a bare workspace-scoped JSON document
-// that unmarshals directly into Req, with no post-load enrichment. Commands
-// that need additional resolution after the JSON parse (e.g. resolving a
-// diff-file reference inside the parsed request) should keep their own
-// callback rather than reaching for this helper.
+// autoLoadWorkspaceRequest is a LoadRequestFile callback for commands whose
+// --request-file contents are a bare workspace-scoped JSON document that
+// unmarshals directly into Req, with no post-load enrichment. Commands that
+// need additional resolution after the JSON parse (e.g. resolving a diff-file
+// reference inside the parsed request) should keep their own callback rather
+// than reaching for this helper.
+//
+// Use by taking the instantiated value: `LoadRequestFile:
+// autoLoadWorkspaceRequest[analysis.OverlapRequest]`.
 //
 // The helper needs a non-nil *config.Config to resolve workspace-scoped paths,
 // so callers must set Options.ConfigForFile = true. A nil cfg returns a clear
 // error rather than nil-panicking, so a future misconfiguration surfaces as a
 // classified CLI error instead of crashing.
-func autoLoadWorkspaceRequest[Req any]() func(context.Context, *config.Config, string) (*Req, error) {
-	return func(_ context.Context, cfg *config.Config, trimmedPath string) (*Req, error) {
-		if cfg == nil {
-			return nil, fmt.Errorf("autoLoadWorkspaceRequest requires Options.ConfigForFile = true; cfg was nil")
-		}
-		req, err := loadWorkspaceScopedJSONFile[Req](cfg.Workspace.RootPath, trimmedPath, "request file")
-		if err != nil {
-			return nil, err
-		}
-		return &req, nil
+func autoLoadWorkspaceRequest[Req any](_ context.Context, cfg *config.Config, trimmedPath string) (*Req, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("autoLoadWorkspaceRequest requires Options.ConfigForFile = true; cfg was nil")
 	}
+	req, err := loadWorkspaceScopedJSONFile[Req](cfg.Workspace.RootPath, trimmedPath, "request file")
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
 }
 
 func loadWorkspaceScopedJSONFile[T any](workspaceRoot, rawPath, label string) (T, error) {

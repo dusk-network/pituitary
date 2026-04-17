@@ -61,7 +61,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 					strings.TrimSpace(specPath) != "" ||
 					flagWasSet(fs, "scope")
 			},
-			LoadRequestFile: autoLoadWorkspaceRequest[analysis.TerminologyAuditRequest](),
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.TerminologyAuditRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.TerminologyAuditRequest, error) {
 				req := analysis.TerminologyAuditRequest{
 					Terms:          []string(terms),

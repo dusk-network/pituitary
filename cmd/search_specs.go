@@ -56,7 +56,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 			InlineFlagsSet: func(fs *flag.FlagSet) bool {
 				return strings.TrimSpace(query) != "" || strings.TrimSpace(domain) != "" || len(statuses) > 0 || flagWasSet(fs, "limit")
 			},
-			LoadRequestFile: autoLoadWorkspaceRequest[index.SearchSpecRequest](),
+			LoadRequestFile: autoLoadWorkspaceRequest[index.SearchSpecRequest],
 			BuildRequest: func(_ context.Context, _ *config.Config, _ string, _ []string) (index.SearchSpecRequest, error) {
 				return index.SearchSpecRequest{
 					Query: strings.TrimSpace(query),

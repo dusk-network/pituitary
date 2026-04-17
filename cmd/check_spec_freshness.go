@@ -41,7 +41,7 @@ func runCheckSpecFreshnessContext(ctx context.Context, args []string, stdout, st
 			InlineFlagsSet: func(_ *flag.FlagSet) bool {
 				return strings.TrimSpace(specRef) != "" || strings.TrimSpace(specPath) != ""
 			},
-			LoadRequestFile: autoLoadWorkspaceRequest[analysis.FreshnessRequest](),
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.FreshnessRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.FreshnessRequest, error) {
 				req := analysis.FreshnessRequest{Scope: strings.TrimSpace(scope)}
 				resolvedSpecRef := strings.TrimSpace(specRef)

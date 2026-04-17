@@ -42,7 +42,7 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 					strings.TrimSpace(specPath) != "" ||
 					strings.TrimSpace(specRecordFile) != ""
 			},
-			LoadRequestFile: autoLoadWorkspaceRequest[analysis.ReviewRequest](),
+			LoadRequestFile: autoLoadWorkspaceRequest[analysis.ReviewRequest],
 			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.ReviewRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
