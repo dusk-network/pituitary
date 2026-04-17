@@ -28,118 +28,72 @@ func runCheckTerminology(args []string, stdout, stderr io.Writer) int {
 }
 
 func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("check-terminology", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	help := newCommandHelp("check-terminology", "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT] [--timings]")
-
 	var (
 		terms          stringList
 		canonicalTerms stringList
 		specRef        string
 		specPath       string
 		scope          string
-		requestFile    string
-		format         string
-		configPath     string
-		timings        bool
 	)
-	fs.Var(&terms, "term", "displaced or governed term to audit; repeat to narrow a configured policy set or supply ad hoc terms")
-	fs.Var(&canonicalTerms, "canonical-term", "replacement or canonical term; repeat to supply multiple terms")
-	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref used to anchor the audit")
-	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec used to anchor the audit")
-	fs.StringVar(&scope, "scope", "all", "artifact scope: all, docs, or specs")
-	fs.StringVar(&requestFile, "request-file", "", "path to terminology audit request JSON, or - for stdin")
-	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
-	fs.StringVar(&configPath, "config", "", "path to workspace config")
-	fs.BoolVar(&timings, "timings", false, "include timing metadata in JSON output")
 
-	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-terminology", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	} else if handled {
-		return 0
-	}
-	if fs.NArg() != 0 {
-		return writeCLIError(stdout, stderr, format, "check-terminology", nil, cliIssue{
-			Code:    "validation_error",
-			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
-		}, 2)
-	}
-
-	request := analysis.TerminologyAuditRequest{
-		Terms:          []string(terms),
-		CanonicalTerms: []string(canonicalTerms),
-		SpecRef:        strings.TrimSpace(specRef),
-		Scope:          strings.TrimSpace(scope),
-	}
-	if err := validateCLIFormat("check-terminology", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
-	}
-
-	trimmedRequestFile := strings.TrimSpace(requestFile)
-	if trimmedRequestFile != "" && (countNonEmptyStrings(request.Terms) > 0 || countNonEmptyStrings(request.CanonicalTerms) > 0 || request.SpecRef != "" || strings.TrimSpace(specPath) != "" || flagWasSet(fs, "scope")) {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "validation_error",
-			Message: "use either --request-file or the terminology flags",
-		}, 2)
-	}
-	if trimmedRequestFile != "" {
-		cfg, err := config.Load(resolvedConfigPath)
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
-		}
-		request, err = loadWorkspaceScopedJSONFile[analysis.TerminologyAuditRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-				Code:    "validation_error",
-				Message: err.Error(),
-			}, 2)
-		}
-	}
-	trimmedPath := strings.TrimSpace(specPath)
-	if trimmedRequestFile == "" && request.SpecRef != "" && trimmedPath != "" {
-		return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-			Code:    "validation_error",
-			Message: "exactly one of --spec-ref or --path is allowed",
-		}, 2)
-	}
-	if trimmedRequestFile == "" && trimmedPath != "" {
-		cfg, err := config.Load(resolvedConfigPath)
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "check-terminology", request, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
-		}
-		request.SpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
-		if err != nil {
-			return writeSpecPathResolutionError(stdout, stderr, format, "check-terminology", request, err)
-		}
-	}
-
-	ctx, tracker, started := withCommandTimings(ctx, timings && format == commandFormatJSON)
-
-	operation := app.CheckTerminology(ctx, resolvedConfigPath, request)
-	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "check-terminology", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
-	}
-
-	return writeCLISuccessWithTimings(stdout, stderr, format, "check-terminology", operation.Request, operation.Result, nil, snapshotCommandTimings(tracker, started))
+	return runCommand[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](
+		ctx, args, stdout, stderr,
+		commandRun[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult]{
+			Name:  "check-terminology",
+			Usage: "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT] [--timings]",
+			Options: commandRunOptions{
+				RequestFile:    true,
+				Timings:        true,
+				ConfigForFile:  true,
+				ConfigForFlags: true,
+			},
+			BindFlags: func(fs *flag.FlagSet) {
+				fs.Var(&terms, "term", "displaced or governed term to audit; repeat to narrow a configured policy set or supply ad hoc terms")
+				fs.Var(&canonicalTerms, "canonical-term", "replacement or canonical term; repeat to supply multiple terms")
+				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref used to anchor the audit")
+				fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec used to anchor the audit")
+				fs.StringVar(&scope, "scope", "all", "artifact scope: all, docs, or specs")
+			},
+			InlineFlagsSet: func(fs *flag.FlagSet) bool {
+				return countNonEmptyStrings(terms) > 0 ||
+					countNonEmptyStrings(canonicalTerms) > 0 ||
+					strings.TrimSpace(specRef) != "" ||
+					strings.TrimSpace(specPath) != "" ||
+					flagWasSet(fs, "scope")
+			},
+			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.TerminologyAuditRequest, error) {
+				req, err := loadWorkspaceScopedJSONFile[analysis.TerminologyAuditRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
+				if err != nil {
+					return nil, err
+				}
+				return &req, nil
+			},
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.TerminologyAuditRequest, error) {
+				req := analysis.TerminologyAuditRequest{
+					Terms:          []string(terms),
+					CanonicalTerms: []string(canonicalTerms),
+					SpecRef:        strings.TrimSpace(specRef),
+					Scope:          strings.TrimSpace(scope),
+				}
+				trimmedPath := strings.TrimSpace(specPath)
+				if req.SpecRef != "" && trimmedPath != "" {
+					return req, fmt.Errorf("exactly one of --spec-ref or --path is allowed")
+				}
+				if trimmedPath != "" {
+					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
+					if err != nil {
+						return req, specPathResolutionError(err)
+					}
+					req.SpecRef = resolved
+				}
+				return req, nil
+			},
+			Execute: func(ctx context.Context, cfgPath string, req analysis.TerminologyAuditRequest) (analysis.TerminologyAuditRequest, *analysis.TerminologyAuditResult, *app.Issue) {
+				op := app.CheckTerminology(ctx, cfgPath, req)
+				return op.Request, op.Result, op.Issue
+			},
+		},
+	)
 }
 
 func countNonEmptyStrings(values []string) int {

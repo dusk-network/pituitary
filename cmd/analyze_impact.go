@@ -18,121 +18,75 @@ func runAnalyzeImpact(args []string, stdout, stderr io.Writer) int {
 }
 
 func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("analyze-impact", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	help := newCommandHelp("analyze-impact", "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF | --request-file PATH|-) [--change-type TYPE] [--summary] [--format FORMAT]")
-
 	var (
-		specRef     string
-		specPath    string
-		requestFile string
-		changeType  string
-		summary     bool
-		format      string
-		configPath  string
-		atDate      string
+		specRef    string
+		specPath   string
+		changeType string
+		summary    bool
+		atDate     string
 	)
-	fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
-	fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
-	fs.StringVar(&requestFile, "request-file", "", "path to impact request JSON, or - for stdin")
-	fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
-	fs.BoolVar(&summary, "summary", false, "emit a concise ranked summary in text output and include summary metadata in JSON")
-	fs.StringVar(&format, "format", defaultCommandFormatForWriter(stdout, commandFormatText), "output format")
-	fs.StringVar(&configPath, "config", "", "path to workspace config")
-	fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
 
-	if handled, err := parseCommandFlags(fs, args, stdout, help); err != nil {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	} else if handled {
-		return 0
-	}
-	if fs.NArg() != 0 {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", nil, cliIssue{
-			Code:    "validation_error",
-			Message: fmt.Sprintf("unexpected positional arguments: %s", strings.Join(fs.Args(), " ")),
-		}, 2)
-	}
-
-	request := analysis.AnalyzeImpactRequest{
-		ChangeType: strings.TrimSpace(changeType),
-		Summary:    summary,
-	}
-	if err := validateCLIFormat("analyze-impact", format); err != nil {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-			Code:    "validation_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	trimmedSpecRef := strings.TrimSpace(specRef)
-	trimmedSpecPath := strings.TrimSpace(specPath)
-	trimmedRequestFile := strings.TrimSpace(requestFile)
-	if nonEmptyCount(trimmedSpecRef, trimmedSpecPath, trimmedRequestFile) > 1 {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-			Code:    "validation_error",
-			Message: "exactly one of --path, --spec-ref, or --request-file is allowed",
-		}, 2)
-	}
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
-	if err != nil {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
-	}
-	if trimmedSpecPath != "" {
-		cfg, err := config.Load(resolvedConfigPath)
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
-		}
-		trimmedSpecRef, err = resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedSpecPath)
-		if err != nil {
-			return writeSpecPathResolutionError(stdout, stderr, format, "analyze-impact", request, err)
-		}
-	}
-	switch {
-	case trimmedRequestFile != "":
-		cfg, err := config.Load(resolvedConfigPath)
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
-		}
-		request, err = loadWorkspaceScopedJSONFile[analysis.AnalyzeImpactRequest](cfg.Workspace.RootPath, trimmedRequestFile, "request file")
-		if err != nil {
-			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-				Code:    "validation_error",
-				Message: err.Error(),
-			}, 2)
-		}
-	default:
-		request.SpecRef = trimmedSpecRef
-		if request.SpecRef == "" {
-			return writeCLIError(stdout, stderr, format, "analyze-impact", request, cliIssue{
-				Code:    "validation_error",
-				Message: "one of --path, --spec-ref, or --request-file is required",
-			}, 2)
-		}
-	}
-
-	if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
-		request.AtDate = trimmedAt
-	}
-	operation := app.AnalyzeImpact(ctx, resolvedConfigPath, request)
-	if operation.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "analyze-impact", operation.Request, cliIssueFromAppIssue(operation.Issue), operation.Issue.ExitCode)
-	}
-
-	// Annotate cross-family impact.
-	annotateCrossFamilyImpact(ctx, resolvedConfigPath, request.SpecRef, operation.Result)
-
-	return writeCLISuccess(stdout, stderr, format, "analyze-impact", operation.Request, operation.Result, nil)
+	return runCommand[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult](
+		ctx, args, stdout, stderr,
+		commandRun[analysis.AnalyzeImpactRequest, analysis.AnalyzeImpactResult]{
+			Name:  "analyze-impact",
+			Usage: "pituitary [--config PATH] analyze-impact (--path PATH | --spec-ref REF | --request-file PATH|-) [--change-type TYPE] [--summary] [--format FORMAT]",
+			Options: commandRunOptions{
+				RequestFile:    true,
+				ConfigForFile:  true,
+				ConfigForFlags: true,
+			},
+			BindFlags: func(fs *flag.FlagSet) {
+				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
+				fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
+				fs.StringVar(&changeType, "change-type", "accepted", "change type: accepted, modified, or deprecated")
+				fs.BoolVar(&summary, "summary", false, "emit a concise ranked summary in text output and include summary metadata in JSON")
+				fs.StringVar(&atDate, "at", "", "ISO date for point-in-time governance query (e.g. 2025-03-15)")
+			},
+			InlineFlagsSet: func(_ *flag.FlagSet) bool {
+				return strings.TrimSpace(specRef) != "" || strings.TrimSpace(specPath) != ""
+			},
+			LoadRequestFile: func(_ context.Context, cfg *config.Config, trimmedPath string) (*analysis.AnalyzeImpactRequest, error) {
+				req, err := loadWorkspaceScopedJSONFile[analysis.AnalyzeImpactRequest](cfg.Workspace.RootPath, trimmedPath, "request file")
+				if err != nil {
+					return nil, err
+				}
+				return &req, nil
+			},
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.AnalyzeImpactRequest, error) {
+				req := analysis.AnalyzeImpactRequest{
+					ChangeType: strings.TrimSpace(changeType),
+					Summary:    summary,
+					SpecRef:    strings.TrimSpace(specRef),
+				}
+				if trimmedPath := strings.TrimSpace(specPath); trimmedPath != "" {
+					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
+					if err != nil {
+						return req, specPathResolutionError(err)
+					}
+					req.SpecRef = resolved
+				}
+				if req.SpecRef == "" {
+					return req, fmt.Errorf("one of --path, --spec-ref, or --request-file is required")
+				}
+				return req, nil
+			},
+			Normalize: func(_ context.Context, req analysis.AnalyzeImpactRequest) (analysis.AnalyzeImpactRequest, error) {
+				if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
+					req.AtDate = trimmedAt
+				}
+				return req, nil
+			},
+			Execute: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest) (analysis.AnalyzeImpactRequest, *analysis.AnalyzeImpactResult, *app.Issue) {
+				op := app.AnalyzeImpact(ctx, cfgPath, req)
+				return op.Request, op.Result, op.Issue
+			},
+			PostProcess: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest, res *analysis.AnalyzeImpactResult) (*analysis.AnalyzeImpactResult, *cliIssue) {
+				annotateCrossFamilyImpact(ctx, cfgPath, req.SpecRef, res)
+				return res, nil
+			},
+		},
+	)
 }
 
 func annotateCrossFamilyImpact(ctx context.Context, configPath string, sourceRef string, result *analysis.AnalyzeImpactResult) {
