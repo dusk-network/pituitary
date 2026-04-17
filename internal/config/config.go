@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	pathpkg "path"
@@ -231,15 +232,20 @@ func Load(path string) (*Config, error) {
 }
 
 func readBoundedConfig(configPath string) ([]byte, error) {
-	info, err := os.Stat(configPath)
+	// #nosec G304 -- configPath is the explicit config file selected by the caller; LimitReader enforces the allocation bound.
+	f, err := os.Open(configPath)
 	if err != nil {
 		return nil, err
 	}
-	if info.Size() > maxConfigBytes {
-		return nil, fmt.Errorf("config file exceeds %d-byte size limit (got %d bytes)", maxConfigBytes, info.Size())
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
+	if err != nil {
+		return nil, err
 	}
-	// #nosec G304 -- configPath is the explicit config file selected by the caller; Stat-bounded read prevents OOM.
-	return os.ReadFile(configPath)
+	if int64(len(data)) > maxConfigBytes {
+		return nil, fmt.Errorf("config file exceeds %d-byte size limit", maxConfigBytes)
+	}
+	return data, nil
 }
 
 // DeclaresMultirepoRepos reports whether the config file at path declares

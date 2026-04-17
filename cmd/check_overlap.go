@@ -163,10 +163,9 @@ func loadSpecRecordFile(workspaceRoot, path string) (model.SpecRecord, error) {
 		if err != nil {
 			return model.SpecRecord{}, err
 		}
-		// #nosec G304 -- absPath is validated to remain under the configured workspace root.
-		data, err = os.ReadFile(absPath)
+		data, err = readBoundedRequestFile(absPath, "spec record")
 		if err != nil {
-			return model.SpecRecord{}, fmt.Errorf("read spec record file %q: %w", path, err)
+			return model.SpecRecord{}, err
 		}
 	}
 	var record model.SpecRecord

@@ -40,3 +40,27 @@ func TestReadBoundedFileReadsUnderLimit(t *testing.T) {
 		t.Fatalf("readBoundedFile content = %q, want %q", string(got), "hi")
 	}
 }
+
+// TestReadAllLimitedEnforcesLimitFromReader verifies the limit is enforced at
+// read time (via io.LimitReader), not via a pre-read Stat. This closes the
+// TOCTOU window where a file could grow or be replaced between the size check
+// and the actual read.
+func TestReadAllLimitedEnforcesLimitFromReader(t *testing.T) {
+	t.Parallel()
+
+	// An unbounded source (endless 'x' stream) must still be rejected.
+	src := bytes.NewReader(bytes.Repeat([]byte("x"), 4096))
+	if _, err := readAllLimited(src, 1024, "test"); err == nil {
+		t.Fatalf("readAllLimited accepted oversize reader; want size limit error")
+	}
+
+	// A source exactly at the limit must be accepted.
+	src = bytes.NewReader(bytes.Repeat([]byte("y"), 1024))
+	got, err := readAllLimited(src, 1024, "test")
+	if err != nil {
+		t.Fatalf("readAllLimited rejected at-limit reader: %v", err)
+	}
+	if len(got) != 1024 {
+		t.Fatalf("readAllLimited len = %d, want 1024", len(got))
+	}
+}

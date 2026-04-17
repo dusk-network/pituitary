@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1072,11 +1073,11 @@ func stripComment(line string) string {
 }
 
 func pathWithinRoot(root, path string) bool {
-	realRoot, err := evalSymlinksBestEffort(root)
+	realRoot, err := EvalSymlinksBestEffort(root)
 	if err != nil {
 		return false
 	}
-	realPath, err := evalSymlinksBestEffort(path)
+	realPath, err := EvalSymlinksBestEffort(path)
 	if err != nil {
 		return false
 	}
@@ -1084,14 +1085,15 @@ func pathWithinRoot(root, path string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// evalSymlinksBestEffort resolves symlinks along the longest existing prefix of
+// EvalSymlinksBestEffort resolves symlinks along the longest existing prefix of
 // path and re-appends any remaining components. It lets callers perform a
 // symlink-safe containment check even when path does not yet exist on disk
-// (e.g., a file that is about to be created).
-func evalSymlinksBestEffort(path string) (string, error) {
+// (e.g., a file that is about to be created). Exported so cmd/ and
+// internal/app/ share one canonical implementation.
+func EvalSymlinksBestEffort(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
@@ -1135,16 +1137,29 @@ const (
 )
 
 // readBoundedFile reads path in full but rejects files larger than maxBytes.
-// The size is checked with Stat first so a hostile or corrupted file never
-// causes a large allocation before the limit kicks in.
+// The read itself is wrapped in an io.LimitReader, so a file that is swapped
+// or grows between open-time and read-time still cannot trigger an unbounded
+// allocation.
 func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
-	info, err := os.Stat(path)
+	// #nosec G304 -- callers validate path containment; LimitReader enforces the allocation bound.
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if info.Size() > maxBytes {
-		return nil, fmt.Errorf("%s exceeds %d-byte size limit (got %d bytes)", filepath.ToSlash(path), maxBytes, info.Size())
+	defer f.Close()
+	return readAllLimited(f, maxBytes, filepath.ToSlash(path))
+}
+
+// readAllLimited reads up to maxBytes+1 bytes from r and returns an error when
+// the source exceeds maxBytes. The extra byte is the "one past the limit"
+// sentinel that tells us the source was longer than allowed.
+func readAllLimited(r io.Reader, maxBytes int64, label string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
 	}
-	// #nosec G304 -- callers validate path containment; Stat-bounded read prevents OOM.
-	return os.ReadFile(path)
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d-byte size limit", label, maxBytes)
+	}
+	return data, nil
 }

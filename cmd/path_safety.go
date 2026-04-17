@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/source"
 )
 
 func validateCLIPathValue(rawPath, label string) (string, error) {
@@ -62,11 +64,11 @@ func resolveWorkspaceScopedCLIPath(workspaceRoot, rawPath, label string) (string
 }
 
 func cliPathWithinRoot(root, path string) bool {
-	realRoot, err := evalSymlinksBestEffortCLI(root)
+	realRoot, err := source.EvalSymlinksBestEffort(root)
 	if err != nil {
 		return false
 	}
-	realPath, err := evalSymlinksBestEffortCLI(path)
+	realPath, err := source.EvalSymlinksBestEffort(path)
 	if err != nil {
 		return false
 	}
@@ -75,34 +77,4 @@ func cliPathWithinRoot(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
-// evalSymlinksBestEffortCLI mirrors internal/source.evalSymlinksBestEffort for
-// CLI-level path checks that may target paths the user is about to create.
-func evalSymlinksBestEffortCLI(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	current := filepath.Clean(abs)
-	var tail []string
-	for {
-		if _, statErr := os.Lstat(current); statErr == nil {
-			break
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return current, nil
-		}
-		tail = append([]string{filepath.Base(current)}, tail...)
-		current = parent
-	}
-	resolved, err := filepath.EvalSymlinks(current)
-	if err != nil {
-		return "", err
-	}
-	for _, seg := range tail {
-		resolved = filepath.Join(resolved, seg)
-	}
-	return filepath.Clean(resolved), nil
 }
