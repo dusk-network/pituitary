@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"strings"
 
@@ -50,7 +51,11 @@ func runCheckSpecFreshnessContext(ctx context.Context, args []string, stdout, st
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.FreshnessRequest, error) {
 				req := analysis.FreshnessRequest{Scope: strings.TrimSpace(scope)}
 				resolvedSpecRef := strings.TrimSpace(specRef)
-				if trimmedPath := strings.TrimSpace(specPath); trimmedPath != "" {
+				trimmedPath := strings.TrimSpace(specPath)
+				if resolvedSpecRef != "" && trimmedPath != "" {
+					return req, fmt.Errorf("exactly one of --path or --spec-ref is allowed")
+				}
+				if trimmedPath != "" {
 					resolved, err := resolveIndexedSpecRefWithConfigContext(ctx, cfg, trimmedPath)
 					if err != nil {
 						return req, specPathResolutionError(err)
