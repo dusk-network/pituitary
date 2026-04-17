@@ -243,8 +243,7 @@ type rawSpecBundle struct {
 
 func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string) (model.SpecRecord, error) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
-	// #nosec G304 -- specPath is the fixed spec.toml file within a discovered bundle directory under the workspace.
-	specBytes, err := os.ReadFile(specPath)
+	specBytes, err := readBoundedFile(specPath, maxSpecTOMLBytes)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read spec.toml: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), err)
 	}
@@ -269,8 +268,7 @@ func loadSpecBundle(workspaceRoot string, source config.Source, bundleDir string
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q body %q does not exist", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath))
 	}
 
-	// #nosec G304 -- bodyPath is validated to remain within the selected bundle directory.
-	bodyBytes, err := os.ReadFile(bodyPath)
+	bodyBytes, err := readBoundedFile(bodyPath, maxMarkdownBodyBytes)
 	if err != nil {
 		return model.SpecRecord{}, fmt.Errorf("source %q bundle %q: read body %q: %w", source.Name, workspaceRelative(workspaceRoot, bundleDir), workspaceRelative(workspaceRoot, bodyPath), err)
 	}
@@ -352,8 +350,7 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 		return nil, err
 	}
 	for _, match := range matches {
-		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
-		bodyBytes, err := os.ReadFile(match.AbsolutePath)
+		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
@@ -385,8 +382,7 @@ func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.
 		return nil, err
 	}
 	for _, match := range matches {
-		// #nosec G304 -- match.AbsolutePath is selected from the configured workspace source.
-		bodyBytes, err := os.ReadFile(match.AbsolutePath)
+		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
 		}
@@ -1076,11 +1072,51 @@ func stripComment(line string) string {
 }
 
 func pathWithinRoot(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
+	realRoot, err := evalSymlinksBestEffort(root)
+	if err != nil {
+		return false
+	}
+	realPath, err := evalSymlinksBestEffort(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
 	if err != nil {
 		return false
 	}
 	return rel == "." || !strings.HasPrefix(rel, "..")
+}
+
+// evalSymlinksBestEffort resolves symlinks along the longest existing prefix of
+// path and re-appends any remaining components. It lets callers perform a
+// symlink-safe containment check even when path does not yet exist on disk
+// (e.g., a file that is about to be created).
+func evalSymlinksBestEffort(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var tail []string
+	for {
+		if _, statErr := os.Lstat(current); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return current, nil
+		}
+		tail = append([]string{filepath.Base(current)}, tail...)
+		current = parent
+	}
+	resolved, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", err
+	}
+	for _, seg := range tail {
+		resolved = filepath.Join(resolved, seg)
+	}
+	return filepath.Clean(resolved), nil
 }
 
 func maxScannerTokenSize(size int) int {
@@ -1088,4 +1124,27 @@ func maxScannerTokenSize(size int) int {
 		return 64 * 1024
 	}
 	return size + 1
+}
+
+// Size caps for indexed content. These bound the memory cost of reading any
+// single spec/body so a crafted input in a shared workspace cannot trigger an
+// OOM during `pituitary index`.
+const (
+	maxSpecTOMLBytes     = 1 * 1024 * 1024  // 1 MiB
+	maxMarkdownBodyBytes = 10 * 1024 * 1024 // 10 MiB
+)
+
+// readBoundedFile reads path in full but rejects files larger than maxBytes.
+// The size is checked with Stat first so a hostile or corrupted file never
+// causes a large allocation before the limit kicks in.
+func readBoundedFile(path string, maxBytes int64) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d-byte size limit (got %d bytes)", filepath.ToSlash(path), maxBytes, info.Size())
+	}
+	// #nosec G304 -- callers validate path containment; Stat-bounded read prevents OOM.
+	return os.ReadFile(path)
 }

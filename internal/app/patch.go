@@ -60,7 +60,13 @@ func resolveSourceFilePath(workspaceRoot, sourceRef string) (string, error) {
 	if relative == "" {
 		return "", fmt.Errorf("source_ref is empty")
 	}
-	return filepath.Join(workspaceRoot, filepath.FromSlash(relative)), nil
+	rootClean := filepath.Clean(workspaceRoot)
+	resolved := filepath.Clean(filepath.Join(rootClean, filepath.FromSlash(relative)))
+	rel, err := filepath.Rel(rootClean, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source_ref %q resolves outside workspace root", sourceRef)
+	}
+	return resolved, nil
 }
 
 func applyEdits(path, expectedContent, expectedChecksum string, edits []plannedEdit) error {

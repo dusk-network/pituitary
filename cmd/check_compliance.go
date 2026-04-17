@@ -182,9 +182,9 @@ func loadComplianceDiffFile(workspaceRoot, path string) (string, error) {
 		err  error
 	)
 	if path == "-" {
-		data, err = io.ReadAll(cliStdin)
+		data, err = readBoundedStdin("diff")
 		if err != nil {
-			return "", fmt.Errorf("read diff from stdin: %w", err)
+			return "", err
 		}
 	} else {
 		absPath, err := resolveWorkspaceScopedCLIPath(workspaceRoot, path, "diff file")

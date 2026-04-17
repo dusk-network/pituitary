@@ -154,9 +154,9 @@ func loadSpecRecordFile(workspaceRoot, path string) (model.SpecRecord, error) {
 		err  error
 	)
 	if path == "-" {
-		data, err = io.ReadAll(cliStdin)
+		data, err = readBoundedStdin("spec record")
 		if err != nil {
-			return model.SpecRecord{}, fmt.Errorf("read spec record from stdin: %w", err)
+			return model.SpecRecord{}, err
 		}
 	} else {
 		absPath, err := resolveWorkspaceScopedCLIPath(workspaceRoot, path, "spec record file")

@@ -62,9 +62,47 @@ func resolveWorkspaceScopedCLIPath(workspaceRoot, rawPath, label string) (string
 }
 
 func cliPathWithinRoot(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
+	realRoot, err := evalSymlinksBestEffortCLI(root)
+	if err != nil {
+		return false
+	}
+	realPath, err := evalSymlinksBestEffortCLI(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(realRoot, realPath)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// evalSymlinksBestEffortCLI mirrors internal/source.evalSymlinksBestEffort for
+// CLI-level path checks that may target paths the user is about to create.
+func evalSymlinksBestEffortCLI(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var tail []string
+	for {
+		if _, statErr := os.Lstat(current); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return current, nil
+		}
+		tail = append([]string{filepath.Base(current)}, tail...)
+		current = parent
+	}
+	resolved, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", err
+	}
+	for _, seg := range tail {
+		resolved = filepath.Join(resolved, seg)
+	}
+	return filepath.Clean(resolved), nil
 }

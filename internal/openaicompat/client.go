@@ -391,23 +391,31 @@ func isTransportFailure(err error, message string) bool {
 		message == "eof"
 }
 
+// maxRetryAfter caps the Retry-After delay a remote endpoint can request.
+// Without this cap, a hostile or misconfigured provider could stall a rebuild
+// for ~31 years by returning "Retry-After: 999999999" or a far-future HTTP date.
+const maxRetryAfter = 60 * time.Second
+
 func retryAfterDuration(value string) time.Duration {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return 0
 	}
+	var delay time.Duration
 	if seconds, err := strconv.Atoi(value); err == nil {
 		if seconds > 0 {
-			return time.Duration(seconds) * time.Second
+			delay = time.Duration(seconds) * time.Second
 		}
+	} else if when, err := http.ParseTime(value); err == nil {
+		delay = time.Until(when)
+	}
+	if delay <= 0 {
 		return 0
 	}
-	if when, err := http.ParseTime(value); err == nil {
-		if delay := time.Until(when); delay > 0 {
-			return delay
-		}
+	if delay > maxRetryAfter {
+		return maxRetryAfter
 	}
-	return 0
+	return delay
 }
 
 func waitBeforeRetry(ctx context.Context, attempt int, retryAfter time.Duration) error {

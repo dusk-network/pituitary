@@ -7,6 +7,24 @@ import (
 	"os"
 )
 
+// maxCLIStdinBytes caps how much a CLI command will buffer from stdin. Without
+// this cap, piping a multi-gigabyte file to `pituitary check-overlap -` would
+// consume all available memory before any parsing happened.
+const maxCLIStdinBytes = 16 * 1024 * 1024
+
+// readBoundedStdin reads at most maxCLIStdinBytes+1 bytes from cliStdin and
+// returns a clear error if the input is larger than the cap.
+func readBoundedStdin(label string) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(cliStdin, maxCLIStdinBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s from stdin: %w", label, err)
+	}
+	if int64(len(data)) > maxCLIStdinBytes {
+		return nil, fmt.Errorf("%s from stdin exceeds %d-byte size limit", label, maxCLIStdinBytes)
+	}
+	return data, nil
+}
+
 func loadWorkspaceScopedJSONFile[T any](workspaceRoot, rawPath, label string) (T, error) {
 	var zero T
 	rawPath, err := validateCLIPathValue(rawPath, label)
@@ -17,9 +35,9 @@ func loadWorkspaceScopedJSONFile[T any](workspaceRoot, rawPath, label string) (T
 	var data []byte
 	switch rawPath {
 	case "-":
-		data, err = io.ReadAll(cliStdin)
+		data, err = readBoundedStdin(label)
 		if err != nil {
-			return zero, fmt.Errorf("read %s from stdin: %w", label, err)
+			return zero, err
 		}
 	default:
 		absPath, err := resolveWorkspaceScopedCLIPath(workspaceRoot, rawPath, label)
