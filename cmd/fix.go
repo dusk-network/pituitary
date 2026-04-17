@@ -50,7 +50,10 @@ func runFixContext(ctx context.Context, args []string, stdout, stderr io.Writer)
 					DryRun: dryRun,
 					Yes:    yes,
 				}
-				if (req.Path == "") == (req.Scope == "") {
+				if req.Path == "" && req.Scope == "" {
+					return req, fmt.Errorf("exactly one of --path or --scope is required")
+				}
+				if req.Path != "" && req.Scope != "" {
 					return req, fmt.Errorf("exactly one of --path or --scope is required")
 				}
 				return req, nil
@@ -91,8 +94,10 @@ func runFixContext(ctx context.Context, args []string, stdout, stderr io.Writer)
 				}
 				plan := planResponse.Result
 				if plan == nil {
-					// Preserve the original "return 0 with no output" outcome
-					// without crashing the typed-nil renderer branch.
+					// Return an empty result to avoid crashing the typed-nil
+					// renderer branch; the "no deterministic doc-drift edits
+					// available" line is the strict edge-case improvement
+					// over the original silent zero exit.
 					return req, &app.FixResult{}, nil
 				}
 
