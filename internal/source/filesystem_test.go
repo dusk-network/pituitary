@@ -299,8 +299,8 @@ body = "body.md"
 		if err == nil {
 			t.Fatal("parseSpecBundle() error = nil, want duplicate scalar field error")
 		}
-		if !strings.Contains(err.Error(), "duplicate title; first defined at line 3") {
-			t.Fatalf("parseSpecBundle() error = %q, want duplicate title details", err)
+		if !strings.Contains(err.Error(), "title") || !strings.Contains(err.Error(), "already been defined") {
+			t.Fatalf("parseSpecBundle() error = %q, want duplicate-title detection with redefinition detail", err)
 		}
 	})
 
@@ -321,8 +321,8 @@ authors = [
 		if err == nil {
 			t.Fatal("parseSpecBundle() error = nil, want duplicate array field error")
 		}
-		if !strings.Contains(err.Error(), "duplicate authors; first defined at line 6") {
-			t.Fatalf("parseSpecBundle() error = %q, want duplicate authors details", err)
+		if !strings.Contains(err.Error(), "authors") || !strings.Contains(err.Error(), "already been defined") {
+			t.Fatalf("parseSpecBundle() error = %q, want duplicate-authors detection with redefinition detail", err)
 		}
 	})
 }
@@ -403,8 +403,10 @@ tags = ["valid", bad]
 		if err == nil {
 			t.Fatal("LoadFromConfig() error = nil, want malformed array failure")
 		}
-		if !strings.Contains(err.Error(), "expected quoted string") {
-			t.Fatalf("LoadFromConfig() error = %q, want quoted-string failure", err)
+		// The library reports the offending key and the bare token that is not
+		// a valid TOML value. Pin only the signal, not the exact wording.
+		if !strings.Contains(err.Error(), "tags") || !strings.Contains(err.Error(), "bad") {
+			t.Fatalf("LoadFromConfig() error = %q, want malformed-tags error referencing the bad token", err)
 		}
 	})
 
@@ -443,8 +445,10 @@ tags = [
 		if err == nil {
 			t.Fatal("LoadFromConfig() error = nil, want unterminated array failure")
 		}
-		if !strings.Contains(err.Error(), `unterminated array for "tags"`) {
-			t.Fatalf("LoadFromConfig() error = %q, want unterminated array message", err)
+		// The library reports an unexpected EOF inside the tags array; both
+		// the offending key and the EOF signal should be present.
+		if !strings.Contains(err.Error(), "tags") || !strings.Contains(err.Error(), "end of file") {
+			t.Fatalf("LoadFromConfig() error = %q, want unterminated-tags error referencing end-of-file", err)
 		}
 	})
 }
