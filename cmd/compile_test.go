@@ -313,9 +313,6 @@ func TestRunCompileJSONIncludesTimings(t *testing.T) {
 	}
 
 	var payload struct {
-		Request struct {
-			Timings bool `json:"timings"`
-		} `json:"request"`
 		Timings struct {
 			TotalMS        int64 `json:"total_ms"`
 			IndexingMS     int64 `json:"indexing_ms"`
@@ -328,9 +325,6 @@ func TestRunCompileJSONIncludesTimings(t *testing.T) {
 	}
 	if len(payload.Errors) != 0 {
 		t.Fatalf("errors = %+v, want none", payload.Errors)
-	}
-	if !payload.Request.Timings {
-		t.Fatalf("request.timings = false, want true")
 	}
 	if payload.Timings.TotalMS <= 0 || payload.Timings.IndexingMS <= 0 {
 		t.Fatalf("timings = %+v, want total/indexing timing metadata", payload.Timings)

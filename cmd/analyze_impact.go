@@ -53,7 +53,7 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.AnalyzeImpactRequest, error) {
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.AnalyzeImpactRequest, error) {
 				trimmedSpecRef := strings.TrimSpace(specRef)
 				trimmedSpecPath := strings.TrimSpace(specPath)
 				req := analysis.AnalyzeImpactRequest{
@@ -76,13 +76,13 @@ func runAnalyzeImpactContext(ctx context.Context, args []string, stdout, stderr 
 				}
 				return req, nil
 			},
-			Normalize: func(_ context.Context, req analysis.AnalyzeImpactRequest) (analysis.AnalyzeImpactRequest, error) {
+			Normalize: func(_ context.Context, req analysis.AnalyzeImpactRequest, _ string) (analysis.AnalyzeImpactRequest, error) {
 				if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
 					req.AtDate = trimmedAt
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest) (analysis.AnalyzeImpactRequest, *analysis.AnalyzeImpactResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.AnalyzeImpactRequest, _ string) (analysis.AnalyzeImpactRequest, *analysis.AnalyzeImpactResult, *app.Issue) {
 				op := app.AnalyzeImpact(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

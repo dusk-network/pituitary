@@ -48,7 +48,7 @@ func runCheckSpecFreshnessContext(ctx context.Context, args []string, stdout, st
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.FreshnessRequest, error) {
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.FreshnessRequest, error) {
 				req := analysis.FreshnessRequest{Scope: strings.TrimSpace(scope)}
 				resolvedSpecRef := strings.TrimSpace(specRef)
 				trimmedPath := strings.TrimSpace(specPath)
@@ -68,7 +68,7 @@ func runCheckSpecFreshnessContext(ctx context.Context, args []string, stdout, st
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.FreshnessRequest) (analysis.FreshnessRequest, *analysis.FreshnessResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.FreshnessRequest, _ string) (analysis.FreshnessRequest, *analysis.FreshnessResult, *app.Issue) {
 				op := app.CheckSpecFreshness(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

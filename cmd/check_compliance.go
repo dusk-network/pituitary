@@ -69,10 +69,10 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 				}
 				return &req, nil
 			},
-			BuildRequest: func(_ context.Context, cfg *config.Config, _ string) (analysis.ComplianceRequest, error) {
+			BuildRequest: func(_ context.Context, cfg *config.Config, _ string, _ []string) (analysis.ComplianceRequest, error) {
 				return complianceRequestFromFlags(cfg.Workspace.RootPath, []string(paths), strings.TrimSpace(diffFile))
 			},
-			Normalize: func(_ context.Context, req analysis.ComplianceRequest) (analysis.ComplianceRequest, error) {
+			Normalize: func(_ context.Context, req analysis.ComplianceRequest, _ string) (analysis.ComplianceRequest, error) {
 				if trimmedAt := strings.TrimSpace(atDate); trimmedAt != "" {
 					req.AtDate = trimmedAt
 				}
@@ -81,7 +81,7 @@ func runCheckComplianceContext(ctx context.Context, args []string, stdout, stder
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.ComplianceRequest) (analysis.ComplianceRequest, *analysis.ComplianceResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.ComplianceRequest, _ string) (analysis.ComplianceRequest, *analysis.ComplianceResult, *app.Issue) {
 				op := app.CheckCompliance(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

@@ -57,7 +57,7 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.CompareRequest, error) {
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.CompareRequest, error) {
 				req := analysis.CompareRequest{}
 				switch {
 				case len(specRefs) > 0 && len(specPaths) > 0:
@@ -73,7 +73,7 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return req, nil
 			},
-			Normalize: func(_ context.Context, req analysis.CompareRequest) (analysis.CompareRequest, error) {
+			Normalize: func(_ context.Context, req analysis.CompareRequest, _ string) (analysis.CompareRequest, error) {
 				switch {
 				case req.SpecRecord == nil && len(req.SpecRefs) != 2:
 					return req, fmt.Errorf("exactly two --spec-ref flags or two --path flags are required")
@@ -82,7 +82,7 @@ func runCompareSpecsContext(ctx context.Context, args []string, stdout, stderr i
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.CompareRequest) (analysis.CompareRequest, *analysis.CompareResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.CompareRequest, _ string) (analysis.CompareRequest, *analysis.CompareResult, *app.Issue) {
 				op := app.CompareSpecs(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},

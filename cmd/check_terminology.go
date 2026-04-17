@@ -68,7 +68,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 				}
 				return &req, nil
 			},
-			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string) (analysis.TerminologyAuditRequest, error) {
+			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.TerminologyAuditRequest, error) {
 				req := analysis.TerminologyAuditRequest{
 					Terms:          []string(terms),
 					CanonicalTerms: []string(canonicalTerms),
@@ -88,7 +88,7 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 				}
 				return req, nil
 			},
-			Execute: func(ctx context.Context, cfgPath string, req analysis.TerminologyAuditRequest) (analysis.TerminologyAuditRequest, *analysis.TerminologyAuditResult, *app.Issue) {
+			Execute: func(ctx context.Context, cfgPath string, req analysis.TerminologyAuditRequest, _ string) (analysis.TerminologyAuditRequest, *analysis.TerminologyAuditResult, *app.Issue) {
 				op := app.CheckTerminology(ctx, cfgPath, req)
 				return op.Request, op.Result, op.Issue
 			},
