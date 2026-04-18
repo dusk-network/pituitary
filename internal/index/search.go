@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/fusion"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
@@ -113,6 +114,124 @@ func (r historicalSectionReranker) Rerank(_ context.Context, _ string, candidate
 	return reranked, nil
 }
 
+// armAwareHistoricalReranker extends historicalSectionReranker with
+// governance-aware use of stroma's HitProvenance.Arms. When a query
+// token literally matches a hit's section heading and the hit is
+// sourced exclusively from the FTS arm, the reranker multiplies its
+// adjusted score by a small boost so exact-terminology matches float
+// above conceptually similar but off-terminology candidates.
+//
+// Hits with nil Provenance (e.g. legacy snapshots that pre-date the
+// stroma v2 fusion pipeline) fall through to the same ordering as
+// historicalSectionReranker — no boost, deterministic tiebreak on
+// ref / heading / chunk.
+type armAwareHistoricalReranker struct {
+	preferHistorical bool
+}
+
+const armAwareTerminologyBoost = 1.05
+
+func (r armAwareHistoricalReranker) Rerank(_ context.Context, query string, candidates []stindex.SearchHit) ([]stindex.SearchHit, error) {
+	tokens := headingTerminologyTokens(query)
+	reranked := append([]stindex.SearchHit(nil), candidates...)
+	// Write the adjusted + boosted score back to each copy's Score so
+	// downstream consumers (buildRankedCandidatesContext) see the
+	// authoritative post-rerank value and do not silently re-sort by
+	// the pre-rerank raw score — which would otherwise undo the
+	// arm-aware boost entirely.
+	for i := range reranked {
+		reranked[i].Score = armAwareAdjustedScore(reranked[i], tokens, r.preferHistorical)
+	}
+	sort.SliceStable(reranked, func(i, j int) bool {
+		switch {
+		case reranked[i].Score != reranked[j].Score:
+			return reranked[i].Score > reranked[j].Score
+		case reranked[i].Ref != reranked[j].Ref:
+			return reranked[i].Ref < reranked[j].Ref
+		case reranked[i].Heading != reranked[j].Heading:
+			return reranked[i].Heading < reranked[j].Heading
+		default:
+			return reranked[i].ChunkID < reranked[j].ChunkID
+		}
+	})
+	return reranked, nil
+}
+
+func armAwareAdjustedScore(hit stindex.SearchHit, queryTokens map[string]struct{}, preferHistorical bool) float64 {
+	adjusted := ranking.AdjustHistoricalSectionScore(hit.Score, hit.Heading, preferHistorical)
+	if !hitHasFTSOnlyProvenance(hit) {
+		return adjusted
+	}
+	if !headingMatchesAnyToken(hit.Heading, queryTokens) {
+		return adjusted
+	}
+	return adjusted * armAwareTerminologyBoost
+}
+
+// hitHasFTSOnlyProvenance reports whether the hit's provenance shows it
+// was contributed by the FTS arm and no other arm. Requires exact
+// single-arm provenance: the pluggable-fusion contract (stroma v2)
+// allows custom FusionStrategy implementations to introduce additional
+// arm names beyond ArmVector/ArmFTS, so a "has FTS, no Vector" check
+// would misclassify multi-arm hits once non-default strategies land.
+func hitHasFTSOnlyProvenance(hit stindex.SearchHit) bool {
+	if hit.Provenance == nil || len(hit.Provenance.Arms) != 1 {
+		return false
+	}
+	_, ok := hit.Provenance.Arms[stindex.ArmFTS]
+	return ok
+}
+
+// normalizeTerminologyTokens lower-cases and strips punctuation from the
+// input then returns the set of tokens at least 3 chars long. The
+// heading match below does exact token equality, not substring
+// containment, so unrelated words that happen to share a substring
+// (e.g. "rate" vs "migration") don't falsely trigger the boost.
+func normalizeTerminologyTokens(input string) map[string]struct{} {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+	tokens := make(map[string]struct{})
+	for _, token := range strings.FieldsFunc(input, isTerminologyTokenSeparator) {
+		token = strings.ToLower(token)
+		if len(token) < 3 {
+			continue
+		}
+		tokens[token] = struct{}{}
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	return tokens
+}
+
+func headingTerminologyTokens(query string) map[string]struct{} {
+	return normalizeTerminologyTokens(query)
+}
+
+func headingMatchesAnyToken(heading string, queryTokens map[string]struct{}) bool {
+	if len(queryTokens) == 0 {
+		return false
+	}
+	headingTokens := normalizeTerminologyTokens(heading)
+	for token := range headingTokens {
+		if _, ok := queryTokens[token]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func isTerminologyTokenSeparator(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', '.', ',', ';', ':', '!', '?', '"', '\'', '`',
+		'(', ')', '[', ']', '{', '}', '/', '\\', '-', '_':
+		return true
+	}
+	return false
+}
+
 // ToQuery normalizes the transport request into an executable search query.
 func (r SearchSpecRequest) ToQuery() (SearchSpecQuery, error) {
 	statuses, err := NormalizeSearchStatuses(r.Filters.Statuses)
@@ -161,7 +280,24 @@ func SearchSpecs(cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, 
 
 // SearchSpecsContext executes semantic retrieval over the indexed spec corpus.
 func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, error) {
-	return searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loadRankedCandidatesContext)
+	if cfg == nil {
+		return nil, fmt.Errorf("config is required")
+	}
+	strategy, err := fusion.Resolve(fusionConfigFromRuntime(cfg.Runtime.Search))
+	if err != nil {
+		return nil, fmt.Errorf("resolve search fusion: %w", err)
+	}
+	loader := func(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
+		return loadRankedCandidatesContextWithFusion(ctx, db, snapshot, embedder, query, strategy, cfg.Runtime.Search.Reranker)
+	}
+	return searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loader)
+}
+
+func fusionConfigFromRuntime(cfg config.SearchConfig) fusion.Config {
+	return fusion.Config{
+		Strategy: cfg.Fusion.Strategy,
+		K:        cfg.Fusion.K,
+	}
 }
 
 // SearchSpecsBySemanticSimilarityContext executes vector-only retrieval over
@@ -360,7 +496,7 @@ func (s *searchContext) Close() {
 	}
 }
 
-func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
+func loadRankedCandidatesContextWithFusion(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery, strategy stindex.FusionStrategy, rerankerPolicy string) ([]chunkCandidate, error) {
 	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
 	hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
@@ -369,14 +505,25 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stin
 			Limit:    searchCandidateLimit(query.Limit),
 			Kinds:    []string{query.Kind},
 			Embedder: embedder,
-			Reranker: historicalSectionReranker{preferHistorical: preferHistorical},
+			Fusion:   strategy,
+			Reranker: selectSearchReranker(rerankerPolicy, preferHistorical),
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("query search candidates: %w", err)
 	}
 
-	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+	scorePreAdjusted := rerankerPolicy == config.SearchRerankerArmAwareHistorical
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical, scorePreAdjusted)
+}
+
+func selectSearchReranker(policy string, preferHistorical bool) stindex.Reranker {
+	switch policy {
+	case config.SearchRerankerArmAwareHistorical:
+		return armAwareHistoricalReranker{preferHistorical: preferHistorical}
+	default:
+		return historicalSectionReranker{preferHistorical: preferHistorical}
+	}
 }
 
 func loadSemanticSimilarityCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
@@ -399,10 +546,10 @@ func loadSemanticSimilarityCandidatesContext(ctx context.Context, db *sql.DB, sn
 		return nil, fmt.Errorf("query semantic similarity candidates: %w", err)
 	}
 
-	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical, false)
 }
 
-func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stindex.SearchHit, query SearchSpecQuery, preferHistorical bool) ([]chunkCandidate, error) {
+func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stindex.SearchHit, query SearchSpecQuery, preferHistorical, scorePreAdjusted bool) ([]chunkCandidate, error) {
 	states, err := loadSearchArtifactStateContext(ctx, db, refsForSearchHits(hits))
 	if err != nil {
 		return nil, err
@@ -432,7 +579,11 @@ func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stinde
 				return nil, fmt.Errorf("decode search inference for %s: %w", candidate.Ref, err)
 			}
 		}
-		candidate.Score = ranking.AdjustHistoricalSectionScore(hit.Score, candidate.SectionHeading, preferHistorical)
+		if scorePreAdjusted {
+			candidate.Score = hit.Score
+		} else {
+			candidate.Score = ranking.AdjustHistoricalSectionScore(hit.Score, candidate.SectionHeading, preferHistorical)
+		}
 		if candidate.Score <= 0 {
 			continue
 		}

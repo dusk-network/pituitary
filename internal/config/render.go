@@ -61,6 +61,17 @@ func Render(cfg *Config) (string, error) {
 		writeChunkingContextualizerConfig(&builder, cfg.Runtime.Chunking.Contextualizer)
 	}
 
+	if !cfg.Runtime.Search.IsZero() {
+		if reranker := strings.TrimSpace(cfg.Runtime.Search.Reranker); reranker != "" {
+			builder.WriteString("\n[runtime.search]\n")
+			fmt.Fprintf(&builder, "reranker = %s\n", strconv.Quote(reranker))
+		}
+		if !cfg.Runtime.Search.Fusion.IsZero() {
+			builder.WriteString("\n[runtime.search.fusion]\n")
+			writeSearchFusionConfig(&builder, cfg.Runtime.Search.Fusion)
+		}
+	}
+
 	if len(cfg.Terminology.ExcludePaths) > 0 {
 		builder.WriteString("\n[terminology]\n")
 		writeQuotedArray(&builder, "exclude_paths", cfg.Terminology.ExcludePaths)
@@ -143,6 +154,15 @@ func writeRuntimeProviderConfig(builder *strings.Builder, provider RuntimeProvid
 func writeChunkingContextualizerConfig(builder *strings.Builder, cfg ChunkingContextualizerConfig) {
 	if format := strings.TrimSpace(cfg.Format); format != "" {
 		fmt.Fprintf(builder, "format = %s\n", strconv.Quote(format))
+	}
+}
+
+func writeSearchFusionConfig(builder *strings.Builder, cfg FusionConfig) {
+	if strategy := strings.TrimSpace(cfg.Strategy); strategy != "" {
+		fmt.Fprintf(builder, "strategy = %s\n", strconv.Quote(strategy))
+	}
+	if cfg.K != 0 {
+		fmt.Fprintf(builder, "k = %d\n", cfg.K)
 	}
 }
 
