@@ -80,7 +80,7 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis"})
+			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking"})
 		default:
 			switch key[1] {
 			case "embedder", "analysis":
@@ -98,6 +98,16 @@ func undecodedKeyMessage(key toml.Key) string {
 					)
 				}
 				return fmt.Sprintf("unsupported runtime.profiles field %q", strings.Join(key[2:], "."))
+			case "chunking":
+				switch {
+				case len(key) == 2:
+					return unsupportedFieldMessage("runtime.chunking", "", []string{"spec", "doc"})
+				case len(key) == 3:
+					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc"})
+				default:
+					scope := "runtime.chunking." + key[2]
+					return unsupportedFieldMessage(scope, strings.Join(key[3:], "."), chunkingKindFields())
+				}
 			default:
 				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
 			}
@@ -147,6 +157,17 @@ func runtimeProviderFields() []string {
 		"timeout_ms",
 		"max_retries",
 		"max_response_tokens",
+	}
+}
+
+func chunkingKindFields() []string {
+	return []string{
+		"policy",
+		"max_tokens",
+		"overlap_tokens",
+		"max_sections",
+		"child_max_tokens",
+		"child_overlap_tokens",
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dusk-network/pituitary/internal/ast"
+	pchunk "github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
@@ -195,9 +196,15 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	}
 	emitPlannedRebuildProgress(records, reuseState, reporter)
 
+	chunkPolicy, err := pchunk.Resolve(chunkConfigFromRuntime(cfg.Runtime.Chunking))
+	if err != nil {
+		return nil, fmt.Errorf("resolve chunk policy: %w", err)
+	}
+
 	stromaOptions := stindex.BuildOptions{
-		Path:     snapshotPath,
-		Embedder: embedder,
+		Path:        snapshotPath,
+		Embedder:    embedder,
+		ChunkPolicy: chunkPolicy,
 	}
 	if !options.Full {
 		// Stroma rebuilds through Path+".new", so reusing the currently published
@@ -239,6 +246,28 @@ func corpusRecordsFromLoadResult(records *source.LoadResult) ([]stcorpus.Record,
 		corpusRecords = append(corpusRecords, record)
 	}
 	return corpusRecords, nil
+}
+
+// chunkConfigFromRuntime adapts the config-layer chunking shape to the
+// chunk package's Config. It is a pure data translation: config holds
+// raw TOML-validated values, chunk.Resolve turns them into a
+// stroma chunk.Policy.
+func chunkConfigFromRuntime(cfg config.ChunkingConfig) pchunk.Config {
+	return pchunk.Config{
+		Spec: chunkKindFromConfig(cfg.Spec),
+		Doc:  chunkKindFromConfig(cfg.Doc),
+	}
+}
+
+func chunkKindFromConfig(kind config.ChunkingKindConfig) pchunk.KindConfig {
+	return pchunk.KindConfig{
+		Policy:             kind.Policy,
+		MaxTokens:          kind.MaxTokens,
+		OverlapTokens:      kind.OverlapTokens,
+		MaxSections:        kind.MaxSections,
+		ChildMaxTokens:     kind.ChildMaxTokens,
+		ChildOverlapTokens: kind.ChildOverlapTokens,
+	}
 }
 
 func corpusRecordFromSpec(spec model.SpecRecord) (stcorpus.Record, error) {

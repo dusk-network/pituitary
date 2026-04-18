@@ -40,6 +40,9 @@ const (
 	TerminologySeverityIgnore  = "ignore"
 	TerminologySeverityWarning = "warning"
 	TerminologySeverityError   = "error"
+
+	ChunkPolicyMarkdown  = "markdown"
+	ChunkPolicyLateChunk = "late_chunk"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -95,6 +98,58 @@ type Runtime struct {
 	Profiles map[string]RuntimeProvider
 	Embedder RuntimeProvider
 	Analysis RuntimeProvider
+	Chunking ChunkingConfig
+}
+
+// ChunkingConfig groups per-kind chunking overrides for the rebuild
+// pipeline. A zero value means "no overrides" — the rebuild keeps the
+// pre-#338 default stroma MarkdownPolicy for every record.
+type ChunkingConfig struct {
+	Spec ChunkingKindConfig
+	Doc  ChunkingKindConfig
+}
+
+// IsZero reports whether no kind has an override configured.
+func (c ChunkingConfig) IsZero() bool {
+	return c.Spec.IsZero() && c.Doc.IsZero()
+}
+
+// ChunkingKindConfig is a per-kind chunking override. A zero value means
+// the kind defers to the router default.
+type ChunkingKindConfig struct {
+	// Policy selects the chunking strategy. Valid values are
+	// ChunkPolicyMarkdown (default when non-empty tuning knobs are set
+	// without an explicit policy) and ChunkPolicyLateChunk.
+	Policy string
+
+	// MaxTokens caps per-section tokens for Markdown and per-parent
+	// tokens for late-chunking. Zero disables the cap.
+	MaxTokens int
+
+	// OverlapTokens is the approximate token overlap between adjacent
+	// sub-sections for ChunkPolicyMarkdown. Ignored by
+	// ChunkPolicyLateChunk (which uses ChildOverlapTokens).
+	OverlapTokens int
+
+	// MaxSections caps total sections per record. Zero applies
+	// stroma's DefaultMaxChunkSections (the same bounded DoS guard
+	// that protects the pre-#338 rebuild path). Negative explicitly
+	// disables the cap for callers that have upstream validation.
+	MaxSections int
+
+	// ChildMaxTokens is required for ChunkPolicyLateChunk and must be
+	// > 0; late-chunking with no child budget would silently disable
+	// retrieval.
+	ChildMaxTokens int
+
+	// ChildOverlapTokens is the approximate overlap between leaf
+	// chunks for ChunkPolicyLateChunk. Zero disables overlap.
+	ChildOverlapTokens int
+}
+
+// IsZero reports whether the kind has no overrides configured.
+func (c ChunkingKindConfig) IsZero() bool {
+	return c == ChunkingKindConfig{}
 }
 
 // RuntimeProvider describes one configured runtime dependency.
@@ -156,6 +211,21 @@ type rawRuntime struct {
 	Profiles map[string]rawRuntimeProvider `toml:"profiles"`
 	Embedder rawRuntimeProvider            `toml:"embedder"`
 	Analysis rawRuntimeProvider            `toml:"analysis"`
+	Chunking rawChunking                   `toml:"chunking"`
+}
+
+type rawChunking struct {
+	Spec rawChunkingKind `toml:"spec"`
+	Doc  rawChunkingKind `toml:"doc"`
+}
+
+type rawChunkingKind struct {
+	Policy             string `toml:"policy"`
+	MaxTokens          int    `toml:"max_tokens"`
+	OverlapTokens      int    `toml:"overlap_tokens"`
+	MaxSections        int    `toml:"max_sections"`
+	ChildMaxTokens     int    `toml:"child_max_tokens"`
+	ChildOverlapTokens int    `toml:"child_overlap_tokens"`
 }
 
 type rawSource struct {
@@ -318,6 +388,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Profiles: make(map[string]RuntimeProvider, len(raw.Runtime.Profiles)),
 			Embedder: buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
 			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
+			Chunking: buildChunkingConfig(raw.Runtime.Chunking),
 		},
 		Terminology: Terminology{
 			ExcludePaths: uniqueStringList(raw.Terminology.ExcludePaths),
@@ -1101,7 +1172,65 @@ func validateRuntime(runtime *Runtime) error {
 	if runtime.Analysis.MaxResponseTokens < 0 {
 		errs.add("runtime.analysis.max_response_tokens: must be >= 0")
 	}
+	validateChunkingKind(&errs, "runtime.chunking.spec", runtime.Chunking.Spec)
+	validateChunkingKind(&errs, "runtime.chunking.doc", runtime.Chunking.Doc)
 	return errs.err()
+}
+
+func buildChunkingConfig(raw rawChunking) ChunkingConfig {
+	return ChunkingConfig{
+		Spec: buildChunkingKind(raw.Spec),
+		Doc:  buildChunkingKind(raw.Doc),
+	}
+}
+
+func buildChunkingKind(raw rawChunkingKind) ChunkingKindConfig {
+	return ChunkingKindConfig{
+		Policy:             strings.TrimSpace(raw.Policy),
+		MaxTokens:          raw.MaxTokens,
+		OverlapTokens:      raw.OverlapTokens,
+		MaxSections:        raw.MaxSections,
+		ChildMaxTokens:     raw.ChildMaxTokens,
+		ChildOverlapTokens: raw.ChildOverlapTokens,
+	}
+}
+
+func validateChunkingKind(errs *validationErrors, label string, kind ChunkingKindConfig) {
+	if kind.IsZero() {
+		return
+	}
+	switch kind.Policy {
+	case "", ChunkPolicyMarkdown:
+		// Markdown accepts any tuning; late-chunk-only fields here are a user bug.
+		if kind.ChildMaxTokens != 0 || kind.ChildOverlapTokens != 0 {
+			errs.add("%s: child_max_tokens / child_overlap_tokens only apply to policy %q", label, ChunkPolicyLateChunk)
+		}
+	case ChunkPolicyLateChunk:
+		if kind.ChildMaxTokens <= 0 {
+			errs.add("%s.child_max_tokens: must be > 0 for policy %q", label, ChunkPolicyLateChunk)
+		}
+		if kind.OverlapTokens != 0 {
+			errs.add("%s.overlap_tokens: not supported for policy %q (use child_overlap_tokens)", label, ChunkPolicyLateChunk)
+		}
+	default:
+		errs.add("%s.policy: unsupported policy %q (supported: %q, %q)", label, kind.Policy, ChunkPolicyMarkdown, ChunkPolicyLateChunk)
+	}
+	if kind.MaxTokens < 0 {
+		errs.add("%s.max_tokens: must be >= 0", label)
+	}
+	if kind.OverlapTokens < 0 {
+		errs.add("%s.overlap_tokens: must be >= 0", label)
+	}
+	// Negative max_sections is the documented escape hatch that
+	// disables the cap (mirrors stroma's BuildOptions contract), so we
+	// only reject other nonsense values here.
+	_ = kind.MaxSections
+	if kind.ChildMaxTokens < 0 {
+		errs.add("%s.child_max_tokens: must be >= 0", label)
+	}
+	if kind.ChildOverlapTokens < 0 {
+		errs.add("%s.child_overlap_tokens: must be >= 0", label)
+	}
 }
 
 func buildRuntimeProvider(raw rawRuntimeProvider, defaultProvider string) RuntimeProvider {

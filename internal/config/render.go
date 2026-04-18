@@ -48,6 +48,15 @@ func Render(cfg *Config) (string, error) {
 		writeRuntimeProviderConfig(&builder, cfg.Runtime.Analysis, runtimeProfileBase(cfg.Runtime.Profiles, cfg.Runtime.Analysis.Profile))
 	}
 
+	if !cfg.Runtime.Chunking.Spec.IsZero() {
+		builder.WriteString("\n[runtime.chunking.spec]\n")
+		writeChunkingKindConfig(&builder, cfg.Runtime.Chunking.Spec)
+	}
+	if !cfg.Runtime.Chunking.Doc.IsZero() {
+		builder.WriteString("\n[runtime.chunking.doc]\n")
+		writeChunkingKindConfig(&builder, cfg.Runtime.Chunking.Doc)
+	}
+
 	if len(cfg.Terminology.ExcludePaths) > 0 {
 		builder.WriteString("\n[terminology]\n")
 		writeQuotedArray(&builder, "exclude_paths", cfg.Terminology.ExcludePaths)
@@ -124,6 +133,27 @@ func writeRuntimeProviderConfig(builder *strings.Builder, provider RuntimeProvid
 	}
 	if base == nil || provider.MaxResponseTokens != base.MaxResponseTokens {
 		fmt.Fprintf(builder, "max_response_tokens = %d\n", provider.MaxResponseTokens)
+	}
+}
+
+func writeChunkingKindConfig(builder *strings.Builder, kind ChunkingKindConfig) {
+	if policy := strings.TrimSpace(kind.Policy); policy != "" {
+		fmt.Fprintf(builder, "policy = %s\n", strconv.Quote(policy))
+	}
+	if kind.MaxTokens != 0 {
+		fmt.Fprintf(builder, "max_tokens = %d\n", kind.MaxTokens)
+	}
+	if kind.OverlapTokens != 0 {
+		fmt.Fprintf(builder, "overlap_tokens = %d\n", kind.OverlapTokens)
+	}
+	if kind.MaxSections != 0 {
+		fmt.Fprintf(builder, "max_sections = %d\n", kind.MaxSections)
+	}
+	if kind.ChildMaxTokens != 0 {
+		fmt.Fprintf(builder, "child_max_tokens = %d\n", kind.ChildMaxTokens)
+	}
+	if kind.ChildOverlapTokens != 0 {
+		fmt.Fprintf(builder, "child_overlap_tokens = %d\n", kind.ChildOverlapTokens)
 	}
 }
 
