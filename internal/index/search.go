@@ -134,12 +134,18 @@ const armAwareTerminologyBoost = 1.05
 func (r armAwareHistoricalReranker) Rerank(_ context.Context, query string, candidates []stindex.SearchHit) ([]stindex.SearchHit, error) {
 	tokens := headingTerminologyTokens(query)
 	reranked := append([]stindex.SearchHit(nil), candidates...)
+	// Write the adjusted + boosted score back to each copy's Score so
+	// downstream consumers (buildRankedCandidatesContext) see the
+	// authoritative post-rerank value and do not silently re-sort by
+	// the pre-rerank raw score — which would otherwise undo the
+	// arm-aware boost entirely.
+	for i := range reranked {
+		reranked[i].Score = armAwareAdjustedScore(reranked[i], tokens, r.preferHistorical)
+	}
 	sort.SliceStable(reranked, func(i, j int) bool {
-		leftScore := armAwareAdjustedScore(reranked[i], tokens, r.preferHistorical)
-		rightScore := armAwareAdjustedScore(reranked[j], tokens, r.preferHistorical)
 		switch {
-		case leftScore != rightScore:
-			return leftScore > rightScore
+		case reranked[i].Score != reranked[j].Score:
+			return reranked[i].Score > reranked[j].Score
 		case reranked[i].Ref != reranked[j].Ref:
 			return reranked[i].Ref < reranked[j].Ref
 		case reranked[i].Heading != reranked[j].Heading:
@@ -507,7 +513,8 @@ func loadRankedCandidatesContextWithFusion(ctx context.Context, db *sql.DB, snap
 		return nil, fmt.Errorf("query search candidates: %w", err)
 	}
 
-	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+	scorePreAdjusted := rerankerPolicy == config.SearchRerankerArmAwareHistorical
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical, scorePreAdjusted)
 }
 
 func selectSearchReranker(policy string, preferHistorical bool) stindex.Reranker {
@@ -539,10 +546,10 @@ func loadSemanticSimilarityCandidatesContext(ctx context.Context, db *sql.DB, sn
 		return nil, fmt.Errorf("query semantic similarity candidates: %w", err)
 	}
 
-	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical)
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical, false)
 }
 
-func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stindex.SearchHit, query SearchSpecQuery, preferHistorical bool) ([]chunkCandidate, error) {
+func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stindex.SearchHit, query SearchSpecQuery, preferHistorical, scorePreAdjusted bool) ([]chunkCandidate, error) {
 	states, err := loadSearchArtifactStateContext(ctx, db, refsForSearchHits(hits))
 	if err != nil {
 		return nil, err
@@ -572,7 +579,11 @@ func buildRankedCandidatesContext(ctx context.Context, db *sql.DB, hits []stinde
 				return nil, fmt.Errorf("decode search inference for %s: %w", candidate.Ref, err)
 			}
 		}
-		candidate.Score = ranking.AdjustHistoricalSectionScore(hit.Score, candidate.SectionHeading, preferHistorical)
+		if scorePreAdjusted {
+			candidate.Score = hit.Score
+		} else {
+			candidate.Score = ranking.AdjustHistoricalSectionScore(hit.Score, candidate.SectionHeading, preferHistorical)
+		}
 		if candidate.Score <= 0 {
 			continue
 		}

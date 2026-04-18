@@ -97,6 +97,33 @@ k = 60
 	}
 }
 
+// Regression for the Copilot finding that strategy="rrf" with k<0 used
+// to emit two overlapping errors ("must be > 0" and "must be >= 0").
+// The validator should now emit a single, clear error.
+func TestLoadRuntimeSearchRejectsNegativeKOnce(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadChunkingFixtureErr(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.search.fusion]
+strategy = "rrf"
+k = -1
+`)
+	if err == nil {
+		t.Fatal("expected error for negative k on strategy rrf")
+	}
+	msg := err.Error()
+	if strings.Count(msg, "fusion.k") > 1 {
+		t.Fatalf("validator emitted overlapping fusion.k errors; got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "must be > 0") {
+		t.Fatalf("error should call out must-be-positive requirement; got %v", err)
+	}
+}
+
 func TestLoadRuntimeSearchRejectsUnknownStrategy(t *testing.T) {
 	t.Parallel()
 

@@ -252,6 +252,50 @@ func TestArmAwareRerankerFallsBackWithoutProvenance(t *testing.T) {
 	}
 }
 
+// TestArmAwareRerankerWritesBoostedScoreBack is a regression guard for
+// the Copilot finding that the previous implementation computed a boost
+// for the reranker's own sort comparator but never wrote it back to the
+// SearchHit.Score field. Downstream, buildRankedCandidatesContext reads
+// hit.Score and re-sorts candidates — if Score stays at the pre-rerank
+// value the arm-aware ordering is silently undone. The reranker must
+// write the adjusted+boosted score onto the returned SearchHits so the
+// downstream consumer sees the authoritative post-rerank value.
+func TestArmAwareRerankerWritesBoostedScoreBack(t *testing.T) {
+	t.Parallel()
+
+	reranker := armAwareHistoricalReranker{}
+	hits := []stindex.SearchHit{
+		{
+			ChunkID: 1,
+			Ref:     "spec-b",
+			Heading: "Fusion policy",
+			Score:   0.50,
+			Provenance: &stindex.HitProvenance{Arms: map[string]stindex.ArmEvidence{
+				stindex.ArmFTS: {Rank: 0, Score: -2.7},
+			}},
+		},
+	}
+
+	reranked, err := reranker.Rerank(context.Background(), "fusion policy", hits)
+	if err != nil {
+		t.Fatalf("Rerank: %v", err)
+	}
+	if len(reranked) != 1 {
+		t.Fatalf("want 1 reranked hit, got %d", len(reranked))
+	}
+	if reranked[0].Score == 0.50 {
+		t.Fatalf("reranker did not write adjusted+boosted score back to hit.Score; still raw %.4f", reranked[0].Score)
+	}
+	expected := 0.50 * armAwareTerminologyBoost
+	if reranked[0].Score != expected {
+		t.Fatalf("reranked Score = %.4f, want %.4f (raw * boost)", reranked[0].Score, expected)
+	}
+	// Input must remain untouched per the stroma Reranker aliasing contract.
+	if hits[0].Score != 0.50 {
+		t.Fatalf("reranker mutated input hit.Score; violates stroma aliasing contract (input now %.4f)", hits[0].Score)
+	}
+}
+
 func cloneHits(in []stindex.SearchHit) []stindex.SearchHit {
 	out := make([]stindex.SearchHit, len(in))
 	copy(out, in)

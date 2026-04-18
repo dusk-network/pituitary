@@ -1400,9 +1400,6 @@ func validateFusionConfig(errs *validationErrors, label string, cfg FusionConfig
 			SearchFusionStrategyRRF,
 		)
 	}
-	if cfg.K < 0 {
-		errs.add("%s.k: must be >= 0", label)
-	}
 }
 
 func buildRuntimeProvider(raw rawRuntimeProvider, defaultProvider string) RuntimeProvider {
