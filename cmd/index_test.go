@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 func TestRunIndexValidatesConfig(t *testing.T) {
@@ -380,6 +382,147 @@ path = "specs"
 	}
 	if !strings.Contains(stderr.String(), `runtime.embedder.endpoint: value is required for provider "openai_compatible"`) {
 		t.Fatalf("runIndex() stderr %q does not contain missing-endpoint detail", stderr.String())
+	}
+}
+
+func TestRunIndexEmitsContextualizerConfigLineInTextMode(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.chunking.contextualizer]
+format = "title_ancestry"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+	}
+
+	progress := stderr.String()
+	want := "pituitary index: chunking contextualizer active (format=title_ancestry)"
+	if !strings.Contains(progress, want) {
+		t.Fatalf("runIndex() stderr %q does not contain %q", progress, want)
+	}
+}
+
+func TestRunIndexJSONRebuildKeepsStderrProgressOnlyWhenContextualizerEnabled(t *testing.T) {
+	// Regression: the JSON stderr stream is a strict NDJSON of
+	// rebuild_progress events (see decodeIndexProgressEvents). The
+	// contextualizer announcement is deliberately text-mode only —
+	// injecting a second event type would break strict parsers.
+	// Machine consumers should read contextualizer posture from
+	// `pituitary status --format json`, not from the rebuild stream.
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.chunking.contextualizer]
+format = "ref_title"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+	}
+
+	if strings.Contains(stderr.String(), "contextualizer") {
+		t.Fatalf("runIndex() JSON stderr %q leaked a contextualizer config line into the progress-only stream", stderr.String())
+	}
+}
+
+func TestEmitRebuildContextualizerConfigTextOnly(t *testing.T) {
+	t.Parallel()
+
+	// Direct helper test: locks both the text-only output and the
+	// JSON-mode silence so a well-meaning future change that adds a
+	// JSON event type back has to update both this test and the
+	// decodeIndexProgressEvents strict decoder together. Nothing
+	// else in cmd/ exercises the JSON-mode helper path directly.
+	cfg := &config.Config{}
+	cfg.Runtime.Chunking.Contextualizer.Format = config.ChunkContextualizerFormatTitleAncestry
+
+	var textOut bytes.Buffer
+	emitRebuildContextualizerConfig(cfg, commandFormatText, &textOut)
+	if got, want := textOut.String(), "pituitary index: chunking contextualizer active (format=title_ancestry)\n"; got != want {
+		t.Fatalf("text mode emit = %q, want %q", got, want)
+	}
+
+	var jsonOut bytes.Buffer
+	emitRebuildContextualizerConfig(cfg, commandFormatJSON, &jsonOut)
+	if jsonOut.Len() != 0 {
+		t.Fatalf("json mode emit = %q, want empty (progress-only stream)", jsonOut.String())
+	}
+
+	var disabledOut bytes.Buffer
+	emitRebuildContextualizerConfig(&config.Config{}, commandFormatText, &disabledOut)
+	if disabledOut.Len() != 0 {
+		t.Fatalf("disabled emit = %q, want empty", disabledOut.String())
+	}
+
+	var nilOut bytes.Buffer
+	emitRebuildContextualizerConfig(nil, commandFormatText, &nilOut)
+	if nilOut.Len() != 0 {
+		t.Fatalf("nil cfg emit = %q, want empty", nilOut.String())
+	}
+}
+
+func TestRunIndexIsSilentAboutContextualizerWhenDisabled(t *testing.T) {
+	// Regression: the zero-config path must not emit a contextualizer
+	// line. Quiet-on-default output is part of the #347 contract so
+	// existing rebuild scripts that grep stderr don't see new noise
+	// after the contextualizer feature is available but not opted in.
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+	}
+
+	if strings.Contains(stderr.String(), "contextualizer") {
+		t.Fatalf("runIndex() stderr %q leaked a contextualizer line on the disabled path", stderr.String())
 	}
 }
 

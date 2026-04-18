@@ -30,8 +30,9 @@ type StatusResult struct {
 }
 
 type RuntimeConfigStatus struct {
-	Embedder RuntimeProviderStatus
-	Analysis RuntimeProviderStatus
+	Embedder       RuntimeProviderStatus
+	Analysis       RuntimeProviderStatus
+	Contextualizer string // empty means disabled; otherwise the configured format name.
 }
 
 type RuntimeProviderStatus struct {
@@ -74,8 +75,9 @@ func Status(ctx context.Context, configPath string, request StatusRequest) Respo
 			EmbedderProvider: cfg.Runtime.Embedder.Provider,
 			AnalysisProvider: cfg.Runtime.Analysis.Provider,
 			RuntimeConfig: &RuntimeConfigStatus{
-				Embedder: runtimeProviderStatus(cfg.Runtime.Embedder),
-				Analysis: runtimeProviderStatus(cfg.Runtime.Analysis),
+				Embedder:       runtimeProviderStatus(cfg.Runtime.Embedder),
+				Analysis:       runtimeProviderStatus(cfg.Runtime.Analysis),
+				Contextualizer: cfg.Runtime.Chunking.Contextualizer.Format,
 			},
 			Index:         status,
 			Freshness:     freshness,
