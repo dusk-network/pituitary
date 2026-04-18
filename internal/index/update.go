@@ -12,8 +12,8 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
-	stindex "github.com/dusk-network/stroma/index"
-	ststore "github.com/dusk-network/stroma/store"
+	stindex "github.com/dusk-network/stroma/v2/index"
+	ststore "github.com/dusk-network/stroma/v2/store"
 )
 
 // UpdatePreconditionError reports that the existing index is structurally

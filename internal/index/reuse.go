@@ -10,7 +10,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
-	stindex "github.com/dusk-network/stroma/index"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 type reuseState struct {

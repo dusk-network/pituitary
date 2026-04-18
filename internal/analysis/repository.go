@@ -8,7 +8,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
-	stindex "github.com/dusk-network/stroma/index"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 type analysisRepository struct {

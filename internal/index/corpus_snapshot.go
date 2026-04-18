@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	stindex "github.com/dusk-network/stroma/index"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 const stromaSnapshotPathKey = "stroma_snapshot_path"

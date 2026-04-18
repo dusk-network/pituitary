@@ -11,7 +11,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
-	ststore "github.com/dusk-network/stroma/store"
+	ststore "github.com/dusk-network/stroma/v2/store"
 )
 
 func TestUpdateNoOp(t *testing.T) {
