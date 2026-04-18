@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	pchunk "github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
 	stindex "github.com/dusk-network/stroma/v2/index"
@@ -310,6 +311,9 @@ func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB
 	if err := validateStoredEmbedderContext(ctx, db, embedder.Fingerprint(), dimension); err != nil {
 		return "", &UpdatePreconditionError{Reason: err.Error()}
 	}
+	if err := validateStoredChunkingConfigContext(ctx, db, cfg.Runtime.Chunking); err != nil {
+		return "", &UpdatePreconditionError{Reason: err.Error(), Action: "run `pituitary index --rebuild`"}
+	}
 
 	snapshotPath, err := stromaSnapshotPathFromDBContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
@@ -332,6 +336,36 @@ func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB
 	default:
 		return snapshotPath, nil
 	}
+}
+
+// validateStoredChunkingConfigContext rejects an incremental update
+// whose current chunking/contextualizer config would diverge from the
+// config in force when the snapshot was built. Without this gate,
+// updating after a config change would re-chunk changed records under
+// the new config while leaving unchanged records on the old chunk
+// shapes — a silent mixed-generation snapshot.
+//
+// Older snapshots (built before this fingerprint was persisted) have
+// no stored value; we skip the check in that case rather than
+// force-rebuild every pre-existing index, because rebuild.go did
+// honor the active config even without recording the fingerprint.
+// The metadata gap is self-healed by the first rebuild OR update
+// after this change, since publishBusinessIndexContext runs on both
+// paths and upserts chunking_config_fingerprint unconditionally.
+func validateStoredChunkingConfigContext(ctx context.Context, db *sql.DB, current config.ChunkingConfig) error {
+	stored, err := readOptionalMetadataValueContext(ctx, db, "chunking_config_fingerprint")
+	if err != nil {
+		return err
+	}
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
+		return nil
+	}
+	want := chunkingConfigFingerprint(current)
+	if stored != want {
+		return fmt.Errorf("chunking config changed since last rebuild (stored %s, current %s)", stored, want)
+	}
+	return nil
 }
 
 func readRequiredMetadataValueContext(ctx context.Context, db *sql.DB, key string) (string, error) {
@@ -374,9 +408,31 @@ func updateStromaSnapshotContext(
 		}
 		return "", nil, err
 	}
+	// Thread the same chunking config through stroma's Update path
+	// that rebuild.go threads through stroma's Rebuild path. Without
+	// this, a repo configured with per-kind chunking or an opt-in
+	// contextualizer sees those settings honored on --rebuild but
+	// silently ignored on --update, producing mixed chunk shapes or
+	// mixed context_prefix semantics across the same snapshot.
+	chunkPolicy, err := pchunk.Resolve(chunkConfigFromRuntime(cfg.Runtime.Chunking))
+	if err != nil {
+		if cleanupSnapshot != nil {
+			cleanupSnapshot()
+		}
+		return "", nil, fmt.Errorf("resolve chunk policy: %w", err)
+	}
+	contextualizer, err := pchunk.ResolveContextualizer(chunkContextualizerFromRuntime(cfg.Runtime.Chunking))
+	if err != nil {
+		if cleanupSnapshot != nil {
+			cleanupSnapshot()
+		}
+		return "", nil, fmt.Errorf("resolve chunk contextualizer: %w", err)
+	}
 	if _, err := stindex.Update(ctx, selectedRecords, diff.removed, stindex.UpdateOptions{
-		Path:     targetSnapshotPath,
-		Embedder: embedder,
+		Path:           targetSnapshotPath,
+		Embedder:       embedder,
+		ChunkPolicy:    chunkPolicy,
+		Contextualizer: contextualizer,
 	}); err != nil {
 		if cleanupSnapshot != nil {
 			cleanupSnapshot()

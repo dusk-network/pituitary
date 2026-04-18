@@ -55,7 +55,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 5)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 7)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 8)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 	assertMetadataValue(t, db, "stroma_snapshot_path", stromaSnapshotPathForContent(cfg.Workspace.ResolvedIndexPath, result.ContentFingerprint))
 	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
