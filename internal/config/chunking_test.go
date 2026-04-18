@@ -90,6 +90,29 @@ policy = "semantic"
 	}
 }
 
+func TestLoadRuntimeChunkingRejectsUnknownKindWithSuggestion(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadChunkingFixtureErr(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.chunking.spce]
+policy = "markdown"
+max_tokens = 512
+`)
+	if err == nil {
+		t.Fatal("expected error for misspelled kind name")
+	}
+	if !strings.Contains(err.Error(), "spce") {
+		t.Fatalf("error should name the misspelled kind; got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"spec"`) {
+		t.Fatalf("error should suggest spec/doc rather than field names; got %v", err)
+	}
+}
+
 func TestLoadRuntimeChunkingRejectsUnknownField(t *testing.T) {
 	t.Parallel()
 

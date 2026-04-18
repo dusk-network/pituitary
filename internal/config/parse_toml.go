@@ -99,15 +99,20 @@ func undecodedKeyMessage(key toml.Key) string {
 				}
 				return fmt.Sprintf("unsupported runtime.profiles field %q", strings.Join(key[2:], "."))
 			case "chunking":
-				switch {
-				case len(key) == 2:
-					return unsupportedFieldMessage("runtime.chunking", "", []string{"spec", "doc"})
-				case len(key) == 3:
-					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc"})
-				default:
-					scope := "runtime.chunking." + key[2]
-					return unsupportedFieldMessage(scope, strings.Join(key[3:], "."), chunkingKindFields())
+				if len(key) < 3 {
+					return fmt.Sprintf("unsupported runtime.chunking field %q", strings.Join(key[2:], "."))
 				}
+				if key[2] != "spec" && key[2] != "doc" {
+					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc"})
+				}
+				if len(key) == 3 {
+					// Outer switch already handled bare section; any
+					// extra path element at this length is a toml
+					// oddity, fall through to generic error.
+					return fmt.Sprintf("unsupported runtime.chunking.%s field %q", key[2], strings.Join(key[3:], "."))
+				}
+				scope := "runtime.chunking." + key[2]
+				return unsupportedFieldMessage(scope, strings.Join(key[3:], "."), chunkingKindFields())
 			default:
 				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
 			}

@@ -1221,10 +1221,7 @@ func validateChunkingKind(errs *validationErrors, label string, kind ChunkingKin
 	if kind.OverlapTokens < 0 {
 		errs.add("%s.overlap_tokens: must be >= 0", label)
 	}
-	// Negative max_sections is the documented escape hatch that
-	// disables the cap (mirrors stroma's BuildOptions contract), so we
-	// only reject other nonsense values here.
-	_ = kind.MaxSections
+	// max_sections accepts any int here; Resolve applies the 0/negative semantics.
 	if kind.ChildMaxTokens < 0 {
 		errs.add("%s.child_max_tokens: must be >= 0", label)
 	}
