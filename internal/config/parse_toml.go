@@ -80,7 +80,7 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking"})
+			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking", "search"})
 		default:
 			switch key[1] {
 			case "embedder", "analysis":
@@ -116,6 +116,19 @@ func undecodedKeyMessage(key toml.Key) string {
 					return unsupportedFieldMessage("runtime.chunking.contextualizer", strings.Join(key[3:], "."), chunkingContextualizerFields())
 				default:
 					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc", "contextualizer"})
+				}
+			case "search":
+				if len(key) < 3 {
+					return fmt.Sprintf("unsupported runtime.search field %q", strings.Join(key[2:], "."))
+				}
+				switch key[2] {
+				case "fusion":
+					if len(key) == 3 {
+						return fmt.Sprintf("unsupported runtime.search.fusion field %q", strings.Join(key[3:], "."))
+					}
+					return unsupportedFieldMessage("runtime.search.fusion", strings.Join(key[3:], "."), searchFusionFields())
+				default:
+					return unsupportedFieldMessage("runtime.search", key[2], []string{"fusion", "reranker"})
 				}
 			default:
 				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
@@ -182,6 +195,10 @@ func chunkingKindFields() []string {
 
 func chunkingContextualizerFields() []string {
 	return []string{"format"}
+}
+
+func searchFusionFields() []string {
+	return []string{"strategy", "k"}
 }
 
 func unsupportedFieldMessage(scope, field string, valid []string) string {

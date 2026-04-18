@@ -50,6 +50,21 @@ const (
 	// ChunkPolicy* above. Kept in lock-step with chunk.PrefixFormat*.
 	ChunkContextualizerFormatTitleAncestry = "title_ancestry"
 	ChunkContextualizerFormatRefTitle      = "ref_title"
+
+	// Search fusion strategy names. Duplicated here (rather than
+	// imported from internal/fusion) to keep the config package
+	// dependency-free of stroma, matching the ChunkPolicy* pattern
+	// above. Kept in lock-step with fusion.Strategy*.
+	SearchFusionStrategyDefault = "default_rrf"
+	SearchFusionStrategyRRF     = "rrf"
+
+	// Search reranker policies. Empty / SearchRerankerHistorical
+	// preserve the pre-#342 historicalSectionReranker byte-for-byte.
+	// SearchRerankerArmAwareHistorical opts in to a governance-aware
+	// reranker that reads HitProvenance.Arms to prefer FTS-sourced hits
+	// when query terminology matches the hit's section heading.
+	SearchRerankerHistorical         = "historical"
+	SearchRerankerArmAwareHistorical = "arm_aware_historical"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -106,6 +121,47 @@ type Runtime struct {
 	Embedder RuntimeProvider
 	Analysis RuntimeProvider
 	Chunking ChunkingConfig
+	Search   SearchConfig
+}
+
+// SearchConfig groups search-time overrides for the retrieval pipeline.
+// A zero value means "no overrides" — snapshot.Search keeps stroma's
+// DefaultFusion() governing hybrid retrieval exactly as it did pre-#342
+// and the historicalSectionReranker stays the sole reranker.
+type SearchConfig struct {
+	Fusion FusionConfig
+
+	// Reranker selects the governance-aware reranker. Empty or
+	// SearchRerankerHistorical preserves the pre-#342 behavior.
+	// SearchRerankerArmAwareHistorical opts in to reading
+	// HitProvenance.Arms.
+	Reranker string
+}
+
+// IsZero reports whether no search override is configured.
+func (c SearchConfig) IsZero() bool {
+	return c.Fusion.IsZero() && strings.TrimSpace(c.Reranker) == ""
+}
+
+// FusionConfig tunes the hybrid-search fusion strategy. A zero value
+// (or Strategy == SearchFusionStrategyDefault with K == 0) resolves to
+// nil so stroma's DefaultFusion() governs the call site byte-for-byte.
+type FusionConfig struct {
+	// Strategy selects the fusion implementation. Empty or
+	// SearchFusionStrategyDefault preserves stroma's DefaultFusion().
+	// SearchFusionStrategyRRF selects an explicit RRFFusion parameterised
+	// by K.
+	Strategy string
+
+	// K is the RRF constant. Only applies to SearchFusionStrategyRRF and
+	// must be > 0 there. Zero under SearchFusionStrategyDefault is valid
+	// and means "no override".
+	K int
+}
+
+// IsZero reports whether no fusion override is configured.
+func (c FusionConfig) IsZero() bool {
+	return c == FusionConfig{}
 }
 
 // ChunkingConfig groups per-kind chunking overrides for the rebuild
@@ -235,6 +291,17 @@ type rawRuntime struct {
 	Embedder rawRuntimeProvider            `toml:"embedder"`
 	Analysis rawRuntimeProvider            `toml:"analysis"`
 	Chunking rawChunking                   `toml:"chunking"`
+	Search   rawSearch                     `toml:"search"`
+}
+
+type rawSearch struct {
+	Fusion   rawSearchFusion `toml:"fusion"`
+	Reranker string          `toml:"reranker"`
+}
+
+type rawSearchFusion struct {
+	Strategy string `toml:"strategy"`
+	K        int    `toml:"k"`
 }
 
 type rawChunking struct {
@@ -417,6 +484,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Embedder: buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
 			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
 			Chunking: buildChunkingConfig(raw.Runtime.Chunking),
+			Search:   buildSearchConfig(raw.Runtime.Search),
 		},
 		Terminology: Terminology{
 			ExcludePaths: uniqueStringList(raw.Terminology.ExcludePaths),
@@ -1203,6 +1271,7 @@ func validateRuntime(runtime *Runtime) error {
 	validateChunkingKind(&errs, "runtime.chunking.spec", runtime.Chunking.Spec)
 	validateChunkingKind(&errs, "runtime.chunking.doc", runtime.Chunking.Doc)
 	validateChunkingContextualizer(&errs, "runtime.chunking.contextualizer", runtime.Chunking.Contextualizer)
+	validateSearchConfig(&errs, "runtime.search", runtime.Search)
 	return errs.err()
 }
 
@@ -1280,6 +1349,59 @@ func validateChunkingContextualizer(errs *validationErrors, label string, cfg Ch
 			ChunkContextualizerFormatTitleAncestry,
 			ChunkContextualizerFormatRefTitle,
 		)
+	}
+}
+
+func buildSearchConfig(raw rawSearch) SearchConfig {
+	return SearchConfig{
+		Fusion:   buildFusionConfig(raw.Fusion),
+		Reranker: strings.TrimSpace(raw.Reranker),
+	}
+}
+
+func buildFusionConfig(raw rawSearchFusion) FusionConfig {
+	return FusionConfig{
+		Strategy: strings.TrimSpace(raw.Strategy),
+		K:        raw.K,
+	}
+}
+
+func validateSearchConfig(errs *validationErrors, label string, cfg SearchConfig) {
+	validateFusionConfig(errs, label+".fusion", cfg.Fusion)
+	switch cfg.Reranker {
+	case "", SearchRerankerHistorical, SearchRerankerArmAwareHistorical:
+		// valid
+	default:
+		errs.add("%s.reranker: unsupported reranker %q (supported: %q, %q)",
+			label, cfg.Reranker,
+			SearchRerankerHistorical,
+			SearchRerankerArmAwareHistorical,
+		)
+	}
+}
+
+func validateFusionConfig(errs *validationErrors, label string, cfg FusionConfig) {
+	if cfg.IsZero() {
+		return
+	}
+	switch cfg.Strategy {
+	case "", SearchFusionStrategyDefault:
+		if cfg.K != 0 {
+			errs.add("%s.k: only applies to strategy %q", label, SearchFusionStrategyRRF)
+		}
+	case SearchFusionStrategyRRF:
+		if cfg.K <= 0 {
+			errs.add("%s.k: must be > 0 for strategy %q", label, SearchFusionStrategyRRF)
+		}
+	default:
+		errs.add("%s.strategy: unsupported strategy %q (supported: %q, %q)",
+			label, cfg.Strategy,
+			SearchFusionStrategyDefault,
+			SearchFusionStrategyRRF,
+		)
+	}
+	if cfg.K < 0 {
+		errs.add("%s.k: must be >= 0", label)
 	}
 }
 
