@@ -44,6 +44,11 @@ type statusResult struct {
 type statusRuntimeConfig struct {
 	Embedder statusRuntimeProvider `json:"embedder"`
 	Analysis statusRuntimeProvider `json:"analysis"`
+	// Contextualizer is always emitted (no omitempty) so JSON
+	// consumers can distinguish "contextualizer explicitly disabled"
+	// (empty string) from "field absent / schema drift / older
+	// binary". Mirrors the text renderer's always-show posture.
+	Contextualizer string `json:"contextualizer"`
 }
 
 type statusRuntimeProvider struct {
@@ -207,6 +212,7 @@ func newStatusRuntimeConfig(runtimeConfig *app.RuntimeConfigStatus) *statusRunti
 			TimeoutMS:  runtimeConfig.Analysis.TimeoutMS,
 			MaxRetries: runtimeConfig.Analysis.MaxRetries,
 		},
+		Contextualizer: runtimeConfig.Contextualizer,
 	}
 }
 

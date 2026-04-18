@@ -677,6 +677,159 @@ path = "specs"
 	}
 }
 
+func TestRunStatusShowsContextualizerDisabledByDefault(t *testing.T) {
+	repo := t.TempDir()
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus(nil, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "runtime.chunking.contextualizer: disabled") {
+		t.Fatalf("runStatus() output %q does not report contextualizer disabled state", out)
+	}
+}
+
+func TestRunStatusShowsContextualizerFormatWhenEnabled(t *testing.T) {
+	repo := t.TempDir()
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[runtime.chunking.contextualizer]
+format = "title_ancestry"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus(nil, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runStatus() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "runtime.chunking.contextualizer: format=title_ancestry") {
+		t.Fatalf("runStatus() output %q does not report active contextualizer format", out)
+	}
+	if strings.Contains(out, "runtime.chunking.contextualizer: disabled") {
+		t.Fatalf("runStatus() output %q incorrectly reports disabled when contextualizer is set", out)
+	}
+}
+
+func TestRunStatusJSONSurfacesContextualizerForBothPostures(t *testing.T) {
+	// The JSON status payload carries the contextualizer field
+	// unconditionally (no omitempty) so machine consumers can
+	// distinguish "disabled" (empty string) from "field absent /
+	// older binary / schema drift". Covers both postures in one
+	// test so regression on either path fails loud.
+	type jsonPayload struct {
+		Result struct {
+			RuntimeConfig struct {
+				Contextualizer string `json:"contextualizer"`
+			} `json:"runtime_config"`
+		} `json:"result"`
+	}
+
+	cases := []struct {
+		name          string
+		fixtureBlock  string
+		wantFormatVal string
+	}{
+		{
+			name:          "enabled surfaces format",
+			fixtureBlock:  "[runtime.chunking.contextualizer]\nformat = \"ref_title\"\n",
+			wantFormatVal: "ref_title",
+		},
+		{
+			name:          "disabled surfaces explicit empty string",
+			fixtureBlock:  "",
+			wantFormatVal: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := t.TempDir()
+			mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+			mustWriteIndexFixture(t, repo, fmt.Sprintf(`
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+%s
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`, tc.fixtureBlock))
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := withWorkingDir(t, repo, func() int {
+				return runStatus([]string{"--format", "json"}, &stdout, &stderr)
+			})
+			if exitCode != 0 {
+				t.Fatalf("runStatus() exit code = %d, want 0 (stderr=%q)", exitCode, stderr.String())
+			}
+
+			var payload jsonPayload
+			if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+				t.Fatalf("unmarshal status json: %v (stdout=%q)", err, stdout.String())
+			}
+			if got := payload.Result.RuntimeConfig.Contextualizer; got != tc.wantFormatVal {
+				t.Fatalf("result.runtime_config.contextualizer = %q, want %q", got, tc.wantFormatVal)
+			}
+
+			// Regression: the field itself must be present in the
+			// raw JSON even on the disabled path.
+			if !strings.Contains(stdout.String(), `"contextualizer":"`) &&
+				!strings.Contains(stdout.String(), `"contextualizer": "`) {
+				t.Fatalf("status JSON does not carry contextualizer key:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
 func TestRunStatusTextIncludesResolvedRuntimeProfiles(t *testing.T) {
 	repo := t.TempDir()
 	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))

@@ -210,6 +210,15 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 }
 
 func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.LoadResult, showDelta bool, format string, stderr io.Writer) (*index.RebuildResult, error) {
+	// Deliberately no emitRebuildContextualizerConfig here: the
+	// incremental update path does not thread ChunkPolicy or
+	// Contextualizer through to stroma (see internal/index/update.go —
+	// no references to either field). Emitting the announcement here
+	// would be an observability lie: we'd tell operators the
+	// contextualizer is active while changed records are processed
+	// through the non-contextual path. Filed separately; keep this
+	// path silent about contextualizer posture until update actually
+	// honors it.
 	progressReporter := indexProgressReporter(format, stderr)
 	if showDelta {
 		return index.UpdateWithDeltaContextAndOptions(ctx, cfg, records, index.UpdateOptions{ComputeDelta: true}, progressReporter)
@@ -218,8 +227,33 @@ func runIndexUpdate(ctx context.Context, cfg *config.Config, records *source.Loa
 }
 
 func runIndexRebuild(ctx context.Context, cfg *config.Config, records *source.LoadResult, full bool, format string, stderr io.Writer) (*index.RebuildResult, error) {
+	emitRebuildContextualizerConfig(cfg, format, stderr)
 	progressReporter := indexProgressReporter(format, stderr)
 	return index.RebuildWithProgressContextAndOptions(ctx, cfg, records, index.RebuildOptions{Full: full}, progressReporter)
+}
+
+// emitRebuildContextualizerConfig announces a non-nil chunk contextualizer
+// once per rebuild, before progress events start. The disabled path is
+// silent per #347 so day-to-day rebuilds stay quiet and only opted-in
+// behavior produces an extra line.
+//
+// Text mode only. JSON mode stderr is a progress-only NDJSON stream
+// (every line is a "rebuild_progress"/"index" event; see the strict
+// decoder in cmd/index_test.go's decodeIndexProgressEvents). Mixing a
+// second event type into that stream would silently break existing
+// strict parsers. Machine consumers should read contextualizer state
+// from `pituitary status --format json`, which carries it on the
+// runtime_config.contextualizer field for both enabled and disabled
+// postures.
+func emitRebuildContextualizerConfig(cfg *config.Config, format string, stderr io.Writer) {
+	if cfg == nil || format != commandFormatText {
+		return
+	}
+	contextualizer := strings.TrimSpace(cfg.Runtime.Chunking.Contextualizer.Format)
+	if contextualizer == "" {
+		return
+	}
+	fmt.Fprintf(stderr, "pituitary index: chunking contextualizer active (format=%s)\n", contextualizer)
 }
 
 func indexProgressReporter(format string, stderr io.Writer) index.RebuildProgressReporter {

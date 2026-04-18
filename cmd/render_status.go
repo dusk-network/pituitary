@@ -95,15 +95,20 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	}
 	if result.RuntimeConfig != nil {
 		fmt.Fprintf(w, "  %s\n", p.white("RUNTIME CONFIG"))
-		for i, item := range []struct {
+		// Providers are never the last tree item anymore — the
+		// contextualizer line below is always emitted (enabled or
+		// disabled) per #347, so both providers are mid-branches.
+		for _, item := range []struct {
 			Name     string
 			Provider statusRuntimeProvider
 		}{
 			{Name: "runtime.embedder", Provider: result.RuntimeConfig.Embedder},
 			{Name: "runtime.analysis", Provider: result.RuntimeConfig.Analysis},
 		} {
-			fmt.Fprintf(w, "  %s %s\n", p.treeItem(i == 1), renderRuntimeProviderSummary(item.Name, item.Provider))
+			fmt.Fprintf(w, "  %s %s\n", p.treeItem(false), renderRuntimeProviderSummary(item.Name, item.Provider))
 		}
+		fmt.Fprintf(w, "  %s runtime.chunking.contextualizer: %s\n",
+			p.treeItem(true), renderContextualizerSummary(result.RuntimeConfig.Contextualizer))
 	}
 	if result.Runtime != nil {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("runtime probe:"), result.Runtime.Scope)
@@ -262,6 +267,17 @@ func renderSpecFamilies(w io.Writer, families *index.FamilyResult) {
 			fmt.Fprintf(w, "    %s ... and %d more\n", p.dim(""), len(families.Ungoverned)-5)
 		}
 	}
+}
+
+// renderContextualizerSummary formats the contextualizer entry in the
+// RUNTIME CONFIG block. Disabled prints "disabled" so an operator can
+// confirm the current posture at a glance; enabled prints
+// "format=<name>" for symmetry with the " | "-joined provider summary.
+func renderContextualizerSummary(format string) string {
+	if format == "" {
+		return "disabled"
+	}
+	return "format=" + format
 }
 
 func renderRuntimeProviderSummary(name string, provider statusRuntimeProvider) string {
