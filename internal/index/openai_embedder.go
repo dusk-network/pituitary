@@ -9,7 +9,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/openaicompat"
-	stembed "github.com/dusk-network/stroma/embed"
+	stembed "github.com/dusk-network/stroma/v2/embed"
 )
 
 const (

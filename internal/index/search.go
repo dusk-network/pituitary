@@ -12,7 +12,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
-	stindex "github.com/dusk-network/stroma/index"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 const (
@@ -364,11 +364,13 @@ func loadRankedCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stin
 	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
 
 	hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
-		Text:     query.Query,
-		Limit:    searchCandidateLimit(query.Limit),
-		Kinds:    []string{query.Kind},
-		Embedder: embedder,
-		Reranker: historicalSectionReranker{preferHistorical: preferHistorical},
+		SearchParams: stindex.SearchParams{
+			Text:     query.Query,
+			Limit:    searchCandidateLimit(query.Limit),
+			Kinds:    []string{query.Kind},
+			Embedder: embedder,
+			Reranker: historicalSectionReranker{preferHistorical: preferHistorical},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("query search candidates: %w", err)

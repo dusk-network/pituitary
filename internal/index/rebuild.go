@@ -18,8 +18,8 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
-	stcorpus "github.com/dusk-network/stroma/corpus"
-	stindex "github.com/dusk-network/stroma/index"
+	stcorpus "github.com/dusk-network/stroma/v2/corpus"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 const schemaVersion = 10
@@ -253,7 +253,7 @@ func corpusRecordFromSpec(spec model.SpecRecord) (stcorpus.Record, error) {
 		BodyText:    spec.BodyText,
 		ContentHash: spec.ContentHash,
 		Metadata:    metadata,
-	}.Normalized()
+	}.Normalize()
 }
 
 func corpusRecordFromDoc(doc model.DocRecord) (stcorpus.Record, error) {
@@ -266,7 +266,7 @@ func corpusRecordFromDoc(doc model.DocRecord) (stcorpus.Record, error) {
 		BodyText:    doc.BodyText,
 		ContentHash: doc.ContentHash,
 		Metadata:    cloneMetadata(doc.Metadata),
-	}.Normalized()
+	}.Normalize()
 }
 
 func publishBusinessIndexContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, result *RebuildResult, snapshotPath string) error {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	ststore "github.com/dusk-network/stroma/store"
+	ststore "github.com/dusk-network/stroma/v2/store"
 )
 
 func openReadWriteContext(ctx context.Context, path string) (*sql.DB, error) {

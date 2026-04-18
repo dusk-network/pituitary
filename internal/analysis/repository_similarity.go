@@ -7,7 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
-	stindex "github.com/dusk-network/stroma/index"
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 const (
