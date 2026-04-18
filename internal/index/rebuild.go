@@ -200,11 +200,16 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, fmt.Errorf("resolve chunk policy: %w", err)
 	}
+	contextualizer, err := pchunk.ResolveContextualizer(chunkContextualizerFromRuntime(cfg.Runtime.Chunking))
+	if err != nil {
+		return nil, fmt.Errorf("resolve chunk contextualizer: %w", err)
+	}
 
 	stromaOptions := stindex.BuildOptions{
-		Path:        snapshotPath,
-		Embedder:    embedder,
-		ChunkPolicy: chunkPolicy,
+		Path:           snapshotPath,
+		Embedder:       embedder,
+		ChunkPolicy:    chunkPolicy,
+		Contextualizer: contextualizer,
 	}
 	if !options.Full {
 		// Stroma rebuilds through Path+".new", so reusing the currently published
@@ -267,6 +272,16 @@ func chunkKindFromConfig(kind config.ChunkingKindConfig) pchunk.KindConfig {
 		MaxSections:        kind.MaxSections,
 		ChildMaxTokens:     kind.ChildMaxTokens,
 		ChildOverlapTokens: kind.ChildOverlapTokens,
+	}
+}
+
+// chunkContextualizerFromRuntime adapts the config-layer contextualizer
+// shape to the chunk package's ContextualizerConfig. Format names are
+// duplicated in the config package so this is a pure string copy; the
+// chunk package validates the format at resolve time.
+func chunkContextualizerFromRuntime(cfg config.ChunkingConfig) pchunk.ContextualizerConfig {
+	return pchunk.ContextualizerConfig{
+		Format: pchunk.PrefixFormat(cfg.Contextualizer.Format),
 	}
 }
 

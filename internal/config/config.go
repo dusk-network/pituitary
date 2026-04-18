@@ -43,6 +43,13 @@ const (
 
 	ChunkPolicyMarkdown  = "markdown"
 	ChunkPolicyLateChunk = "late_chunk"
+
+	// Chunk contextualizer formats. Duplicated here (rather than
+	// imported from internal/chunk) to keep the config package
+	// dependency-free of chunk, matching the pattern used for
+	// ChunkPolicy* above. Kept in lock-step with chunk.PrefixFormat*.
+	ChunkContextualizerFormatTitleAncestry = "title_ancestry"
+	ChunkContextualizerFormatRefTitle      = "ref_title"
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -105,13 +112,29 @@ type Runtime struct {
 // pipeline. A zero value means "no overrides" — the rebuild keeps the
 // pre-#338 default stroma MarkdownPolicy for every record.
 type ChunkingConfig struct {
-	Spec ChunkingKindConfig
-	Doc  ChunkingKindConfig
+	Spec           ChunkingKindConfig
+	Doc            ChunkingKindConfig
+	Contextualizer ChunkingContextualizerConfig
 }
 
-// IsZero reports whether no kind has an override configured.
+// IsZero reports whether no kind or contextualizer override is set.
 func (c ChunkingConfig) IsZero() bool {
-	return c.Spec.IsZero() && c.Doc.IsZero()
+	return c.Spec.IsZero() && c.Doc.IsZero() && c.Contextualizer.IsZero()
+}
+
+// ChunkingContextualizerConfig selects a per-chunk context prefix
+// builder. A zero value means "disabled" — the rebuild produces the
+// same snapshot it did before #343 (no prefix column writes, no
+// reuse-cache invalidation). Opt-in only.
+type ChunkingContextualizerConfig struct {
+	// Format selects the prefix layout. Empty means disabled.
+	// Validated against chunk.PrefixFormat at rebuild resolve time.
+	Format string
+}
+
+// IsZero reports whether the contextualizer is disabled.
+func (c ChunkingContextualizerConfig) IsZero() bool {
+	return strings.TrimSpace(c.Format) == ""
 }
 
 // ChunkingKindConfig is a per-kind chunking override. A zero value means
@@ -215,8 +238,9 @@ type rawRuntime struct {
 }
 
 type rawChunking struct {
-	Spec rawChunkingKind `toml:"spec"`
-	Doc  rawChunkingKind `toml:"doc"`
+	Spec           rawChunkingKind           `toml:"spec"`
+	Doc            rawChunkingKind           `toml:"doc"`
+	Contextualizer rawChunkingContextualizer `toml:"contextualizer"`
 }
 
 type rawChunkingKind struct {
@@ -226,6 +250,10 @@ type rawChunkingKind struct {
 	MaxSections        int    `toml:"max_sections"`
 	ChildMaxTokens     int    `toml:"child_max_tokens"`
 	ChildOverlapTokens int    `toml:"child_overlap_tokens"`
+}
+
+type rawChunkingContextualizer struct {
+	Format string `toml:"format"`
 }
 
 type rawSource struct {
@@ -1174,13 +1202,21 @@ func validateRuntime(runtime *Runtime) error {
 	}
 	validateChunkingKind(&errs, "runtime.chunking.spec", runtime.Chunking.Spec)
 	validateChunkingKind(&errs, "runtime.chunking.doc", runtime.Chunking.Doc)
+	validateChunkingContextualizer(&errs, "runtime.chunking.contextualizer", runtime.Chunking.Contextualizer)
 	return errs.err()
 }
 
 func buildChunkingConfig(raw rawChunking) ChunkingConfig {
 	return ChunkingConfig{
-		Spec: buildChunkingKind(raw.Spec),
-		Doc:  buildChunkingKind(raw.Doc),
+		Spec:           buildChunkingKind(raw.Spec),
+		Doc:            buildChunkingKind(raw.Doc),
+		Contextualizer: buildChunkingContextualizer(raw.Contextualizer),
+	}
+}
+
+func buildChunkingContextualizer(raw rawChunkingContextualizer) ChunkingContextualizerConfig {
+	return ChunkingContextualizerConfig{
+		Format: strings.TrimSpace(raw.Format),
 	}
 }
 
@@ -1227,6 +1263,23 @@ func validateChunkingKind(errs *validationErrors, label string, kind ChunkingKin
 	}
 	if kind.ChildOverlapTokens < 0 {
 		errs.add("%s.child_overlap_tokens: must be >= 0", label)
+	}
+}
+
+func validateChunkingContextualizer(errs *validationErrors, label string, cfg ChunkingContextualizerConfig) {
+	if cfg.IsZero() {
+		return
+	}
+	switch cfg.Format {
+	case ChunkContextualizerFormatTitleAncestry,
+		ChunkContextualizerFormatRefTitle:
+		// valid
+	default:
+		errs.add("%s.format: unsupported format %q (supported: %q, %q)",
+			label, cfg.Format,
+			ChunkContextualizerFormatTitleAncestry,
+			ChunkContextualizerFormatRefTitle,
+		)
 	}
 }
 
