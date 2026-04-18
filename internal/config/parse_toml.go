@@ -102,17 +102,21 @@ func undecodedKeyMessage(key toml.Key) string {
 				if len(key) < 3 {
 					return fmt.Sprintf("unsupported runtime.chunking field %q", strings.Join(key[2:], "."))
 				}
-				if key[2] != "spec" && key[2] != "doc" {
-					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc"})
+				switch key[2] {
+				case "spec", "doc":
+					if len(key) == 3 {
+						return fmt.Sprintf("unsupported runtime.chunking.%s field %q", key[2], strings.Join(key[3:], "."))
+					}
+					scope := "runtime.chunking." + key[2]
+					return unsupportedFieldMessage(scope, strings.Join(key[3:], "."), chunkingKindFields())
+				case "contextualizer":
+					if len(key) == 3 {
+						return fmt.Sprintf("unsupported runtime.chunking.contextualizer field %q", strings.Join(key[3:], "."))
+					}
+					return unsupportedFieldMessage("runtime.chunking.contextualizer", strings.Join(key[3:], "."), chunkingContextualizerFields())
+				default:
+					return unsupportedFieldMessage("runtime.chunking", key[2], []string{"spec", "doc", "contextualizer"})
 				}
-				if len(key) == 3 {
-					// Outer switch already handled bare section; any
-					// extra path element at this length is a toml
-					// oddity, fall through to generic error.
-					return fmt.Sprintf("unsupported runtime.chunking.%s field %q", key[2], strings.Join(key[3:], "."))
-				}
-				scope := "runtime.chunking." + key[2]
-				return unsupportedFieldMessage(scope, strings.Join(key[3:], "."), chunkingKindFields())
 			default:
 				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))
 			}
@@ -174,6 +178,10 @@ func chunkingKindFields() []string {
 		"child_max_tokens",
 		"child_overlap_tokens",
 	}
+}
+
+func chunkingContextualizerFields() []string {
+	return []string{"format"}
 }
 
 func unsupportedFieldMessage(scope, field string, valid []string) string {

@@ -56,6 +56,10 @@ func Render(cfg *Config) (string, error) {
 		builder.WriteString("\n[runtime.chunking.doc]\n")
 		writeChunkingKindConfig(&builder, cfg.Runtime.Chunking.Doc)
 	}
+	if !cfg.Runtime.Chunking.Contextualizer.IsZero() {
+		builder.WriteString("\n[runtime.chunking.contextualizer]\n")
+		writeChunkingContextualizerConfig(&builder, cfg.Runtime.Chunking.Contextualizer)
+	}
 
 	if len(cfg.Terminology.ExcludePaths) > 0 {
 		builder.WriteString("\n[terminology]\n")
@@ -133,6 +137,12 @@ func writeRuntimeProviderConfig(builder *strings.Builder, provider RuntimeProvid
 	}
 	if base == nil || provider.MaxResponseTokens != base.MaxResponseTokens {
 		fmt.Fprintf(builder, "max_response_tokens = %d\n", provider.MaxResponseTokens)
+	}
+}
+
+func writeChunkingContextualizerConfig(builder *strings.Builder, cfg ChunkingContextualizerConfig) {
+	if format := strings.TrimSpace(cfg.Format); format != "" {
+		fmt.Fprintf(builder, "format = %s\n", strconv.Quote(format))
 	}
 }
 
