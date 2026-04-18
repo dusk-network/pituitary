@@ -349,7 +349,9 @@ func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB
 // no stored value; we skip the check in that case rather than
 // force-rebuild every pre-existing index, because rebuild.go did
 // honor the active config even without recording the fingerprint.
-// The first post-fingerprint rebuild self-heals the metadata gap.
+// The metadata gap is self-healed by the first rebuild OR update
+// after this change, since publishBusinessIndexContext runs on both
+// paths and upserts chunking_config_fingerprint unconditionally.
 func validateStoredChunkingConfigContext(ctx context.Context, db *sql.DB, current config.ChunkingConfig) error {
 	stored, err := readOptionalMetadataValueContext(ctx, db, "chunking_config_fingerprint")
 	if err != nil {

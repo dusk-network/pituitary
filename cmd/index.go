@@ -239,10 +239,13 @@ func runIndexRebuild(ctx context.Context, cfg *config.Config, records *source.Lo
 	return result, err
 }
 
-// emitRebuildContextualizerConfig announces a non-nil chunk contextualizer
-// once per rebuild, before progress events start. The disabled path is
-// silent per #347 so day-to-day rebuilds stay quiet and only opted-in
-// behavior produces an extra line.
+// emitRebuildContextualizerConfig announces a non-nil chunk
+// contextualizer once per rebuild or update, after the data-path call
+// returns without error. Callers must only invoke this on success so
+// stderr never implies the contextualizer was applied when rebuild or
+// update aborted before publish. The disabled path is silent per #347
+// so day-to-day runs stay quiet and only opted-in behavior produces
+// an extra line.
 //
 // Text mode only. JSON mode stderr is a progress-only NDJSON stream
 // (every line is a "rebuild_progress"/"index" event; see the strict
