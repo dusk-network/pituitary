@@ -439,6 +439,9 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 	if err := upsertMetadataContext(ctx, tx, "source_fingerprint", sourceFingerprint(cfg)); err != nil {
 		return err
 	}
+	if err := upsertMetadataContext(ctx, tx, "chunking_config_fingerprint", chunkingConfigFingerprint(cfg.Runtime.Chunking)); err != nil {
+		return err
+	}
 	if manifest := sourceManifestJSON(cfg); manifest != "" {
 		if err := upsertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
 			return err
@@ -891,6 +894,31 @@ func fingerprint(parts []string) string {
 	sort.Strings(parts)
 	hash := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(hash[:])
+}
+
+// chunkingConfigFingerprint is a stable hash of every field that
+// affects how a record is chunked or contextualized. It is persisted
+// at rebuild time and validated on --update so a config change
+// between rebuild and update can't silently produce a snapshot with
+// mixed chunk shapes (old records re-chunked under one policy, new
+// records under another). Any mismatch forces an explicit rebuild.
+func chunkingConfigFingerprint(cfg config.ChunkingConfig) string {
+	parts := []string{
+		"contextualizer_format=" + cfg.Contextualizer.Format,
+		"spec_policy=" + cfg.Spec.Policy,
+		fmt.Sprintf("spec_max_tokens=%d", cfg.Spec.MaxTokens),
+		fmt.Sprintf("spec_overlap_tokens=%d", cfg.Spec.OverlapTokens),
+		fmt.Sprintf("spec_max_sections=%d", cfg.Spec.MaxSections),
+		fmt.Sprintf("spec_child_max_tokens=%d", cfg.Spec.ChildMaxTokens),
+		fmt.Sprintf("spec_child_overlap_tokens=%d", cfg.Spec.ChildOverlapTokens),
+		"doc_policy=" + cfg.Doc.Policy,
+		fmt.Sprintf("doc_max_tokens=%d", cfg.Doc.MaxTokens),
+		fmt.Sprintf("doc_overlap_tokens=%d", cfg.Doc.OverlapTokens),
+		fmt.Sprintf("doc_max_sections=%d", cfg.Doc.MaxSections),
+		fmt.Sprintf("doc_child_max_tokens=%d", cfg.Doc.ChildMaxTokens),
+		fmt.Sprintf("doc_child_overlap_tokens=%d", cfg.Doc.ChildOverlapTokens),
+	}
+	return fingerprint(parts)
 }
 
 // inferASTEdgesContext walks the workspace for code files, extracts symbols via
