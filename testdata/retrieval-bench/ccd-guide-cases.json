@@ -34,8 +34,113 @@
     "id": "guardrails_why",
     "query": "why do I need guardrails around autonomous agents",
     "relevant_doc_refs": [
-      "doc://guide/07-guardrails",
+      "doc://guide/07-guardrails"
+    ]
+  },
+  {
+    "id": "why_problem_statement",
+    "query": "what problem does CCD solve and why do AI sessions lose context between runs",
+    "relevant_doc_refs": [
       "doc://guide/01-why"
+    ]
+  },
+  {
+    "id": "adoption_ladder_levels",
+    "query": "what are the CCD adoption levels and when should I move from level 1 to level 2",
+    "relevant_doc_refs": [
+      "doc://guide/03-adoption-ladder"
+    ]
+  },
+  {
+    "id": "machine_team_lead_role",
+    "query": "what does becoming a machine team lead mean for the developer's role",
+    "relevant_doc_refs": [
+      "doc://guide/03-adoption-ladder"
+    ]
+  },
+  {
+    "id": "session_state_boundaries",
+    "query": "what is the difference between project truth, operator state, and workspace state",
+    "relevant_doc_refs": [
+      "doc://guide/04-process"
+    ]
+  },
+  {
+    "id": "session_loop_phases",
+    "query": "what are the explicit phases of a CCD session loop",
+    "relevant_doc_refs": [
+      "doc://guide/04-process",
+      "doc://reference/cheatsheet"
+    ]
+  },
+  {
+    "id": "memory_scope_layout",
+    "query": "where on disk does CCD store profile, repo, branch, and workspace memory files",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture"
+    ]
+  },
+  {
+    "id": "infrastructure_level2_signals",
+    "query": "when should I add deterministic source ordering and stronger review loops",
+    "relevant_doc_refs": [
+      "doc://guide/06-infrastructure"
+    ]
+  },
+  {
+    "id": "ai_doc_sync_runtimes",
+    "query": "how do I keep CLAUDE.md, GEMINI.md, and AGENTS.md aligned across runtimes",
+    "relevant_doc_refs": [
+      "doc://guide/06-infrastructure"
+    ]
+  },
+  {
+    "id": "fail_closed_principle",
+    "query": "why does CCD fail closed when a gate is missing or ambiguous",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails"
+    ]
+  },
+  {
+    "id": "deterministic_vs_prompt",
+    "query": "why prefer hard-coded validators over prompt-based instructions for guardrails",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails"
+    ]
+  },
+  {
+    "id": "session_patterns_recipes",
+    "query": "operational recipes for starting, executing, and closing a session cleanly",
+    "relevant_doc_refs": [
+      "doc://guide/08-patterns"
+    ]
+  },
+  {
+    "id": "doc_accuracy_patterns",
+    "query": "patterns for keeping documentation accurate as the system evolves",
+    "relevant_doc_refs": [
+      "doc://guide/08-patterns"
+    ]
+  },
+  {
+    "id": "compliance_audit_changes",
+    "query": "what state model alignment changes did the 2026-03 audit require in the guide",
+    "relevant_doc_refs": [
+      "doc://archive/specs/cli/2026-03-08-ccd-guide-compliance-audit"
+    ]
+  },
+  {
+    "id": "cheatsheet_daily",
+    "query": "where is the daily quick reference for the CCD kernel loop",
+    "relevant_doc_refs": [
+      "doc://reference/cheatsheet"
+    ]
+  },
+  {
+    "id": "bootstrap_without_skill_md",
+    "query": "how do I bootstrap CCD in a tool without SKILL.md support",
+    "relevant_doc_refs": [
+      "doc://reference/bootstrap-prompt"
     ]
   }
 ]
