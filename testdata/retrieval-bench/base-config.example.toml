@@ -1,0 +1,93 @@
+# Example base config consumed by scripts/bench-precision-344.sh.
+#
+# Copy to a writable path, then update:
+#   - [workspace].root → absolute path of the corpus you want to bench
+#   - [workspace].index_path → absolute path for variant snapshots
+#   - [runtime.embedder].endpoint → reachable OpenAI-compatible /v1 base URL
+#   - [[sources]] entries → match the corpus layout
+#
+# The script appends one of three chunking overlays from
+# testdata/retrieval-bench/chunking-overlays/, so this file MUST NOT
+# include a [runtime.chunking] block.
+#
+# The published 2026-04-19 run used:
+#   - corpus: ~/devel/ccd-guide @ 8854090 (`docs(rfc): correct RFC 0006 §6 ...`)
+#   - embedder: mlx-router @ http://100.92.91.40:1234/v1, model nomic-embed-text-v1.5
+
+[workspace]
+root = "/absolute/path/to/your/corpus"
+index_path = "/tmp/pituitary-bench-344/corpus.db"
+
+[runtime.embedder]
+provider = "openai_compatible"
+endpoint = "http://localhost:1234/v1"
+model = "nomic-embed-text-v1.5"
+timeout_ms = 30000
+max_retries = 1
+
+# Below: the source list used for the published ccd-guide run. Replace
+# with sources matching your own corpus layout.
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+files = [
+  "autonomous-escalation-and-approval-policy/spec.toml",
+  "autonomous-memory-governance/spec.toml",
+  "autonomous-session-lifecycle/spec.toml",
+  "backlog-extension/spec.toml",
+  "continuity-history-and-focus-recommendation/spec.toml",
+  "concurrent-state-and-ownership/spec.toml",
+  "execution-gates/spec.toml",
+  "machine-runtime-api/spec.toml",
+  "mid-session-context-refresh/spec.toml",
+  "memory-compaction-replay/spec.toml",
+  "memory-entry-format/spec.toml",
+  "memory-ingest-sync-provider-contract/spec.toml",
+  "memory-recall-provider-contract/spec.toml",
+  "memory-promotion/spec.toml",
+  "optimization-reintroduction/spec.toml",
+  "pod-identity-and-cross-machine-coordination/spec.toml",
+  "pod-identity-model/spec.toml",
+  "projection-compiler-cache/spec.toml",
+  "reference-adapter-hermes/spec.toml",
+  "reference-adapter-openclaw/spec.toml",
+  "repo-identity-linking/spec.toml",
+  "runtime-state-contract/spec.toml",
+  "session-intent-signals/spec.toml",
+  "session-workflow/spec.toml",
+  "skill-sync-distribution/spec.toml",
+  "state-model-core/spec.toml",
+  "substrate-abstraction/spec.toml",
+]
+
+[[sources]]
+name = "contracts"
+adapter = "filesystem"
+kind = "markdown_contract"
+path = "."
+files = [
+  "KERNEL_CONTRACT.md",
+]
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+files = [
+  "archive/specs/cli/2026-03-08-ccd-guide-compliance-audit.md",
+  "guide/01-why.md",
+  "guide/02-quickstart.md",
+  "guide/03-adoption-ladder.md",
+  "guide/04-process.md",
+  "guide/05-memory-architecture.md",
+  "guide/06-infrastructure.md",
+  "guide/07-guardrails.md",
+  "guide/08-patterns.md",
+  "operations/README.md",
+  "reference/bootstrap-prompt.md",
+  "reference/cheatsheet.md",
+]
