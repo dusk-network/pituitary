@@ -252,8 +252,9 @@ type RuntimeProvider struct {
 }
 
 type Terminology struct {
-	ExcludePaths []string
-	Policies     []TerminologyPolicy
+	ExcludePaths           []string
+	Policies               []TerminologyPolicy
+	IncludeSemanticMatches bool
 }
 
 type TerminologyPolicy struct {
@@ -337,8 +338,9 @@ type rawSource struct {
 }
 
 type rawTerminology struct {
-	ExcludePaths []string               `toml:"exclude_paths"`
-	Policies     []rawTerminologyPolicy `toml:"policies"`
+	ExcludePaths           []string               `toml:"exclude_paths"`
+	IncludeSemanticMatches bool                   `toml:"include_semantic_matches"`
+	Policies               []rawTerminologyPolicy `toml:"policies"`
 }
 
 type rawTerminologyPolicy struct {
@@ -487,8 +489,9 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Search:   buildSearchConfig(raw.Runtime.Search),
 		},
 		Terminology: Terminology{
-			ExcludePaths: uniqueStringList(raw.Terminology.ExcludePaths),
-			Policies:     make([]TerminologyPolicy, 0, len(raw.Terminology.Policies)),
+			ExcludePaths:           uniqueStringList(raw.Terminology.ExcludePaths),
+			IncludeSemanticMatches: raw.Terminology.IncludeSemanticMatches,
+			Policies:               make([]TerminologyPolicy, 0, len(raw.Terminology.Policies)),
 		},
 		Sources: make([]Source, 0, len(raw.Sources)),
 	}

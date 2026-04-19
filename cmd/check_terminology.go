@@ -29,18 +29,19 @@ func runCheckTerminology(args []string, stdout, stderr io.Writer) int {
 
 func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
-		terms          stringList
-		canonicalTerms stringList
-		specRef        string
-		specPath       string
-		scope          string
+		terms                  stringList
+		canonicalTerms         stringList
+		specRef                string
+		specPath               string
+		scope                  string
+		includeSemanticMatches bool
 	)
 
 	return runCommand[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult](
 		ctx, args, stdout, stderr,
 		commandRun[analysis.TerminologyAuditRequest, analysis.TerminologyAuditResult]{
 			Name:  "check-terminology",
-			Usage: "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] | --request-file PATH|-) [--format FORMAT] [--timings]",
+			Usage: "pituitary [--config PATH] check-terminology ([--term TERM]... [--canonical-term TERM]... [--spec-ref REF | --path PATH] [--scope SCOPE] [--include-semantic-matches] | --request-file PATH|-) [--format FORMAT] [--timings]",
 			Options: commandRunOptions{
 				RequestFile:    true,
 				Timings:        true,
@@ -53,21 +54,24 @@ func runCheckTerminologyContext(ctx context.Context, args []string, stdout, stde
 				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref used to anchor the audit")
 				fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec used to anchor the audit")
 				fs.StringVar(&scope, "scope", "all", "artifact scope: all, docs, or specs")
+				fs.BoolVar(&includeSemanticMatches, "include-semantic-matches", false, "include embedding-similarity near-miss findings (low precision on mature corpora; default off)")
 			},
 			InlineFlagsSet: func(fs *flag.FlagSet) bool {
 				return countNonEmptyStrings([]string(terms)) > 0 ||
 					countNonEmptyStrings([]string(canonicalTerms)) > 0 ||
 					strings.TrimSpace(specRef) != "" ||
 					strings.TrimSpace(specPath) != "" ||
-					flagWasSet(fs, "scope")
+					flagWasSet(fs, "scope") ||
+					flagWasSet(fs, "include-semantic-matches")
 			},
 			LoadRequestFile: autoLoadWorkspaceRequest[analysis.TerminologyAuditRequest],
 			BuildRequest: func(ctx context.Context, cfg *config.Config, _ string, _ []string) (analysis.TerminologyAuditRequest, error) {
 				req := analysis.TerminologyAuditRequest{
-					Terms:          []string(terms),
-					CanonicalTerms: []string(canonicalTerms),
-					SpecRef:        strings.TrimSpace(specRef),
-					Scope:          strings.TrimSpace(scope),
+					Terms:                  []string(terms),
+					CanonicalTerms:         []string(canonicalTerms),
+					SpecRef:                strings.TrimSpace(specRef),
+					Scope:                  strings.TrimSpace(scope),
+					IncludeSemanticMatches: includeSemanticMatches,
 				}
 				trimmedPath := strings.TrimSpace(specPath)
 				if req.SpecRef != "" && trimmedPath != "" {

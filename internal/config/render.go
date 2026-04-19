@@ -72,9 +72,14 @@ func Render(cfg *Config) (string, error) {
 		}
 	}
 
-	if len(cfg.Terminology.ExcludePaths) > 0 {
+	if len(cfg.Terminology.ExcludePaths) > 0 || cfg.Terminology.IncludeSemanticMatches {
 		builder.WriteString("\n[terminology]\n")
-		writeQuotedArray(&builder, "exclude_paths", cfg.Terminology.ExcludePaths)
+		if len(cfg.Terminology.ExcludePaths) > 0 {
+			writeQuotedArray(&builder, "exclude_paths", cfg.Terminology.ExcludePaths)
+		}
+		if cfg.Terminology.IncludeSemanticMatches {
+			builder.WriteString("include_semantic_matches = true\n")
+		}
 	}
 
 	for _, policy := range cfg.Terminology.Policies {

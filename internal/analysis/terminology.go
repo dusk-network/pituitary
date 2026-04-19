@@ -32,6 +32,10 @@ type TerminologyAuditRequest struct {
 	CanonicalTerms []string `json:"canonical_terms,omitempty"`
 	SpecRef        string   `json:"spec_ref,omitempty"`
 	Scope          string   `json:"scope,omitempty"`
+	// IncludeSemanticMatches opts the request into the embedding-similarity
+	// near-miss path. When false (the default), only deterministic literal
+	// matches are returned. When true, it ORs with cfg.Terminology.IncludeSemanticMatches.
+	IncludeSemanticMatches bool `json:"include_semantic_matches,omitempty"`
 }
 
 // TerminologyAuditScope reports how the audit selected artifacts.
@@ -193,10 +197,16 @@ func CheckTerminologyContext(ctx context.Context, cfg *config.Config, request Te
 	matchers := compileTerminologyMatchers(normalized.Terms)
 	findings, tolerated := auditTerminologyArtifacts(artifacts, matchers, normalized.GovernedTerms, normalized.CanonicalTerms, evidenceSections)
 
-	// Semantic near-miss detection: if a real embedder is configured, search
-	// for chunks that are conceptually similar to governed terms but don't
-	// contain the literal term string.
-	semanticMatches, err := semanticTerminologyNearMisses(ctx, cfg, repo, normalized.GovernedTerms, normalized.TerminologyAuditRequest)
+	// Semantic near-miss detection: opt-in only. The embedding-similarity path
+	// has low precision on corpora near migration-completion (see #354), so the
+	// default output is limited to deterministic literal matches. Users
+	// actively doing a migration can enable it via the request flag or via
+	// [terminology] include_semantic_matches = true.
+	includeSemantic := normalized.IncludeSemanticMatches || cfg.Terminology.IncludeSemanticMatches
+	var semanticMatches []semanticTerminologyMatch
+	if includeSemantic {
+		semanticMatches, err = semanticTerminologyNearMisses(ctx, cfg, repo, normalized.GovernedTerms, normalized.TerminologyAuditRequest)
+	}
 	if err != nil {
 		warnings = append(warnings, Warning{
 			Code:    "semantic_terminology_unavailable",
