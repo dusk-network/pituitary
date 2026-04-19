@@ -20,12 +20,13 @@ import (
 //
 //  1. The number of reported TerminologyTermMatch entries whose Provenance
 //     is "literal" equals the number of literal occurrences in the corpus.
-//  2. No finding is reported against any artifact whose raw body contains
-//     zero occurrences of any governed alias.
+//  2. No literal-provenance match is reported against any artifact whose raw
+//     body contains zero occurrences of any governed alias.
 //
 // #289 reproduces at roughly a 73:1 reported-to-real ratio, so a true
 // reproduction of the bug on HEAD will fail assertion (1) by a wide margin
-// and/or fail assertion (2) by placing findings on the zero-alias specs.
+// and/or fail assertion (2) by placing literal-provenance matches on the
+// zero-alias artifacts.
 func TestCheckTerminologyLiteralFindingsMatchCorpus(t *testing.T) {
 	t.Parallel()
 
@@ -46,11 +47,14 @@ func TestCheckTerminologyLiteralFindingsMatchCorpus(t *testing.T) {
 	}
 
 	// Refs whose raw body contains zero literal alias occurrences. The audit
-	// must not produce literal-provenance findings against any of them.
+	// must not produce literal-provenance findings against any of them. Doc
+	// refs are computed by docRefForPath as "doc://<path-relative-to-source-root>"
+	// with the .md suffix trimmed, so files under the `docs` source at
+	// docs/unrelated-a/body.md become doc://unrelated-a/body.
 	zeroAliasRefs := map[string]struct{}{
 		"SPEC-CLEAN":             {},
-		"doc://docs/unrelated-a": {},
-		"doc://docs/unrelated-b": {},
+		"doc://unrelated-a/body": {},
+		"doc://unrelated-b/body": {},
 	}
 
 	var literalMatchCount int
@@ -204,12 +208,12 @@ func dumpTerminologyFindings(t *testing.T, findings []TerminologyFinding) {
 // loadTerminologyFalsePositiveFixtureConfig builds a deterministic corpus
 // with exactly four literal occurrences of governed aliases:
 //
-//   - specs/legacy-handoff/body.md     → 1 × "session handoff"
-//   - specs/focus-selection/body.md    → 2 × "focus selection"
-//   - docs/changelog/body.md           → 1 × "backlog dispatch"
+//   - specs/legacy-handoff/body.md     → 1 × "session handoff"   (SPEC-LEGACY-HANDOFF)
+//   - specs/focus-selection/body.md    → 2 × "focus selection"   (SPEC-FOCUS-SELECTION)
+//   - docs/changelog/body.md           → 1 × "backlog dispatch"  (doc://changelog/body)
 //
 // Plus three artifacts that must contain zero occurrences of any governed
-// alias (SPEC-CLEAN, doc://docs/unrelated-a, doc://docs/unrelated-b).
+// alias: SPEC-CLEAN, doc://unrelated-a/body, doc://unrelated-b/body.
 func loadTerminologyFalsePositiveFixtureConfig(tb testing.TB) (*config.Config, string) {
 	tb.Helper()
 
