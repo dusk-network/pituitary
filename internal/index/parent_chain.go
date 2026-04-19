@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	stchunk "github.com/dusk-network/stroma/v2/chunk"
 
@@ -47,9 +48,8 @@ func validateDocParentChainContext(ctx context.Context, snapshotPath string) err
 	}
 	defer db.Close()
 
-	const query = `
-SELECT COUNT(*),
-       IFNULL(GROUP_CONCAT(c.record_ref || '#' || c.id, ','), '')
+	const countQuery = `
+SELECT COUNT(*)
 FROM   chunks c
 JOIN   chunks p ON c.parent_chunk_id = p.id
 JOIN   records r ON c.record_ref = r.ref
@@ -58,15 +58,51 @@ WHERE  r.kind = ?
             OR p.parent_chunk_id IS NOT NULL)`
 
 	var brokenCount int
-	var brokenRefs string
-	if err := db.QueryRowContext(ctx, query, sdk.ArtifactKindDoc).Scan(&brokenCount, &brokenRefs); err != nil {
+	if err := db.QueryRowContext(ctx, countQuery, sdk.ArtifactKindDoc).Scan(&brokenCount); err != nil {
 		return fmt.Errorf("query doc parent-chain invariant: %w", err)
 	}
-	if brokenCount > 0 {
-		return fmt.Errorf(
-			"doc parent-chain validation failed: %d doc leaf chunk(s) point at a parent outside the same record or at a non-root parent; offenders: %s",
-			brokenCount, brokenRefs,
-		)
+	if brokenCount == 0 {
+		return nil
 	}
-	return nil
+
+	// Only when validation fails do we pay for a bounded sample of
+	// offenders for the error message. GROUP_CONCAT over every row on
+	// a healthy large snapshot would be wasted work (and can bump into
+	// SQLite's GROUP_CONCAT length limits on very large corpora).
+	const brokenSampleLimit = 10
+	const sampleQuery = `
+SELECT c.record_ref || '#' || c.id
+FROM   chunks c
+JOIN   chunks p ON c.parent_chunk_id = p.id
+JOIN   records r ON c.record_ref = r.ref
+WHERE  r.kind = ?
+       AND (c.record_ref <> p.record_ref
+            OR p.parent_chunk_id IS NOT NULL)
+LIMIT  ?`
+
+	rows, err := db.QueryContext(ctx, sampleQuery, sdk.ArtifactKindDoc, brokenSampleLimit)
+	if err != nil {
+		return fmt.Errorf("sample doc parent-chain offenders: %w", err)
+	}
+	defer rows.Close()
+	var offenders []string
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			return fmt.Errorf("scan doc parent-chain offender: %w", err)
+		}
+		offenders = append(offenders, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate doc parent-chain offenders: %w", err)
+	}
+
+	sampleNote := ""
+	if brokenCount > len(offenders) {
+		sampleNote = fmt.Sprintf(" (sampled %d of %d)", len(offenders), brokenCount)
+	}
+	return fmt.Errorf(
+		"doc parent-chain validation failed: %d doc leaf chunk(s) point at a parent outside the same record or at a non-root parent; offenders%s: %s",
+		brokenCount, sampleNote, strings.Join(offenders, ","),
+	)
 }

@@ -87,9 +87,11 @@ func (c KindConfig) IsZero() bool {
 	return c == KindConfig{}
 }
 
-// Config aggregates per-kind chunking overrides. A zero value means "no
-// router, no overrides" — Resolve returns a nil Policy so stroma's
-// default MarkdownPolicy applies exactly as it did pre-#338.
+// Config aggregates per-kind chunking overrides. A zero value means
+// "no operator overrides" — Resolve still materializes a
+// KindRouterPolicy carrying the resolver's built-in defaults
+// (MarkdownPolicy for specs, LateChunkPolicy for docs under #344).
+// See Resolve for the full per-kind semantics.
 type Config struct {
 	Spec KindConfig
 	Doc  KindConfig
@@ -116,7 +118,7 @@ func (c Config) IsZero() bool {
 //     DefaultDocLateChunk* knobs (#344 product lever — long-form docs
 //     get parent+leaf hierarchy feeding ExpandContext). Operators who
 //     don't want the storage overhead opt back by setting
-//     `[runtime.chunking.doc]` policy = "markdown"`, which overrides the
+//     `[runtime.chunking.doc] policy = "markdown"`, which overrides the
 //     default via ByKind.
 //
 // The tuning knobs users set without an explicit Policy field still

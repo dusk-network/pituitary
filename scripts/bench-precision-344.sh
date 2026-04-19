@@ -37,7 +37,29 @@ BENCH_REPORT_MD="${BENCH_REPORT_MD:-${REPO_ROOT}/docs/development/retrieval-prec
 mkdir -p "${BENCH_OUT_DIR}"
 
 VARIANTS=(pre338 p338 p344)
-BASE_INDEX_PATH="$(awk -F'=' '/^index_path/ { gsub(/[ "]/, "", $2); print $2; exit }' "${BENCH_BASE_CONFIG}")"
+
+# Read [workspace].index_path from the base config. Scoped to the
+# [workspace] table (TOML is order-sensitive per-table but other tables
+# can also define `index_path = ...`, so scan must stop at the next
+# table header), with leading whitespace tolerated to match how most
+# operators actually write TOML.
+read_workspace_index_path() {
+  local cfg="$1"
+  awk '
+    BEGIN { in_ws = 0 }
+    /^\[workspace\][[:space:]]*$/ { in_ws = 1; next }
+    in_ws && /^\[/ { in_ws = 0 }
+    in_ws && /^[[:space:]]*index_path[[:space:]]*=/ {
+      sub(/^[^=]*=[[:space:]]*/, "")
+      gsub(/^"|"[[:space:]]*$|^'\''|'\''[[:space:]]*$/, "")
+      sub(/[[:space:]]+$/, "")
+      print
+      exit
+    }
+  ' "${cfg}"
+}
+
+BASE_INDEX_PATH="$(read_workspace_index_path "${BENCH_BASE_CONFIG}")"
 if [[ -z "${BASE_INDEX_PATH}" ]]; then
   echo "bench-precision-344: could not read [workspace] index_path from ${BENCH_BASE_CONFIG}" >&2
   exit 2
