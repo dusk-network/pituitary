@@ -1573,6 +1573,96 @@ func TestRenderRoundTripsTerminologyPolicies(t *testing.T) {
 	}
 }
 
+func TestLoadTerminologyIncludeSemanticMatches(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[terminology]
+include_semantic_matches = true
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Terminology.IncludeSemanticMatches {
+		t.Fatalf("Terminology.IncludeSemanticMatches = false, want true")
+	}
+
+	// Round-trip: render + reload should preserve the flag.
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(rendered, "include_semantic_matches = true") {
+		t.Fatalf("rendered config %q does not contain include_semantic_matches = true", rendered)
+	}
+	reloaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if !reloaded.Terminology.IncludeSemanticMatches {
+		t.Fatalf("round-trip lost IncludeSemanticMatches")
+	}
+}
+
+func TestLoadTerminologyIncludeSemanticMatchesDefaultsFalse(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[terminology.policies]]
+preferred = "locality"
+historical_aliases = ["repo"]
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Terminology.IncludeSemanticMatches {
+		t.Fatalf("Terminology.IncludeSemanticMatches = true, want false (default)")
+	}
+
+	// Render should NOT emit the flag when false (keeps default configs minimal).
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if strings.Contains(rendered, "include_semantic_matches") {
+		t.Fatalf("rendered config %q contains include_semantic_matches; should omit at default", rendered)
+	}
+}
+
 func TestLoadRejectsMissingSourcePath(t *testing.T) {
 	t.Parallel()
 

@@ -137,7 +137,7 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "terminology":
 		switch len(key) {
 		case 2:
-			return unsupportedFieldMessage("terminology", key[1], []string{"exclude_paths", "policies"})
+			return unsupportedFieldMessage("terminology", key[1], []string{"exclude_paths", "include_semantic_matches", "policies"})
 		default:
 			if key[1] == "policies" && len(key) == 3 {
 				return unsupportedFieldMessage("terminology.policies", key[2], []string{
