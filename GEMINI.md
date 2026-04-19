@@ -1,4 +1,4 @@
-<!-- GENERATED: source=AGENTS.md format-version=1 sha256=43cb2256fd95fcc94773e58c4068857453e6c352edba3a431ac1348b413dc8da -->
+<!-- GENERATED: source=AGENTS.md format-version=1 sha256=f872fbd69c0feb2732866dfad848d652fb6789fab35100df61adf7d76b0746bc -->
 
 > Generated from `AGENTS.md`. Edit `AGENTS.md`, then rerun `scripts/sync-ai-docs.sh --write`.
 > If this file conflicts with `AGENTS.md`, `AGENTS.md` wins.
@@ -16,6 +16,7 @@ Pituitary is a consistency governance tool that keeps specifications, documentat
 ## Coding Standards
 
 - Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before deep implementation work. Use the active GitHub issues for backlog and priority context.
+- If you touch core write paths or repo governance, also read [docs/development/repo-governance.md](docs/development/repo-governance.md).
 - Treat repository docs as the primary source of truth; keep GitHub issues aligned with them rather than the reverse.
 - Prefer small, reversible changes and deterministic tooling over hand-maintained generated state.
 - Keep outputs machine-readable where the architecture expects JSON-first behavior.
