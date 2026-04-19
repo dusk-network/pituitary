@@ -1,0 +1,12 @@
+# #344 proposed default: specs keep the tighter MarkdownPolicy; docs
+# switch to LateChunkPolicy with tuned parent/child tokens so long-form
+# docs get a parent+leaf hierarchy feeding ExpandContext.
+
+[runtime.chunking.spec]
+policy = "markdown"
+
+[runtime.chunking.doc]
+policy = "late_chunk"
+max_tokens = 2048
+child_max_tokens = 384
+child_overlap_tokens = 48

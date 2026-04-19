@@ -1,0 +1,9 @@
+# #338 plumbing default: router active, both kinds explicitly on
+# MarkdownPolicy. Exercises the KindRouterPolicy seam without changing
+# chunk shapes vs pre-#338.
+
+[runtime.chunking.spec]
+policy = "markdown"
+
+[runtime.chunking.doc]
+policy = "markdown"

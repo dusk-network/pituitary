@@ -14,21 +14,78 @@ import (
 	"github.com/dusk-network/pituitary/sdk"
 )
 
-func TestResolve_ZeroConfigReturnsNilPolicy(t *testing.T) {
+func TestResolve_ZeroConfigDefaultsDocsToLateChunk(t *testing.T) {
 	t.Parallel()
 
+	// #344: zero-config Resolve now always materializes a router so
+	// docs pick up the LateChunkPolicy default. Router.Default keeps
+	// the pre-#338 MarkdownPolicy contract for any unknown kind, and
+	// specs fall through to that Default (no explicit ByKind entry).
 	policy, err := Resolve(Config{})
 	if err != nil {
 		t.Fatalf("Resolve(zero) returned error: %v", err)
 	}
-	if policy != nil {
-		t.Fatalf("Resolve(zero) = %T, want nil (preserves default stroma behavior)", policy)
+	router, ok := policy.(stchunk.KindRouterPolicy)
+	if !ok {
+		t.Fatalf("Resolve(zero) = %T, want KindRouterPolicy", policy)
+	}
+	defaultPolicy, ok := router.Default.(stchunk.MarkdownPolicy)
+	if !ok {
+		t.Fatalf("router.Default = %T, want MarkdownPolicy", router.Default)
+	}
+	if got, want := defaultPolicy.Options.MaxSections, stindex.DefaultMaxChunkSections; got != want {
+		t.Fatalf("router.Default MaxSections = %d, want %d", got, want)
+	}
+	if _, specConfigured := router.ByKind[sdk.ArtifactKindSpec]; specConfigured {
+		t.Fatalf("router.ByKind has spec entry on zero config; specs should fall through to router.Default")
+	}
+	docPolicy, ok := router.ByKind[sdk.ArtifactKindDoc].(stchunk.LateChunkPolicy)
+	if !ok {
+		t.Fatalf("router.ByKind[doc] = %T, want LateChunkPolicy on zero config", router.ByKind[sdk.ArtifactKindDoc])
+	}
+	if docPolicy.ParentMaxTokens != DefaultDocLateChunkParentMaxTokens ||
+		docPolicy.ChildMaxTokens != DefaultDocLateChunkChildMaxTokens ||
+		docPolicy.ChildOverlapTokens != DefaultDocLateChunkChildOverlapTokens {
+		t.Fatalf("default doc LateChunkPolicy = %+v, want parent=%d child=%d overlap=%d",
+			docPolicy,
+			DefaultDocLateChunkParentMaxTokens,
+			DefaultDocLateChunkChildMaxTokens,
+			DefaultDocLateChunkChildOverlapTokens,
+		)
+	}
+	if got, want := docPolicy.MaxSections, stindex.DefaultMaxChunkSections; got != want {
+		t.Fatalf("default doc LateChunkPolicy.MaxSections = %d, want %d", got, want)
 	}
 }
 
-func TestResolve_SpecOnlyRoutesSpecAndDefaultsOthers(t *testing.T) {
+func TestResolve_ExplicitMarkdownDocOverridesDefault(t *testing.T) {
 	t.Parallel()
 
+	// AC: operators can opt back to MarkdownPolicy for docs when they
+	// don't want the LateChunkPolicy storage overhead. Explicit
+	// `policy = "markdown"` must win over the #344 default.
+	policy, err := Resolve(Config{
+		Doc: KindConfig{Policy: PolicyMarkdown, MaxTokens: 800},
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	router := policy.(stchunk.KindRouterPolicy)
+	docPolicy, ok := router.ByKind[sdk.ArtifactKindDoc].(stchunk.MarkdownPolicy)
+	if !ok {
+		t.Fatalf("doc policy = %T, want MarkdownPolicy (explicit opt-back)", router.ByKind[sdk.ArtifactKindDoc])
+	}
+	if docPolicy.Options.MaxTokens != 800 {
+		t.Fatalf("doc MarkdownPolicy.Options.MaxTokens = %d, want 800", docPolicy.Options.MaxTokens)
+	}
+}
+
+func TestResolve_SpecOnlyPinsSpecAndKeepsDocDefault(t *testing.T) {
+	t.Parallel()
+
+	// Configuring only specs must leave docs on the #344 LateChunkPolicy
+	// default, and must not accidentally disable the DoS guard on the
+	// unknown-kind fallback (router.Default).
 	policy, err := Resolve(Config{
 		Spec: KindConfig{Policy: PolicyMarkdown, MaxTokens: 512},
 	})
@@ -42,16 +99,13 @@ func TestResolve_SpecOnlyRoutesSpecAndDefaultsOthers(t *testing.T) {
 	if _, ok := router.ByKind[sdk.ArtifactKindSpec]; !ok {
 		t.Fatalf("router missing spec entry; ByKind=%+v", router.ByKind)
 	}
-	if _, ok := router.ByKind[sdk.ArtifactKindDoc]; ok {
-		t.Fatalf("router has doc entry but doc was not configured")
+	if _, ok := router.ByKind[sdk.ArtifactKindDoc].(stchunk.LateChunkPolicy); !ok {
+		t.Fatalf("router.ByKind[doc] = %T, want LateChunkPolicy (#344 default applies when doc unconfigured)", router.ByKind[sdk.ArtifactKindDoc])
 	}
 	defaultPolicy, ok := router.Default.(stchunk.MarkdownPolicy)
 	if !ok {
 		t.Fatalf("router.Default = %T, want MarkdownPolicy", router.Default)
 	}
-	// Router Default must carry stroma's DefaultMaxChunkSections cap
-	// so the unconfigured kind keeps the same DoS guard as the
-	// pre-#338 nil-policy rebuild path.
 	if got, want := defaultPolicy.Options.MaxSections, stindex.DefaultMaxChunkSections; got != want {
 		t.Fatalf("router.Default MarkdownPolicy.Options.MaxSections = %d, want %d", got, want)
 	}

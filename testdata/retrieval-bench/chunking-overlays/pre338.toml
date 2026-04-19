@@ -1,0 +1,3 @@
+# pre-#338 baseline: no router, no chunking config at all.
+# `chunk.Resolve` returns a nil policy, so stroma applies its default
+# MarkdownPolicy to every kind — byte-identical to the pre-router pipeline.
