@@ -1,0 +1,41 @@
+[
+  {
+    "id": "quickstart_bootstrap",
+    "query": "how do I bootstrap a new CCD session for the first time",
+    "relevant_doc_refs": [
+      "doc://guide/02-quickstart",
+      "doc://reference/bootstrap-prompt"
+    ]
+  },
+  {
+    "id": "handoff_semantics",
+    "query": "what goes into a handoff and how does it get surfaced to the next session",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture",
+      "doc://reference/cheatsheet"
+    ]
+  },
+  {
+    "id": "execution_gate_lifecycle",
+    "query": "when does an execution gate fire and how is it cleared",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails",
+      "doc://guide/08-patterns"
+    ]
+  },
+  {
+    "id": "memory_promotion_flow",
+    "query": "how memories get promoted from session to profile scope",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture"
+    ]
+  },
+  {
+    "id": "guardrails_why",
+    "query": "why do I need guardrails around autonomous agents",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails",
+      "doc://guide/01-why"
+    ]
+  }
+]

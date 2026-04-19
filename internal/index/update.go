@@ -161,6 +161,13 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	}()
 
 	result.ContentFingerprint = contentFingerprint(records)
+	// Same reason as rebuildContext: summarizeRebuild's predictive
+	// Markdown-based ChunkCount undercounts doc chunks once
+	// LateChunkPolicy emits parent+leaf hierarchies, so refresh from
+	// the written snapshot before publishing.
+	if err := refreshRebuildChunkCountFromSnapshotContext(ctx, snapshotPath, result); err != nil {
+		return nil, err
+	}
 	if err := publishBusinessIndexContext(ctx, cfg, records, result, snapshotPath); err != nil {
 		return nil, err
 	}
@@ -346,12 +353,16 @@ func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB
 // shapes — a silent mixed-generation snapshot.
 //
 // Older snapshots (built before this fingerprint was persisted) have
-// no stored value; we skip the check in that case rather than
-// force-rebuild every pre-existing index, because rebuild.go did
-// honor the active config even without recording the fingerprint.
-// The metadata gap is self-healed by the first rebuild OR update
-// after this change, since publishBusinessIndexContext runs on both
-// paths and upserts chunking_config_fingerprint unconditionally.
+// no stored value. That was safe while resolver defaults were frozen,
+// because rebuild.go honored the active config even without recording
+// the fingerprint. Once pchunk.ResolverDefaultsVersion advances past
+// "1" (i.e., the resolver's zero-config output has changed since the
+// pre-fingerprint era), that premise breaks: an `--update` against a
+// pre-fingerprint snapshot would re-chunk only the changed records
+// under the new default and leave the rest on the old layout — the
+// exact mixed-generation hazard this gate exists to prevent. So we
+// reject missing fingerprints whenever the resolver has moved past v1
+// and route the caller through a full rebuild instead.
 func validateStoredChunkingConfigContext(ctx context.Context, db *sql.DB, current config.ChunkingConfig) error {
 	stored, err := readOptionalMetadataValueContext(ctx, db, "chunking_config_fingerprint")
 	if err != nil {
@@ -359,6 +370,12 @@ func validateStoredChunkingConfigContext(ctx context.Context, db *sql.DB, curren
 	}
 	stored = strings.TrimSpace(stored)
 	if stored == "" {
+		if pchunk.ResolverDefaultsVersion != "1" {
+			return fmt.Errorf(
+				"stored snapshot has no chunking_config_fingerprint and resolver defaults have advanced to version %q since it was built",
+				pchunk.ResolverDefaultsVersion,
+			)
+		}
 		return nil
 	}
 	want := chunkingConfigFingerprint(current)
@@ -438,6 +455,17 @@ func updateStromaSnapshotContext(
 			cleanupSnapshot()
 		}
 		return "", nil, normalizeStromaUpdateError(targetSnapshotPath, err)
+	}
+	// Mirror the rebuild-path guard so an incremental update cannot
+	// silently land a snapshot with doc leaves missing parent_chunk_id
+	// under LateChunkPolicy. The validator inspects the published target.
+	if docLateChunkActive(chunkPolicy) {
+		if err := validateDocParentChainContext(ctx, targetSnapshotPath); err != nil {
+			if cleanupSnapshot != nil {
+				cleanupSnapshot()
+			}
+			return "", nil, err
+		}
 	}
 	return targetSnapshotPath, cleanupSnapshot, nil
 }

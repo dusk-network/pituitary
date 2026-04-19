@@ -220,14 +220,56 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		return nil, fmt.Errorf("build stroma snapshot: %w", err)
 	}
 
+	// #344 AC: under LateChunkPolicy we must actually see parent/leaf
+	// linkage land in the snapshot; validate loudly here so a
+	// regression in stroma or in the resolver cannot ship quietly.
+	if docLateChunkActive(chunkPolicy) {
+		if err := validateDocParentChainContext(ctx, snapshotPath); err != nil {
+			return nil, err
+		}
+	}
+
 	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.ContentFingerprint = contentFP
 	result.IndexPath = indexPath
+
+	// summarizeRebuild computes ChunkCount predictively via the
+	// pre-router Markdown sectioner, which systematically undercounts
+	// doc chunks once LateChunkPolicy emits parent+leaf hierarchies.
+	// Refresh the count from the freshly-published snapshot so the
+	// reported chunk growth reflects reality — operators need to see
+	// the real index-size / embedding-cost footprint of the #344
+	// default to evaluate it.
+	if err := refreshRebuildChunkCountFromSnapshotContext(ctx, snapshotPath, result); err != nil {
+		return nil, err
+	}
 
 	if err := publishBusinessIndexContext(ctx, cfg, records, result, snapshotPath); err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+// refreshRebuildChunkCountFromSnapshotContext overwrites result.ChunkCount
+// with the ground-truth count from the published stroma snapshot. This
+// replaces the Markdown-based predictive count that summarizeRebuild
+// produces, which is wrong for docs under LateChunkPolicy where each
+// record can emit a parent plus multiple leaves.
+func refreshRebuildChunkCountFromSnapshotContext(ctx context.Context, snapshotPath string, result *RebuildResult) error {
+	if result == nil || snapshotPath == "" {
+		return nil
+	}
+	snapshot, err := stindex.OpenSnapshot(ctx, snapshotPath)
+	if err != nil {
+		return fmt.Errorf("open stroma snapshot for chunk-count refresh: %w", err)
+	}
+	defer snapshot.Close()
+	stats, err := snapshot.Stats(ctx)
+	if err != nil {
+		return fmt.Errorf("read stroma snapshot stats: %w", err)
+	}
+	result.ChunkCount = stats.ChunkCount
+	return nil
 }
 
 func corpusRecordsFromLoadResult(records *source.LoadResult) ([]stcorpus.Record, error) {
@@ -902,8 +944,17 @@ func fingerprint(parts []string) string {
 // between rebuild and update can't silently produce a snapshot with
 // mixed chunk shapes (old records re-chunked under one policy, new
 // records under another). Any mismatch forces an explicit rebuild.
+//
+// The pchunk.ResolverDefaultsVersion component captures Resolve's
+// zero-config defaults. Without it, flipping a default in Resolve
+// (e.g. #344: doc default flips from MarkdownPolicy to LateChunkPolicy)
+// would leave existing snapshots' raw-field fingerprint unchanged and
+// silently mix chunk shapes across an incremental update. Including
+// the version forces rebuild on default flips even when no config
+// field changed on disk.
 func chunkingConfigFingerprint(cfg config.ChunkingConfig) string {
 	parts := []string{
+		"resolver_defaults_version=" + pchunk.ResolverDefaultsVersion,
 		"contextualizer_format=" + cfg.Contextualizer.Format,
 		"spec_policy=" + cfg.Spec.Policy,
 		fmt.Sprintf("spec_max_tokens=%d", cfg.Spec.MaxTokens),

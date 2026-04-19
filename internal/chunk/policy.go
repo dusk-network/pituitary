@@ -18,7 +18,36 @@ const (
 	// Parents live as storage-only context that ExpandContext can surface
 	// on demand; children are what participate in retrieval.
 	PolicyLateChunk = "late_chunk"
+
+	// DefaultDocLateChunkParentMaxTokens is the default parent section
+	// budget used when docs fall through to the #344 LateChunkPolicy
+	// default. Sized for long-form docs while staying well under typical
+	// context windows.
+	DefaultDocLateChunkParentMaxTokens = 2048
+	// DefaultDocLateChunkChildMaxTokens caps leaf chunks at a size that
+	// still embeds cleanly with mainstream 512-token embedders.
+	DefaultDocLateChunkChildMaxTokens = 384
+	// DefaultDocLateChunkChildOverlapTokens adds small leaf overlap so
+	// heading-straddling queries do not lose recall at chunk boundaries.
+	DefaultDocLateChunkChildOverlapTokens = 48
 )
+
+// ResolverDefaultsVersion tags the behavior of Resolve when a kind is
+// left unconfigured. It is persisted in the rebuild-time chunking
+// fingerprint so that flipping a default here forces `--update` to fall
+// back to a full rebuild instead of silently producing a mixed-
+// generation snapshot with old records on the old default and new
+// records on the new default.
+//
+//   - "1" (pre-#344): zero-config returned a nil policy, so both kinds
+//     fell through to stroma's MarkdownPolicy default.
+//   - "2" (#344): zero-config for docs now defaults to LateChunkPolicy
+//     with the tuned DefaultDocLateChunk* knobs; spec defaults are
+//     unchanged.
+//
+// Bump this string whenever Resolve's zero-config behavior changes so
+// pre-existing snapshots fail the fingerprint check and get rebuilt.
+const ResolverDefaultsVersion = "2"
 
 // KindConfig describes the chunking policy for a single record kind
 // (spec or doc). A zero value means "no override" — the resolver treats
@@ -58,9 +87,11 @@ func (c KindConfig) IsZero() bool {
 	return c == KindConfig{}
 }
 
-// Config aggregates per-kind chunking overrides. A zero value means "no
-// router, no overrides" — Resolve returns a nil Policy so stroma's
-// default MarkdownPolicy applies exactly as it did pre-#338.
+// Config aggregates per-kind chunking overrides. A zero value means
+// "no operator overrides" — Resolve still materializes a
+// KindRouterPolicy carrying the resolver's built-in defaults
+// (MarkdownPolicy for specs, LateChunkPolicy for docs under #344).
+// See Resolve for the full per-kind semantics.
 type Config struct {
 	Spec KindConfig
 	Doc  KindConfig
@@ -73,26 +104,28 @@ func (c Config) IsZero() bool {
 
 // Resolve builds a stroma chunk.Policy from pituitary's per-kind config.
 //
-// When no kind has an override configured (cfg.IsZero()), Resolve
-// returns nil. Callers are expected to pass nil straight through to
-// stroma, which preserves the default MarkdownPolicy behavior that
-// shipped before the router was introduced — i.e., byte-identical to
-// pre-change output.
+// Resolve always returns a non-nil KindRouterPolicy. Its Default mirrors
+// stroma's bounded nil-policy path (MarkdownPolicy with the
+// DefaultMaxChunkSections cap in place) so unknown kinds keep the
+// pre-#338 DoS guard.
 //
-// When at least one kind is configured, Resolve returns a
-// KindRouterPolicy whose Default mirrors stroma's bounded nil-policy
-// path (MarkdownPolicy with the DefaultMaxChunkSections cap in place)
-// so a repo that only configures one kind does not silently disable
-// the per-record section cap on the other kind. The ByKind map carries
-// the configured kinds resolved to their concrete policies; those
-// policies also receive the same cap substitution when the user left
-// max_sections unset, so "I only tuned max_tokens" never implicitly
-// disables the DoS guard.
+// Per-kind resolution:
+//
+//   - Spec: keeps stroma's MarkdownPolicy default via router.Default when
+//     unconfigured; explicit `[runtime.chunking.spec]` builds a concrete
+//     policy and pins it in ByKind.
+//   - Doc: when unconfigured, defaults to LateChunkPolicy with the
+//     DefaultDocLateChunk* knobs (#344 product lever — long-form docs
+//     get parent+leaf hierarchy feeding ExpandContext). Operators who
+//     don't want the storage overhead opt back by setting
+//     `[runtime.chunking.doc] policy = "markdown"`, which overrides the
+//     default via ByKind.
+//
+// The tuning knobs users set without an explicit Policy field still
+// resolve through MarkdownPolicy (buildPolicy treats empty Policy as
+// PolicyMarkdown), so "I only tuned max_tokens" keeps the DoS guard on
+// without silently inheriting the late-chunk default.
 func Resolve(cfg Config) (stchunk.Policy, error) {
-	if cfg.IsZero() {
-		return nil, nil
-	}
-
 	router := stchunk.KindRouterPolicy{
 		Default: stchunk.MarkdownPolicy{
 			Options: stchunk.Options{MaxSections: stindex.DefaultMaxChunkSections},
@@ -112,8 +145,22 @@ func Resolve(cfg Config) (stchunk.Policy, error) {
 			return nil, fmt.Errorf("doc chunking: %w", err)
 		}
 		router.ByKind[sdk.ArtifactKindDoc] = policy
+	} else {
+		router.ByKind[sdk.ArtifactKindDoc] = defaultDocPolicy()
 	}
 	return router, nil
+}
+
+// defaultDocPolicy returns the #344 LateChunkPolicy default for docs.
+// Kept as a helper so callers and tests agree on the exact defaults
+// without scattering magic numbers.
+func defaultDocPolicy() stchunk.LateChunkPolicy {
+	return stchunk.LateChunkPolicy{
+		ParentMaxTokens:    DefaultDocLateChunkParentMaxTokens,
+		ChildMaxTokens:     DefaultDocLateChunkChildMaxTokens,
+		ChildOverlapTokens: DefaultDocLateChunkChildOverlapTokens,
+		MaxSections:        stindex.DefaultMaxChunkSections,
+	}
 }
 
 // resolveMaxSections mirrors stroma's index.resolveMaxChunkSections.
