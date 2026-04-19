@@ -35,7 +35,7 @@ The issue body anticipated this: "`ExpandContext` wiring is explicitly called ou
 
 ## Variants
 
-The script appends one of three overlays from [`testdata/retrieval-bench/chunking-overlays/`](../../testdata/retrieval-bench/chunking-overlays/) to the base config:
+The script appends one of three overlays from `testdata/retrieval-bench/chunking-overlays/` to the base config:
 
 - **pre338** — no `[runtime.chunking]` block. `chunk.Resolve` returns `nil`, stroma falls back to its default `MarkdownPolicy` for every kind. Byte-identical to the pre-router pipeline.
 - **p338** — `KindRouterPolicy` active, both `spec` and `doc` kinds explicitly on `MarkdownPolicy`. Exercises the router seam without changing chunk shapes.
