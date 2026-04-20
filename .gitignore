@@ -15,3 +15,9 @@ README-old.md
 demo.cast
 docs/OSS_TRIAGE.md
 skills/pituitary-cli/anneal.log
+
+# #358 private-corpus artifacts — must never be committed. Real artifacts
+# live under ~/biz/pituitary/bench-358/ (outside the repo); these entries
+# are defense-in-depth in case someone accidentally symlinks them in.
+/bench-358-private/
+/snapshots-private/
