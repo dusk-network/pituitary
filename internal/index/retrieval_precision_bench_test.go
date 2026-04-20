@@ -75,6 +75,11 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	}
 	defer snapshot.Close()
 
+	// resolveChunkRelevance needs a *sql.DB; reuse the already-open
+	// read-only handle from OpenReadOnlyContext rather than opening a
+	// sibling connection.
+	sqlDB := db
+
 	embedder, err := newEmbedder(cfg.Runtime.Embedder)
 	if err != nil {
 		t.Fatalf("build embedder: %v", err)
@@ -88,6 +93,7 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		CaseCount:   len(cases),
 	}
 
+	chunkEligible := 0
 	for _, c := range cases {
 		hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
 			SearchParams: stindex.SearchParams{
@@ -106,12 +112,34 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		rep.MeanPrecisionAt10 += cr.PrecisionAt10
 		rep.MeanRecallAt10 += cr.RecallAt10
 		rep.MeanReciprocalRank += cr.ReciprocalRank
+
+		relevant, status, err := resolveChunkRelevance(sqlDB, c.RelevantSourceSpans)
+		if err != nil {
+			t.Fatalf("case %s: resolve chunk relevance: %v", c.ID, err)
+		}
+		ccr := evaluateChunkPrecisionCase(c, hits, relevant, status)
+		rep.ChunkCases = append(rep.ChunkCases, ccr)
+		if status == resolveStatusOK {
+			chunkEligible++
+			rep.MeanChunkPrecisionAt5 += ccr.ChunkPrecisionAt5
+			rep.MeanChunkPrecisionAt10 += ccr.ChunkPrecisionAt10
+			rep.MeanChunkRecallAt10 += ccr.ChunkRecallAt10
+			rep.MeanChunkReciprocalRank += ccr.ChunkReciprocalRank
+		}
 	}
 	n := float64(len(cases))
 	rep.MeanPrecisionAt5 /= n
 	rep.MeanPrecisionAt10 /= n
 	rep.MeanRecallAt10 /= n
 	rep.MeanReciprocalRank /= n
+	rep.ChunkCaseCount = chunkEligible
+	if chunkEligible > 0 {
+		cn := float64(chunkEligible)
+		rep.MeanChunkPrecisionAt5 /= cn
+		rep.MeanChunkPrecisionAt10 /= cn
+		rep.MeanChunkRecallAt10 /= cn
+		rep.MeanChunkReciprocalRank /= cn
+	}
 
 	if reportPath := strings.TrimSpace(os.Getenv("PITUITARY_PRECISION_REPORT")); reportPath != "" {
 		if err := writePrecisionReport(reportPath, rep); err != nil {
