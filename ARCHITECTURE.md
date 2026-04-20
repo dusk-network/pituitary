@@ -976,6 +976,11 @@ All tools keep the same discipline: retrieval first, then deterministic analysis
 - Implement filtered retrieval via Stroma search plus Pituitary artifact filters
 - Ship `search_specs`
 
+Retrieval-precision benchmark reports that exercise this workstream:
+
+- [docs/development/retrieval-precision-344.md](docs/development/retrieval-precision-344.md) — doc-level precision@k on the bootstrap corpus, gating the `LateChunkPolicy` default (see #344).
+- [docs/development/retrieval-precision-358.md](docs/development/retrieval-precision-358.md) — chunk-level precision benchmark on the next-iteration corpus (post-#344 follow-up; see #358).
+
 ### Workstream 3: Core Spec Analysis
 
 - Implement `check_overlap`

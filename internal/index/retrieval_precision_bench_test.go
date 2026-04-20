@@ -4,6 +4,7 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -75,6 +76,19 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	}
 	defer snapshot.Close()
 
+	// resolveChunkRelevance needs a *sql.DB against the stroma chunks
+	// database — which is a separate file from the registry DB opened
+	// by OpenReadOnlyContext. snapshot.Path() returns the stroma snapshot's
+	// on-disk path; open a read-only sibling handle via the file: URI
+	// scheme so ?mode=ro is interpreted as a query parameter by the
+	// sqlite3 driver (without the scheme prefix, mattn/go-sqlite3 treats
+	// the entire string as a literal filename).
+	sqlDB, err := sql.Open("sqlite3", "file:"+snapshot.Path()+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open stroma sql handle: %v", err)
+	}
+	defer sqlDB.Close()
+
 	embedder, err := newEmbedder(cfg.Runtime.Embedder)
 	if err != nil {
 		t.Fatalf("build embedder: %v", err)
@@ -88,6 +102,7 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		CaseCount:   len(cases),
 	}
 
+	chunkEligible := 0
 	for _, c := range cases {
 		hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
 			SearchParams: stindex.SearchParams{
@@ -106,12 +121,57 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		rep.MeanPrecisionAt10 += cr.PrecisionAt10
 		rep.MeanRecallAt10 += cr.RecallAt10
 		rep.MeanReciprocalRank += cr.ReciprocalRank
+
+		relevant, status, err := resolveChunkRelevance(sqlDB, c.RelevantSourceSpans)
+		if err != nil {
+			t.Fatalf("case %s: resolve chunk relevance: %v", c.ID, err)
+		}
+		ccr := evaluateChunkPrecisionCase(c, hits, relevant, status)
+		rep.ChunkCases = append(rep.ChunkCases, ccr)
+		if status == resolveStatusOK {
+			chunkEligible++
+			rep.MeanChunkPrecisionAt5 += ccr.ChunkPrecisionAt5
+			rep.MeanChunkPrecisionAt10 += ccr.ChunkPrecisionAt10
+			rep.MeanChunkRecallAt10 += ccr.ChunkRecallAt10
+			rep.MeanChunkReciprocalRank += ccr.ChunkReciprocalRank
+		}
 	}
 	n := float64(len(cases))
 	rep.MeanPrecisionAt5 /= n
 	rep.MeanPrecisionAt10 /= n
 	rep.MeanRecallAt10 /= n
 	rep.MeanReciprocalRank /= n
+	rep.ChunkCaseCount = chunkEligible
+	if chunkEligible > 0 {
+		cn := float64(chunkEligible)
+		rep.MeanChunkPrecisionAt5 /= cn
+		rep.MeanChunkPrecisionAt10 /= cn
+		rep.MeanChunkRecallAt10 /= cn
+		rep.MeanChunkReciprocalRank /= cn
+	}
+
+	// Strict mode (for published runs): fail if any case carries spans but
+	// the chunk-level metric silently dropped it from the denominator. This
+	// closes the failure mode where anchor drift or corpus skew removes
+	// hard cases without any hard signal — the published report would
+	// otherwise show a shrunken chunk_case_count but the test would still
+	// PASS. Opt-in via PITUITARY_PRECISION_STRICT=1 so iteration runs can
+	// still surface labeling bugs without blocking.
+	if os.Getenv("PITUITARY_PRECISION_STRICT") == "1" {
+		var bad []string
+		for i, c := range cases {
+			if len(c.RelevantSourceSpans) == 0 {
+				continue
+			}
+			if rep.ChunkCases[i].ResolveStatus != resolveStatusOK {
+				bad = append(bad, fmt.Sprintf("%s (status=%s)", c.ID, rep.ChunkCases[i].ResolveStatus))
+			}
+		}
+		if len(bad) > 0 {
+			t.Fatalf("PITUITARY_PRECISION_STRICT=1 and %d case(s) with spans did not resolve to OK: %s",
+				len(bad), strings.Join(bad, ", "))
+		}
+	}
 
 	if reportPath := strings.TrimSpace(os.Getenv("PITUITARY_PRECISION_REPORT")); reportPath != "" {
 		if err := writePrecisionReport(reportPath, rep); err != nil {
@@ -129,9 +189,23 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 }
 
 type precisionCase struct {
-	ID              string   `json:"id"`
-	Query           string   `json:"query"`
-	RelevantDocRefs []string `json:"relevant_doc_refs"`
+	ID                  string       `json:"id"`
+	Query               string       `json:"query"`
+	RelevantDocRefs     []string     `json:"relevant_doc_refs"`
+	RelevantSourceSpans []sourceSpan `json:"relevant_source_spans,omitempty"`
+	Tags                []string     `json:"tags,omitempty"`
+}
+
+// sourceSpan pins the answering text for a case via a distinctive
+// anchor substring that must appear in a chunk's content for that
+// chunk to be counted relevant under the chunk-level metric.
+// start_line/end_line are optional provenance only — scoring does
+// not consume them.
+type sourceSpan struct {
+	DocRef    string `json:"doc_ref"`
+	Anchor    string `json:"anchor"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
 }
 
 type precisionCaseResult struct {
@@ -145,6 +219,20 @@ type precisionCaseResult struct {
 	ReciprocalRank float64  `json:"reciprocal_rank"`
 }
 
+type chunkPrecisionCaseResult struct {
+	ID                   string  `json:"id"`
+	Query                string  `json:"query"`
+	RelevantChunkIDs     []int64 `json:"relevant_chunk_ids"`
+	RetrievedTop10Chunks []int64 `json:"retrieved_top_10_chunk_ids"`
+	ChunkPrecisionAt5    float64 `json:"chunk_precision_at_5"`
+	ChunkPrecisionAt10   float64 `json:"chunk_precision_at_10"`
+	ChunkRecallAt10      float64 `json:"chunk_recall_at_10"`
+	ChunkReciprocalRank  float64 `json:"chunk_reciprocal_rank"`
+	// ResolveStatus is one of: "ok", "no_spans" (case has no source spans),
+	// "unresolved" (≥1 span anchor matched zero chunks — labeling or pin bug).
+	ResolveStatus string `json:"resolve_status"`
+}
+
 type precisionReport struct {
 	Label              string                `json:"label,omitempty"`
 	GeneratedAt        string                `json:"generated_at"`
@@ -156,6 +244,15 @@ type precisionReport struct {
 	MeanRecallAt10     float64               `json:"mean_recall_at_10"`
 	MeanReciprocalRank float64               `json:"mean_reciprocal_rank"`
 	Cases              []precisionCaseResult `json:"cases"`
+	// Chunk-level aggregates — populated only when ≥1 case has spans.
+	ChunkCaseCount          int                        `json:"chunk_case_count"`
+	MeanChunkPrecisionAt5   float64                    `json:"mean_chunk_precision_at_5,omitempty"`
+	MeanChunkPrecisionAt10  float64                    `json:"mean_chunk_precision_at_10,omitempty"`
+	MeanChunkRecallAt10     float64                    `json:"mean_chunk_recall_at_10,omitempty"`
+	MeanChunkReciprocalRank float64                    `json:"mean_chunk_reciprocal_rank,omitempty"`
+	ChunkCases              []chunkPrecisionCaseResult `json:"chunk_cases,omitempty"`
+	// SnapshotSizeBytes is folded in by the runner (not this test).
+	SnapshotSizeBytes int64 `json:"snapshot_size_bytes,omitempty"`
 }
 
 func loadPrecisionCases(path string) ([]precisionCase, error) {
@@ -178,6 +275,17 @@ func loadPrecisionCases(path string) ([]precisionCase, error) {
 		}
 		if len(cases[i].RelevantDocRefs) == 0 {
 			return nil, fmt.Errorf("case %s: relevant_doc_refs is required", cases[i].ID)
+		}
+		for j, span := range cases[i].RelevantSourceSpans {
+			span.DocRef = strings.TrimSpace(span.DocRef)
+			span.Anchor = strings.TrimSpace(span.Anchor)
+			if span.DocRef == "" {
+				return nil, fmt.Errorf("case %s span %d: doc_ref is required", cases[i].ID, j)
+			}
+			if span.Anchor == "" {
+				return nil, fmt.Errorf("case %s span %d: anchor is required (≥5 words, distinctive)", cases[i].ID, j)
+			}
+			cases[i].RelevantSourceSpans[j] = span
 		}
 	}
 	return cases, nil

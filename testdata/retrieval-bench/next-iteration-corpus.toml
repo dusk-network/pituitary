@@ -1,0 +1,17 @@
+# Public smoke corpus for #358. Neither repo is public-on-github, but this
+# is the repro-contract inherited from #344's ccd-guide precedent: reviewers
+# with repo access can reproduce the numbers under the pinned SHAs.
+#
+# The #358 harness refuses to run when either HEAD drifts from the pin.
+
+[[corpus.repo]]
+name = "ccd-guide"
+path = "/Users/emanuele/devel/ccd-guide"
+remote = "git@github.com:dusk-network/ccd.git"
+sha = "bac0cd6"
+
+[[corpus.repo]]
+name = "pituitary-docs"
+path = "/Users/emanuele/devel/pituitary-358-bench"
+remote = "git@github.com:dusk-network/pituitary.git"
+sha = "b946548"
