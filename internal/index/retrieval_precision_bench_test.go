@@ -79,8 +79,11 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	// resolveChunkRelevance needs a *sql.DB against the stroma chunks
 	// database — which is a separate file from the registry DB opened
 	// by OpenReadOnlyContext. snapshot.Path() returns the stroma snapshot's
-	// on-disk path; open a read-only sibling handle against it.
-	sqlDB, err := sql.Open("sqlite3", snapshot.Path()+"?mode=ro")
+	// on-disk path; open a read-only sibling handle via the file: URI
+	// scheme so ?mode=ro is interpreted as a query parameter by the
+	// sqlite3 driver (without the scheme prefix, mattn/go-sqlite3 treats
+	// the entire string as a literal filename).
+	sqlDB, err := sql.Open("sqlite3", "file:"+snapshot.Path()+"?mode=ro")
 	if err != nil {
 		t.Fatalf("open stroma sql handle: %v", err)
 	}
