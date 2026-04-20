@@ -150,6 +150,29 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		rep.MeanChunkReciprocalRank /= cn
 	}
 
+	// Strict mode (for published runs): fail if any case carries spans but
+	// the chunk-level metric silently dropped it from the denominator. This
+	// closes the failure mode where anchor drift or corpus skew removes
+	// hard cases without any hard signal — the published report would
+	// otherwise show a shrunken chunk_case_count but the test would still
+	// PASS. Opt-in via PITUITARY_PRECISION_STRICT=1 so iteration runs can
+	// still surface labeling bugs without blocking.
+	if os.Getenv("PITUITARY_PRECISION_STRICT") == "1" {
+		var bad []string
+		for i, c := range cases {
+			if len(c.RelevantSourceSpans) == 0 {
+				continue
+			}
+			if rep.ChunkCases[i].ResolveStatus != resolveStatusOK {
+				bad = append(bad, fmt.Sprintf("%s (status=%s)", c.ID, rep.ChunkCases[i].ResolveStatus))
+			}
+		}
+		if len(bad) > 0 {
+			t.Fatalf("PITUITARY_PRECISION_STRICT=1 and %d case(s) with spans did not resolve to OK: %s",
+				len(bad), strings.Join(bad, ", "))
+		}
+	}
+
 	if reportPath := strings.TrimSpace(os.Getenv("PITUITARY_PRECISION_REPORT")); reportPath != "" {
 		if err := writePrecisionReport(reportPath, rep); err != nil {
 			t.Fatalf("write report %s: %v", reportPath, err)

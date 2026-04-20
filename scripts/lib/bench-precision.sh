@@ -68,9 +68,11 @@ bench_read_corpus_pins() {
   ' "${pinfile}"
 }
 
-# Check each pinned repo's HEAD against the pin. Returns 0 if all match.
-# Returns 2 on any mismatch and prints details to stderr. Prefix-matches
-# the SHA so pin files may record short SHAs.
+# Check each pinned repo's HEAD against the pin AND verify the worktree
+# is clean. Returns 0 if all match, 2 on any mismatch or dirty tree with
+# details to stderr. Prefix-matches the SHA so pin files may record
+# short SHAs. The dirty-tree check closes the hole where a repo has the
+# pinned HEAD but local modifications contaminate the indexed content.
 bench_enforce_corpus_pins() {
   local pinfile="$1"
   local failed=0
@@ -87,6 +89,14 @@ bench_enforce_corpus_pins() {
     head_sha="$(git -C "${repo_path}" rev-parse HEAD 2>/dev/null || echo '?')"
     if [[ "${head_sha}" != "${pin_sha}"* ]]; then
       echo "bench: pin drift for ${repo_path}: HEAD=${head_sha} pin=${pin_sha}" >&2
+      failed=1
+      continue
+    fi
+    local dirty
+    dirty="$(git -C "${repo_path}" status --porcelain 2>/dev/null)"
+    if [[ -n "${dirty}" ]]; then
+      echo "bench: dirty worktree for ${repo_path} (pin=${pin_sha} matches HEAD but local changes present):" >&2
+      echo "${dirty}" | sed 's/^/  /' >&2
       failed=1
     fi
   done < <(bench_read_corpus_pins "${pinfile}")
