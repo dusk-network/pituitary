@@ -4,6 +4,7 @@ package index
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -75,10 +76,15 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	}
 	defer snapshot.Close()
 
-	// resolveChunkRelevance needs a *sql.DB; reuse the already-open
-	// read-only handle from OpenReadOnlyContext rather than opening a
-	// sibling connection.
-	sqlDB := db
+	// resolveChunkRelevance needs a *sql.DB against the stroma chunks
+	// database — which is a separate file from the registry DB opened
+	// by OpenReadOnlyContext. snapshot.Path() returns the stroma snapshot's
+	// on-disk path; open a read-only sibling handle against it.
+	sqlDB, err := sql.Open("sqlite3", snapshot.Path()+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open stroma sql handle: %v", err)
+	}
+	defer sqlDB.Close()
 
 	embedder, err := newEmbedder(cfg.Runtime.Embedder)
 	if err != nil {
