@@ -6,8 +6,11 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
+
+	stindex "github.com/dusk-network/stroma/v2/index"
 )
 
 // ResolveStatus values for resolveChunkRelevance. Centralized as unexported
@@ -80,6 +83,84 @@ var whitespaceRun = regexp.MustCompile(`\s+`)
 
 func normalizeAnchor(s string) string {
 	return strings.ToLower(whitespaceRun.ReplaceAllString(strings.TrimSpace(s), " "))
+}
+
+// evaluateChunkPrecisionCase scores on chunk-id rank order without any
+// doc-ref dedup. Two hits from the same doc both count if both are in
+// the relevant set. The status field is propagated from resolveChunkRelevance.
+func evaluateChunkPrecisionCase(
+	c precisionCase,
+	hits []stindex.SearchHit,
+	relevantChunkIDs map[int64]bool,
+	status string,
+) chunkPrecisionCaseResult {
+	retrieved := make([]int64, 0, len(hits))
+	for _, h := range hits {
+		retrieved = append(retrieved, h.ChunkID)
+	}
+	top5 := truncateInt64(retrieved, 5)
+	top10 := truncateInt64(retrieved, 10)
+
+	totalRelevant := len(relevantChunkIDs)
+	ids := make([]int64, 0, totalRelevant)
+	for id := range relevantChunkIDs {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	return chunkPrecisionCaseResult{
+		ID:                   c.ID,
+		Query:                c.Query,
+		RelevantChunkIDs:     ids,
+		RetrievedTop10Chunks: top10,
+		ChunkPrecisionAt5:    precisionAtInt64(top5, relevantChunkIDs, 5),
+		ChunkPrecisionAt10:   precisionAtInt64(top10, relevantChunkIDs, 10),
+		ChunkRecallAt10:      recallAtInt64(top10, relevantChunkIDs, totalRelevant),
+		ChunkReciprocalRank:  reciprocalRankInt64(top10, relevantChunkIDs),
+		ResolveStatus:        status,
+	}
+}
+
+func precisionAtInt64(retrieved []int64, relevant map[int64]bool, k int) float64 {
+	if k <= 0 {
+		return 0
+	}
+	hits := 0
+	for _, r := range retrieved {
+		if relevant[r] {
+			hits++
+		}
+	}
+	return float64(hits) / float64(k)
+}
+
+func recallAtInt64(retrieved []int64, relevant map[int64]bool, totalRelevant int) float64 {
+	if totalRelevant <= 0 {
+		return 0
+	}
+	hits := 0
+	for _, r := range retrieved {
+		if relevant[r] {
+			hits++
+		}
+	}
+	return float64(hits) / float64(totalRelevant)
+}
+
+func reciprocalRankInt64(retrieved []int64, relevant map[int64]bool) float64 {
+	for i, r := range retrieved {
+		if relevant[r] {
+			return 1.0 / float64(i+1)
+		}
+	}
+	return 0
+}
+
+func truncateInt64(values []int64, n int) []int64 {
+	if len(values) <= n {
+		return append([]int64{}, values...)
+	}
+	return append([]int64{}, values[:n]...)
 }
 
 // TestResolveChunkRelevance_AnchorMatch confirms that given a seeded chunks
@@ -171,5 +252,50 @@ func mustInsertChunk(t *testing.T, db *sql.DB, id int64, ref string, idx int, he
 		id, ref, idx, heading, content)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
+	}
+}
+
+// TestEvaluateChunkPrecisionCase: chunk-level scoring does NOT dedup by doc ref.
+// Two hits with the same Ref but different ChunkID both count at chunk level.
+func TestEvaluateChunkPrecisionCase(t *testing.T) {
+	c := precisionCase{
+		ID:              "chunk_rank_test",
+		Query:           "q",
+		RelevantDocRefs: []string{"doc://a"},
+		RelevantSourceSpans: []sourceSpan{
+			{DocRef: "doc://a", Anchor: "x"},
+		},
+	}
+	hits := []stindex.SearchHit{
+		{ChunkID: 10, Ref: "doc://a"}, // relevant (in set)
+		{ChunkID: 20, Ref: "doc://b"}, // irrelevant
+		{ChunkID: 11, Ref: "doc://a"}, // relevant (in set)
+	}
+	relevant := map[int64]bool{10: true, 11: true}
+	got := evaluateChunkPrecisionCase(c, hits, relevant, resolveStatusOK)
+	if got.ChunkPrecisionAt5 != 2.0/5.0 {
+		t.Errorf("p@5 = %v, want 0.4", got.ChunkPrecisionAt5)
+	}
+	if got.ChunkReciprocalRank != 1.0 {
+		t.Errorf("RR = %v, want 1.0 (first hit is relevant)", got.ChunkReciprocalRank)
+	}
+	if len(got.RetrievedTop10Chunks) != 3 || got.RetrievedTop10Chunks[2] != 11 {
+		t.Errorf("RetrievedTop10Chunks = %v, want [10 20 11]", got.RetrievedTop10Chunks)
+	}
+	if got.ResolveStatus != resolveStatusOK {
+		t.Errorf("ResolveStatus = %q, want %q", got.ResolveStatus, resolveStatusOK)
+	}
+}
+
+// TestEvaluateChunkPrecisionCase_NoSpans returns a zero'd result with
+// status resolveStatusNoSpans so the aggregator knows to skip it.
+func TestEvaluateChunkPrecisionCase_NoSpans(t *testing.T) {
+	c := precisionCase{ID: "x", Query: "q", RelevantDocRefs: []string{"doc://a"}}
+	got := evaluateChunkPrecisionCase(c, nil, nil, resolveStatusNoSpans)
+	if got.ResolveStatus != resolveStatusNoSpans {
+		t.Errorf("status = %q, want %q", got.ResolveStatus, resolveStatusNoSpans)
+	}
+	if got.ChunkPrecisionAt5 != 0 || got.ChunkRecallAt10 != 0 {
+		t.Errorf("expected zeroed scores, got p@5=%v r@10=%v", got.ChunkPrecisionAt5, got.ChunkRecallAt10)
 	}
 }
