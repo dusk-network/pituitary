@@ -86,9 +86,20 @@ run_variant() {
     go test -tags=precision_bench -run TestRetrievalPrecisionBench -count=1 \
       -timeout=60m -v ./internal/index/
 
-  # Fold the per-variant snapshot size into the JSON report.
+  # Fold the per-variant snapshot size into the JSON report. The meaningful
+  # size is the STROMA chunks DB (typically MB-scale), not the Pituitary
+  # registry DB at variant_index (typically KB-scale). Stroma writes to a
+  # sibling file named ${variant_index%.*}.stroma.<hash>.${ext}; glob for it.
+  local stroma_pattern="${variant_index%.*}.stroma.*.${variant_index##*.}"
+  local stroma_path
+  stroma_path="$(ls -1 ${stroma_pattern} 2>/dev/null | head -1)"
   local size_bytes
-  size_bytes="$(bench_file_size_bytes "${variant_index}")"
+  if [[ -n "${stroma_path}" && -f "${stroma_path}" ]]; then
+    size_bytes="$(bench_file_size_bytes "${stroma_path}")"
+  else
+    echo "bench: warning — could not locate stroma snapshot matching ${stroma_pattern}; reporting registry size instead" >&2
+    size_bytes="$(bench_file_size_bytes "${variant_index}")"
+  fi
   python3 -c "
 import json, sys
 path, size = sys.argv[1], int(sys.argv[2])
