@@ -76,3 +76,20 @@ If/when we want to *demonstrate* a `LateChunkPolicy` win in numbers (rather than
 ## Relationship to issue acceptance
 
 The #344 acceptance criterion reads "Precision@k benchmark published with before/after numbers on a representative corpus." This report satisfies that literal requirement: numbers are published, the corpus and methodology are documented, and the repro is portable. It does *not* on its own validate that the `LateChunkPolicy` default flip improves retrieval quality — that validation requires the next-iteration benchmark shape above, tracked separately.
+
+## Retrospective: benchmark ACs must specify metric sensitivity range
+
+**What went wrong in framing.** The #344 AC asked for "before/after numbers on a representative corpus" without naming what the metric needed to be *capable of detecting*. Top-10 doc-level precision was a defensible reading of that AC, and we published numbers that literally satisfied it — but those numbers couldn't in principle move in response to the feature being measured. `LateChunkPolicy`'s product benefit lives downstream of doc-level retrieval (in `ExpandContext(IncludeParent)` feeding richer context to a grader); a metric that collapses retrieved hits to unique doc refs before scoring cannot see that benefit regardless of outcome.
+
+**What #358 Arm A confirmed.** Extending the same benchmark shape to chunk-level scoring and to a 192-doc hard corpus across 11 repos produced null delta on every metric and every variant. The ceiling is structural: anchor-substring labeling disciplined enough to uniquely identify "the answering chunk" is also disciplined enough to be rank-stable under any reasonable chunking policy. The curation method selects *against* variant-sensitivity. Retrieval-precision is therefore not a usable validation channel for chunk-policy changes at all — not just for this issue, not just at this corpus size. Arm B (LLM-graded RAG quality with `ExpandContext` on/off) is the channel that can resolve the question.
+
+**The lesson for the next benchmark AC.** The upstream ExpandContext / Arm B benchmark is the immediate place to apply this learning: its AC should state, alongside the metric shape, the *sensitivity range* the metric is expected to have — specifically what effect the benchmark would detect if the feature works as intended, and what effects it structurally cannot detect. A "null delta on a metric that cannot detect the benefit in principle" reads identically to "feature does not work" at a skim, and neither the writer nor the reader can correct for that without the sensitivity range being explicit up front.
+
+**Shape that would have caught #344 at AC-writing time.** A benchmark AC checklist, applied to the next issue, could include:
+
+1. **Metric shape** — what is scored (doc-level precision, chunk-level precision, MRR, LLM-graded answer quality, etc.).
+2. **Sensitivity range** — the mechanism by which the measured feature is *expected* to move the metric, and the effects the metric is *known not to see*. If the mechanism is downstream of the metric, say so and name the benchmark that *can* see it.
+3. **Null-result protocol** — what a null delta means given the sensitivity range above. Distinguish "feature is inert" from "metric cannot detect this kind of effect."
+4. **Representative corpus** — corpus shape, size floor, and a note on whether the corpus is above the retrieval-difficulty threshold where the feature's mechanism can plausibly show up.
+
+This is an observation from #344 and #358 Arm A, not a ratified repo policy; promoting it to a binding governance rule (issue-template update, canonical doc under `docs/development/`, or equivalent) is a separate decision. Both issues landed numbers that satisfied their literal ACs without advancing the underlying question, which is the concrete cost that motivates the checklist above.

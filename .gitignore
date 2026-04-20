@@ -16,6 +16,9 @@ demo.cast
 docs/OSS_TRIAGE.md
 skills/pituitary-cli/anneal.log
 
+# Claude Code harness runtime state — machine-local, must not leak into the repo
+.claude/scheduled_tasks.lock
+
 # #358 private-corpus artifacts — must never be committed. Real artifacts
 # live under ~/biz/pituitary/bench-358/ (outside the repo); these entries
 # are defense-in-depth in case someone accidentally symlinks them in.
