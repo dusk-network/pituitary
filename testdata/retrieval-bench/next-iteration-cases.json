@@ -1,0 +1,456 @@
+[
+  {
+    "id": "quickstart_bootstrap",
+    "query": "how do I bootstrap a new CCD session for the first time",
+    "relevant_doc_refs": [
+      "doc://guide/02-quickstart",
+      "doc://reference/bootstrap-prompt"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/02-quickstart",
+        "anchor": "bootstraps CCD state for the current workspace",
+        "start_line": 35,
+        "end_line": 42
+      },
+      {
+        "doc_ref": "doc://reference/bootstrap-prompt",
+        "anchor": "Find the CCD CLI in this order",
+        "start_line": 5,
+        "end_line": 14
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "handoff_semantics",
+    "query": "what goes into a handoff and how does it get surfaced to the next session",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture",
+      "doc://reference/cheatsheet"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/05-memory-architecture",
+        "anchor": "Definition of done** — how to know the next session succeeded",
+        "start_line": 56,
+        "end_line": 73
+      },
+      {
+        "doc_ref": "doc://reference/cheatsheet",
+        "anchor": "full close-out and continuity evaluation",
+        "start_line": 37,
+        "end_line": 46
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "execution_gate_lifecycle",
+    "query": "when does an execution gate fire and how is it cleared",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails",
+      "doc://guide/08-patterns"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/07-guardrails",
+        "anchor": "Kill switches are not punishment. They are circuit breakers",
+        "start_line": 95,
+        "end_line": 98
+      },
+      {
+        "doc_ref": "doc://guide/08-patterns",
+        "anchor": "60-second operator debrief at the end of every session",
+        "start_line": 34,
+        "end_line": 40
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "memory_promotion_flow",
+    "query": "how memories get promoted from session to profile scope",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/05-memory-architecture",
+        "anchor": "This is the only heuristic in the system. Everything else is structural",
+        "start_line": 241,
+        "end_line": 244
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "guardrails_why",
+    "query": "why do I need guardrails around autonomous agents",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/07-guardrails",
+        "anchor": "they optimize for the most probable next token given everything in context",
+        "start_line": 14,
+        "end_line": 18
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "why_problem_statement",
+    "query": "what problem does CCD solve and why do AI sessions lose context between runs",
+    "relevant_doc_refs": [
+      "doc://guide/01-why"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/01-why",
+        "anchor": "AI agents are stateless between sessions and lossy within a long one",
+        "start_line": 3,
+        "end_line": 6
+      }
+    ]
+  },
+  {
+    "id": "adoption_ladder_levels",
+    "query": "what are the CCD adoption levels and when should I move from level 1 to level 2",
+    "relevant_doc_refs": [
+      "doc://guide/03-adoption-ladder"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/03-adoption-ladder",
+        "anchor": "You want deterministic source ordering instead of",
+        "start_line": 63,
+        "end_line": 67
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "machine_team_lead_role",
+    "query": "what does becoming a machine team lead mean for the developer's role",
+    "relevant_doc_refs": [
+      "doc://guide/03-adoption-ladder"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/03-adoption-ladder",
+        "anchor": "You stop being a developer who uses AI tools and start being an operator",
+        "start_line": 269,
+        "end_line": 270
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "session_state_boundaries",
+    "query": "what is the difference between project truth, operator state, and workspace state",
+    "relevant_doc_refs": [
+      "doc://guide/04-process"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/04-process",
+        "anchor": "session loop with explicit boundaries between project truth, operator state",
+        "start_line": 3,
+        "end_line": 4
+      }
+    ]
+  },
+  {
+    "id": "session_loop_phases",
+    "query": "what are the explicit phases of a CCD session loop",
+    "relevant_doc_refs": [
+      "doc://guide/04-process",
+      "doc://reference/cheatsheet"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/04-process",
+        "anchor": "evaluate close-out -> ccd radar-state --path",
+        "start_line": 7,
+        "end_line": 14
+      },
+      {
+        "doc_ref": "doc://reference/cheatsheet",
+        "anchor": "checkpoint   -> ccd checkpoint --path .",
+        "start_line": 7,
+        "end_line": 13
+      }
+    ]
+  },
+  {
+    "id": "memory_scope_layout",
+    "query": "where on disk does CCD store profile, repo, branch, and workspace memory files",
+    "relevant_doc_refs": [
+      "doc://guide/05-memory-architecture"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/05-memory-architecture",
+        "anchor": "Work-stream memory** — `~/.ccd/profiles/{profile}/repos/{locality_id}/branches",
+        "start_line": 85,
+        "end_line": 88
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "infrastructure_level2_signals",
+    "query": "when should I add deterministic source ordering and stronger review loops",
+    "relevant_doc_refs": [
+      "doc://guide/06-infrastructure"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/06-infrastructure",
+        "anchor": "falls back to built-in source detection. The sources section is how you make",
+        "start_line": 129,
+        "end_line": 130
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "ai_doc_sync_runtimes",
+    "query": "how do I keep CLAUDE.md, GEMINI.md, and AGENTS.md aligned across runtimes",
+    "relevant_doc_refs": [
+      "doc://guide/06-infrastructure"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/06-infrastructure",
+        "anchor": "run `scripts/sync-ai-docs.sh --write` to regenerate the mirrors",
+        "start_line": 93,
+        "end_line": 94
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "fail_closed_principle",
+    "query": "why does CCD fail closed when a gate is missing or ambiguous",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/07-guardrails",
+        "anchor": "The cost of fail-closed is occasional unnecessary interruptions",
+        "start_line": 110,
+        "end_line": 111
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "deterministic_vs_prompt",
+    "query": "why prefer hard-coded validators over prompt-based instructions for guardrails",
+    "relevant_doc_refs": [
+      "doc://guide/07-guardrails"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/07-guardrails",
+        "anchor": "Prompt-based rules are documentation for the developer. Mechanical gates are what actually prevent bad outcomes",
+        "start_line": 18,
+        "end_line": 19
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "session_patterns_recipes",
+    "query": "operational recipes for starting, executing, and closing a session cleanly",
+    "relevant_doc_refs": [
+      "doc://guide/08-patterns"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/08-patterns",
+        "anchor": "The power of this pattern is its cold-start speed",
+        "start_line": 28,
+        "end_line": 29
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "doc_accuracy_patterns",
+    "query": "patterns for keeping documentation accurate as the system evolves",
+    "relevant_doc_refs": [
+      "doc://guide/08-patterns"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://guide/08-patterns",
+        "anchor": "doc-sync never silently canonizes a workaround",
+        "start_line": 117,
+        "end_line": 118
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "compliance_audit_changes",
+    "query": "what state model alignment changes did the 2026-03 audit require in the guide",
+    "relevant_doc_refs": [
+      "doc://archive/specs/cli/2026-03-08-ccd-guide-compliance-audit"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://archive/specs/cli/2026-03-08-ccd-guide-compliance-audit",
+        "anchor": "maps every guide document against the new three-layer state model",
+        "start_line": 9,
+        "end_line": 11
+      }
+    ]
+  },
+  {
+    "id": "cheatsheet_daily",
+    "query": "where is the daily quick reference for the CCD kernel loop",
+    "relevant_doc_refs": [
+      "doc://reference/cheatsheet"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://reference/cheatsheet",
+        "anchor": "Daily reference for the CCD kernel loop and the most important advanced surfaces",
+        "start_line": 3,
+        "end_line": 3
+      }
+    ]
+  },
+  {
+    "id": "bootstrap_without_skill_md",
+    "query": "how do I bootstrap CCD in a tool without SKILL.md support",
+    "relevant_doc_refs": [
+      "doc://reference/bootstrap-prompt"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://reference/bootstrap-prompt",
+        "anchor": "for tools that do not support SKILL.md but can still run local commands",
+        "start_line": 1,
+        "end_line": 1
+      }
+    ]
+  },
+  {
+    "id": "pituitary_authoritative_state",
+    "query": "what counts as authoritative state versus derived cache state in Pituitary",
+    "relevant_doc_refs": [
+      "doc://development/repo-governance"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/repo-governance",
+        "anchor": "rebuildable cache state. It must be correct and atomic, but it is not the source of truth",
+        "start_line": 28,
+        "end_line": 28
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_null_delta_reasons",
+    "query": "why did the #344 precision benchmark show no delta between chunking policies",
+    "relevant_doc_refs": [
+      "doc://development/retrieval-precision-344"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/retrieval-precision-344",
+        "anchor": "Corpus is too small to stress retrieval",
+        "start_line": 51,
+        "end_line": 52
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_data_flow_packages",
+    "query": "which packages does a query pass through from the filesystem to CLI output in Pituitary",
+    "relevant_doc_refs": [
+      "doc://development/architecture-guide"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/architecture-guide",
+        "anchor": "filesystem -> internal/source -> internal/chunk -> internal/index -> internal/analysis",
+        "start_line": 45,
+        "end_line": 45
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_review_spec_action_failon",
+    "query": "how does the review-spec GitHub action decide when to fail a pull request",
+    "relevant_doc_refs": [
+      "doc://development/ci-recipes"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/ci-recipes",
+        "anchor": "fail only when a touched spec review finds deterministic doc-drift items",
+        "start_line": 38,
+        "end_line": 40
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_deterministic_providers",
+    "query": "why do Pituitary tests avoid live API credentials and network access",
+    "relevant_doc_refs": [
+      "doc://development/testing-guide"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/testing-guide",
+        "anchor": "Tests and CI use deterministic provider behavior rather than live APIs",
+        "start_line": 63,
+        "end_line": 64
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_rate_limit_rollback",
+    "query": "how should the rate limit rollout be rolled back if overload behavior is unclear",
+    "relevant_doc_refs": [
+      "doc://runbooks/rate-limit-rollout"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://runbooks/rate-limit-rollout",
+        "anchor": "Disable burst handling first if overload behavior becomes difficult to interpret",
+        "start_line": 20,
+        "end_line": 20
+      }
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_docs_update_rules",
+    "query": "which doc should I update when adding a new Pituitary user-facing command or flag",
+    "relevant_doc_refs": [
+      "doc://development/documentation-guide"
+    ],
+    "relevant_source_spans": [
+      {
+        "doc_ref": "doc://development/documentation-guide",
+        "anchor": "New user-facing command or flag:",
+        "start_line": 22,
+        "end_line": 24
+      }
+    ],
+    "tags": ["mid_body"]
+  }
+]
