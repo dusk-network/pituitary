@@ -78,7 +78,8 @@ bench_enforce_corpus_pins() {
     if [[ -z "${repo_path}" || -z "${pin_sha}" ]]; then
       continue
     fi
-    if [[ ! -d "${repo_path}/.git" ]]; then
+    # Accept both classic repos (.git dir) and worktrees (.git file pointer).
+    if [[ ! -e "${repo_path}/.git" ]]; then
       echo "bench: pin target is not a git repo: ${repo_path}" >&2
       failed=1; continue
     fi
