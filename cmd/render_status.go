@@ -60,6 +60,13 @@ func renderStatusResult(w io.Writer, result *statusResult) {
 	} else {
 		fmt.Fprintf(w, "  %s %s\n", p.dim("index:"), p.red("missing"))
 	}
+	if result.InferAppliesToEnabled != nil {
+		if *result.InferAppliesToEnabled {
+			fmt.Fprintf(w, "  %s %s\n", p.dim("inference:"), p.green("enabled"))
+		} else {
+			fmt.Fprintf(w, "  %s %s %s\n", p.dim("inference:"), p.red("disabled"), p.dim("(set workspace.infer_applies_to = true to enable)"))
+		}
+	}
 	if len(result.Repos) > 0 {
 		fmt.Fprintf(w, "  %s\n", p.white("REPO COVERAGE"))
 		for i, repo := range result.Repos {

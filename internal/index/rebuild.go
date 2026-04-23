@@ -28,28 +28,29 @@ const schemaVersion = 10
 // RebuildResult reports the staged rebuild outcome.
 // When Update is true, the result describes an incremental update instead of a full rebuild.
 type RebuildResult struct {
-	DryRun              bool                       `json:"dry_run,omitempty"`
-	Update              bool                       `json:"update,omitempty"`
-	IndexPath           string                     `json:"index_path"`
-	FullRebuild         bool                       `json:"full_rebuild,omitempty"`
-	ArtifactCount       int                        `json:"artifact_count"`
-	SpecCount           int                        `json:"spec_count"`
-	DocCount            int                        `json:"doc_count"`
-	ChunkCount          int                        `json:"chunk_count"`
-	EdgeCount           int                        `json:"edge_count"`
-	EmbedderDimension   int                        `json:"embedder_dimension"`
-	ReusedArtifactCount int                        `json:"reused_artifact_count,omitempty"`
-	ReusedChunkCount    int                        `json:"reused_chunk_count,omitempty"`
-	EmbeddedChunkCount  int                        `json:"embedded_chunk_count,omitempty"`
-	AddedCount          int                        `json:"added_count,omitempty"`
-	UpdatedCount        int                        `json:"updated_count,omitempty"`
-	RemovedCount        int                        `json:"removed_count,omitempty"`
-	UnchangedCount      int                        `json:"unchanged_count,omitempty"`
-	InferredEdgeCount   int                        `json:"inferred_edge_count,omitempty"`
-	ContentFingerprint  string                     `json:"content_fingerprint"`
-	Repos               []RepoCoverage             `json:"repo_coverage,omitempty"`
-	Sources             []source.LoadSourceSummary `json:"sources,omitempty"`
-	Delta               *GovernanceDelta           `json:"delta,omitempty"`
+	DryRun                bool                       `json:"dry_run,omitempty"`
+	Update                bool                       `json:"update,omitempty"`
+	IndexPath             string                     `json:"index_path"`
+	FullRebuild           bool                       `json:"full_rebuild,omitempty"`
+	ArtifactCount         int                        `json:"artifact_count"`
+	SpecCount             int                        `json:"spec_count"`
+	DocCount              int                        `json:"doc_count"`
+	ChunkCount            int                        `json:"chunk_count"`
+	EdgeCount             int                        `json:"edge_count"`
+	EmbedderDimension     int                        `json:"embedder_dimension"`
+	ReusedArtifactCount   int                        `json:"reused_artifact_count,omitempty"`
+	ReusedChunkCount      int                        `json:"reused_chunk_count,omitempty"`
+	EmbeddedChunkCount    int                        `json:"embedded_chunk_count,omitempty"`
+	AddedCount            int                        `json:"added_count,omitempty"`
+	UpdatedCount          int                        `json:"updated_count,omitempty"`
+	RemovedCount          int                        `json:"removed_count,omitempty"`
+	UnchangedCount        int                        `json:"unchanged_count,omitempty"`
+	InferredEdgeCount     int                        `json:"inferred_edge_count,omitempty"`
+	InferAppliesToEnabled bool                       `json:"infer_applies_to_enabled"`
+	ContentFingerprint    string                     `json:"content_fingerprint"`
+	Repos                 []RepoCoverage             `json:"repo_coverage,omitempty"`
+	Sources               []source.LoadSourceSummary `json:"sources,omitempty"`
+	Delta                 *GovernanceDelta           `json:"delta,omitempty"`
 }
 
 // RebuildOptions controls optional rebuild behavior.
@@ -116,6 +117,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
+	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
 	return result, nil
 }
 
@@ -484,6 +486,9 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 	if err := upsertMetadataContext(ctx, tx, "chunking_config_fingerprint", chunkingConfigFingerprint(cfg.Runtime.Chunking)); err != nil {
 		return err
 	}
+	if err := upsertMetadataContext(ctx, tx, "infer_applies_to_enabled", strconv.FormatBool(cfg.Workspace.InferAppliesTo)); err != nil {
+		return err
+	}
 	if manifest := sourceManifestJSON(cfg); manifest != "" {
 		if err := upsertMetadataContext(ctx, tx, "source_manifest", manifest); err != nil {
 			return err
@@ -509,6 +514,7 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 
 	result.EdgeCount = edgeCount
 	result.InferredEdgeCount = inferredCount
+	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
 	return nil
 }
 

@@ -39,6 +39,63 @@ func TestRenderPreviewSourcesResultIncludesFiles(t *testing.T) {
 	}
 }
 
+func TestRenderIndexResultShowsInferenceState(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		result     *index.RebuildResult
+		wantSubstr string
+	}{
+		{
+			name: "disabled",
+			result: &index.RebuildResult{
+				IndexPath:             "/tmp/p.db",
+				ArtifactCount:         1,
+				ChunkCount:            2,
+				EdgeCount:             3,
+				InferAppliesToEnabled: false,
+			},
+			wantSubstr: "inference: disabled",
+		},
+		{
+			name: "enabled_with_edges",
+			result: &index.RebuildResult{
+				IndexPath:             "/tmp/p.db",
+				ArtifactCount:         1,
+				ChunkCount:            2,
+				EdgeCount:             3,
+				InferredEdgeCount:     5,
+				InferAppliesToEnabled: true,
+			},
+			wantSubstr: "inference: enabled (5 inferred edge(s))",
+		},
+		{
+			name: "enabled_with_zero_inferred",
+			result: &index.RebuildResult{
+				IndexPath:             "/tmp/p.db",
+				ArtifactCount:         1,
+				ChunkCount:            2,
+				EdgeCount:             3,
+				InferredEdgeCount:     0,
+				InferAppliesToEnabled: true,
+			},
+			wantSubstr: "inference: enabled (0 inferred edge(s))",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			renderIndexResult(&stdout, tc.result)
+			output := stdout.String()
+			if !strings.Contains(output, tc.wantSubstr) {
+				t.Fatalf("renderIndexResult() output:\n%s\ndoes not contain %q", output, tc.wantSubstr)
+			}
+		})
+	}
+}
+
 func TestRenderExplainFileResultIncludesInference(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +137,41 @@ func TestRenderExplainFileResultIncludesInference(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("renderExplainFileResult() output %q does not contain %q", output, want)
 		}
+	}
+}
+
+func TestRenderStatusResultShowsInferenceState(t *testing.T) {
+	t.Parallel()
+
+	tru := true
+	fls := false
+	cases := []struct {
+		name       string
+		flag       *bool
+		wantSubstr string
+	}{
+		{name: "disabled", flag: &fls, wantSubstr: "inference: disabled"},
+		{name: "enabled", flag: &tru, wantSubstr: "inference: enabled"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			renderStatusResult(&stdout, &statusResult{
+				WorkspaceRoot:         "/tmp/repo",
+				ConfigPath:            "/tmp/repo/pituitary.toml",
+				IndexPath:             "/tmp/repo/.pituitary/pituitary.db",
+				IndexExists:           true,
+				SpecCount:             3,
+				DocCount:              2,
+				ChunkCount:            17,
+				InferAppliesToEnabled: tc.flag,
+			})
+			output := stdout.String()
+			if !strings.Contains(output, tc.wantSubstr) {
+				t.Fatalf("renderStatusResult() output:\n%s\ndoes not contain %q", output, tc.wantSubstr)
+			}
+		})
 	}
 }
 

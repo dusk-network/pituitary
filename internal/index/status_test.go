@@ -53,6 +53,77 @@ func TestReadStatusReadsFixtureCounts(t *testing.T) {
 	}
 }
 
+func TestReadStatusReportsInferAppliesToEnabled(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		tomlFlag string
+		want     bool
+	}{
+		{name: "enabled", tomlFlag: "true", want: true},
+		{name: "disabled", tomlFlag: "false", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+
+			configContent := `
+[workspace]
+root = "` + filepath.ToSlash(dir) + `"
+index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = ` + tc.tomlFlag + `
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`
+			mustWriteFile(t, filepath.Join(dir, "pituitary.toml"), configContent)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+
+			cfg, err := config.Load(filepath.Join(dir, "pituitary.toml"))
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			records, err := source.LoadFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("LoadFromConfig: %v", err)
+			}
+			if _, err := Rebuild(cfg, records); err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+
+			status, err := ReadStatus(cfg.Workspace.ResolvedIndexPath)
+			if err != nil {
+				t.Fatalf("ReadStatus: %v", err)
+			}
+			if status.InferAppliesToEnabled == nil {
+				t.Fatalf("status.InferAppliesToEnabled = nil, want %v", tc.want)
+			}
+			if *status.InferAppliesToEnabled != tc.want {
+				t.Errorf("status.InferAppliesToEnabled = %v, want %v", *status.InferAppliesToEnabled, tc.want)
+			}
+		})
+	}
+}
+
 func TestReadStatusReportsRepoCoverage(t *testing.T) {
 	t.Parallel()
 

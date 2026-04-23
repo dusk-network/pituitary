@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -140,6 +141,7 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		"source_fingerprint",
 		"source_manifest",
 		"content_fingerprint",
+		"infer_applies_to_enabled",
 	)
 	if err != nil {
 		return nil, err
@@ -174,6 +176,21 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 			Message: fmt.Sprintf("index embedder fingerprint %q does not match configured embedder fingerprint %q", stored, configuredEmbedderFingerprint),
 			Indexed: stored,
 			Current: configuredEmbedderFingerprint,
+		})
+	}
+
+	currentInferAppliesTo := strconv.FormatBool(cfg.Workspace.InferAppliesTo)
+	switch stored := strings.TrimSpace(metadata["infer_applies_to_enabled"]); {
+	case stored == "":
+		// Legacy indexes without the metadata key predate the visibility fix;
+		// treat the absence as not-a-mismatch rather than flagging every
+		// pre-existing index as incompatible. A subsequent rebuild fills it in.
+	case !strings.EqualFold(stored, currentInferAppliesTo):
+		issues = append(issues, FreshnessIssue{
+			Kind:    "infer_applies_to_mismatch",
+			Message: fmt.Sprintf("index infer_applies_to %q does not match current workspace infer_applies_to %q; --update cannot regenerate inferred edges, run `pituitary index --rebuild`", stored, currentInferAppliesTo),
+			Indexed: stored,
+			Current: currentInferAppliesTo,
 		})
 	}
 

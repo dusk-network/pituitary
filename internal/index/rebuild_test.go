@@ -55,7 +55,7 @@ func TestRebuildCreatesSQLiteIndexFromFixtures(t *testing.T) {
 
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, 5)
 	assertCount(t, db, `SELECT COUNT(*) FROM edges`, 9)
-	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 8)
+	assertCount(t, db, `SELECT COUNT(*) FROM metadata`, 9)
 	assertMetadataValue(t, db, "embedder_fingerprint", "fixture|fixture-8d|plain_v1")
 	assertMetadataValue(t, db, "stroma_snapshot_path", stromaSnapshotPathForContent(cfg.Workspace.ResolvedIndexPath, result.ContentFingerprint))
 	assertMetadataValue(t, db, "source_fingerprint", sourceFingerprint(cfg))
@@ -456,6 +456,144 @@ func NewSlidingWindowLimiter(w int) *SlidingWindowLimiter {
 	}
 	if edgeSource != "inferred" {
 		t.Errorf("expected edge_source=inferred, got %s", edgeSource)
+	}
+}
+
+func TestPrepareRebuildReflectsInferAppliesToFromConfig(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		tomlFlag string
+		want     bool
+	}{
+		{name: "enabled", tomlFlag: "true", want: true},
+		{name: "disabled", tomlFlag: "false", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+
+			configContent := `
+[workspace]
+root = "` + filepath.ToSlash(dir) + `"
+index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = ` + tc.tomlFlag + `
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`
+			mustWriteFile(t, filepath.Join(dir, "pituitary.toml"), configContent)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+
+			cfg, err := config.Load(filepath.Join(dir, "pituitary.toml"))
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			records, err := source.LoadFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("LoadFromConfig: %v", err)
+			}
+			result, err := PrepareRebuild(cfg, records)
+			if err != nil {
+				t.Fatalf("PrepareRebuild: %v", err)
+			}
+			if result.InferAppliesToEnabled != tc.want {
+				t.Errorf("PrepareRebuild result.InferAppliesToEnabled = %v, want %v", result.InferAppliesToEnabled, tc.want)
+			}
+		})
+	}
+}
+
+func TestRebuildResultReflectsInferAppliesToFromConfig(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		tomlFlag     string
+		wantField    bool
+		wantMetadata string
+	}{
+		{name: "enabled", tomlFlag: "true", wantField: true, wantMetadata: "true"},
+		{name: "disabled", tomlFlag: "false", wantField: false, wantMetadata: "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+
+			configContent := `
+[workspace]
+root = "` + filepath.ToSlash(dir) + `"
+index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = ` + tc.tomlFlag + `
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`
+			configPath := filepath.Join(dir, "pituitary.toml")
+			mustWriteFile(t, configPath, configContent)
+
+			// Minimal spec so the rebuild has something to emit.
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			records, err := source.LoadFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("LoadFromConfig: %v", err)
+			}
+
+			result, err := Rebuild(cfg, records)
+			if err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+
+			if result.InferAppliesToEnabled != tc.wantField {
+				t.Errorf("result.InferAppliesToEnabled = %v, want %v", result.InferAppliesToEnabled, tc.wantField)
+			}
+
+			db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+			defer db.Close()
+			assertMetadataValue(t, db, "infer_applies_to_enabled", tc.wantMetadata)
+		})
 	}
 }
 
