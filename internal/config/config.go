@@ -86,6 +86,7 @@ type Workspace struct {
 	IndexPath         string
 	ResolvedIndexPath string
 	InferAppliesTo    bool
+	InferAppliesToSet bool
 	Repos             []WorkspaceRepo
 }
 
@@ -278,7 +279,7 @@ type rawWorkspace struct {
 	Root           string             `toml:"root"`
 	RepoID         string             `toml:"repo_id"`
 	IndexPath      string             `toml:"index_path"`
-	InferAppliesTo bool               `toml:"infer_applies_to"`
+	InferAppliesTo *bool              `toml:"infer_applies_to"`
 	Repos          []rawWorkspaceRepo `toml:"repos"`
 }
 
@@ -475,11 +476,12 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 		ConfigPath:    configPath,
 		ConfigDir:     configBaseDir(configPath),
 		Workspace: Workspace{
-			Root:           raw.Workspace.Root,
-			RepoID:         strings.TrimSpace(raw.Workspace.RepoID),
-			IndexPath:      raw.Workspace.IndexPath,
-			InferAppliesTo: raw.Workspace.InferAppliesTo,
-			Repos:          make([]WorkspaceRepo, 0, len(raw.Workspace.Repos)),
+			Root:              raw.Workspace.Root,
+			RepoID:            strings.TrimSpace(raw.Workspace.RepoID),
+			IndexPath:         raw.Workspace.IndexPath,
+			InferAppliesTo:    raw.Workspace.InferAppliesTo != nil && *raw.Workspace.InferAppliesTo,
+			InferAppliesToSet: raw.Workspace.InferAppliesTo != nil,
+			Repos:             make([]WorkspaceRepo, 0, len(raw.Workspace.Repos)),
 		},
 		Runtime: Runtime{
 			Profiles: make(map[string]RuntimeProvider, len(raw.Runtime.Profiles)),

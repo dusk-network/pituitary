@@ -1855,6 +1855,91 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func TestRenderPreservesExplicitInferAppliesTo(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		tomlFlag string
+		want     string
+	}{
+		{name: "explicit_true", tomlFlag: "infer_applies_to = true\n", want: "infer_applies_to = true"},
+		{name: "explicit_false", tomlFlag: "infer_applies_to = false\n", want: "infer_applies_to = false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`+tc.tomlFlag)
+
+			rendered, err := Render(cfg)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(rendered, tc.want) {
+				t.Fatalf("Render output missing %q:\n%s", tc.want, rendered)
+			}
+		})
+	}
+}
+
+func TestRenderOmitsInferAppliesToWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`)
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(rendered, "infer_applies_to") {
+		t.Fatalf("Render emitted infer_applies_to for an unset config:\n%s", rendered)
+	}
+}
+
+func TestLoadTracksWorkspaceInferAppliesToSetness(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		tomlFragment   string
+		wantSet        bool
+		wantInferValue bool
+	}{
+		{name: "unset", tomlFragment: "", wantSet: false, wantInferValue: false},
+		{name: "explicit_false", tomlFragment: "infer_applies_to = false\n", wantSet: true, wantInferValue: false},
+		{name: "explicit_true", tomlFragment: "infer_applies_to = true\n", wantSet: true, wantInferValue: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`+tc.tomlFragment)
+
+			if cfg.Workspace.InferAppliesToSet != tc.wantSet {
+				t.Errorf("InferAppliesToSet = %v, want %v", cfg.Workspace.InferAppliesToSet, tc.wantSet)
+			}
+			if cfg.Workspace.InferAppliesTo != tc.wantInferValue {
+				t.Errorf("InferAppliesTo = %v, want %v", cfg.Workspace.InferAppliesTo, tc.wantInferValue)
+			}
+		})
+	}
+}
+
 func equalStringSlices(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
