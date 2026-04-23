@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/openaicompat"
+	"github.com/dusk-network/pituitary/internal/runtimeerr"
 	stembed "github.com/dusk-network/stroma/v2/embed"
 )
 
@@ -16,16 +18,23 @@ const (
 	embeddingStrategyPlain             = "plain_v1"
 	embeddingStrategyNomicSearchPrefix = "nomic_search_prefix_v1"
 	openAICompatibleEmbedderRuntime    = "runtime.embedder"
-	// Use a conservative default because some local OpenAI-compatible providers,
-	// notably LM Studio serving nomic-embed-text, fail or destabilize on larger
-	// embedding batches even when single-item requests succeed.
+	// Conservative batch cap for self-hosted gateways, notably LM Studio
+	// serving nomic-embed-text, that destabilise on larger embedding batches
+	// even when single-item requests succeed. The outer batch loop feeds
+	// stroma one 8-item slice at a time so the adaptive split on 413/5xx
+	// can halve a rejected batch in-place rather than fail the whole call.
 	openAICompatibleEmbeddingBatchSize = 8
 )
 
 type openAICompatibleEmbedder struct {
-	model    string
-	strategy string
-	client   *openaicompat.Client
+	runtime    string
+	provider   string
+	model      string
+	strategy   string
+	endpoint   string
+	timeoutMS  int
+	maxRetries int
+	client     *stembed.OpenAI
 
 	mu        sync.Mutex
 	dimension int
@@ -34,16 +43,51 @@ type openAICompatibleEmbedder struct {
 var _ Embedder = (*openAICompatibleEmbedder)(nil)
 var _ stembed.ContextualEmbedder = (*openAICompatibleEmbedder)(nil)
 
-func newOpenAICompatibleEmbedder(provider config.RuntimeProvider) (Embedder, error) {
-	client, err := openaicompat.NewClient(provider, openAICompatibleEmbedderRuntime)
-	if err != nil {
-		return nil, err
+func newOpenAICompatibleEmbedder(cfg config.RuntimeProvider) (Embedder, error) {
+	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
+	token := ""
+	if envVar := strings.TrimSpace(cfg.APIKeyEnv); envVar != "" {
+		token = strings.TrimSpace(os.Getenv(envVar))
+		if token == "" {
+			return nil, runtimeerr.NewDependencyUnavailableWithDetails(runtimeerr.FailureDetails{
+				Runtime:      openAICompatibleEmbedderRuntime,
+				Provider:     config.RuntimeProviderOpenAI,
+				Model:        strings.TrimSpace(cfg.Model),
+				Endpoint:     endpoint,
+				FailureClass: runtimeerr.FailureClassAuth,
+				TimeoutMS:    cfg.TimeoutMS,
+				MaxRetries:   cfg.MaxRetries,
+			}, "missing API key for %s", openAICompatibleEmbedderRuntime)
+		}
 	}
 
+	var timeout time.Duration
+	if cfg.TimeoutMS > 0 {
+		timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
+	}
+
+	// stroma's embed.OpenAI does not yet expose MaxRetries
+	// (dusk-network/stroma#73); until it does, the outer batch loop here
+	// handles the 413/5xx case via adaptive split, and transient-network
+	// retries rely on the caller. This wrapper is retained precisely so
+	// that future knob lands with a one-line wire-through.
+	client := stembed.NewOpenAI(stembed.OpenAIConfig{
+		BaseURL:      endpoint,
+		Model:        strings.TrimSpace(cfg.Model),
+		APIToken:     token,
+		Timeout:      timeout,
+		MaxBatchSize: openAICompatibleEmbeddingBatchSize,
+	})
+
 	return &openAICompatibleEmbedder{
-		model:    strings.TrimSpace(provider.Model),
-		strategy: embeddingStrategyForModel(provider.Model),
-		client:   client,
+		runtime:    openAICompatibleEmbedderRuntime,
+		provider:   config.RuntimeProviderOpenAI,
+		model:      strings.TrimSpace(cfg.Model),
+		strategy:   embeddingStrategyForModel(cfg.Model),
+		endpoint:   endpoint,
+		timeoutMS:  cfg.TimeoutMS,
+		maxRetries: cfg.MaxRetries,
+		client:     client,
 	}, nil
 }
 
@@ -67,20 +111,20 @@ func (e *openAICompatibleEmbedder) Dimension(ctx context.Context) (int, error) {
 }
 
 func (e *openAICompatibleEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float64, error) {
-	return e.embedTexts(ctx, "document", texts)
+	return e.embedTexts(ctx, false, texts)
 }
 
 func (e *openAICompatibleEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float64, error) {
-	return e.embedTexts(ctx, "query", texts)
+	return e.embedTexts(ctx, true, texts)
 }
 
 func (e *openAICompatibleEmbedder) EmbedDocumentChunks(ctx context.Context, _ string, chunks []string) ([][]float64, error) {
 	// Current OpenAI-compatible providers embed each chunk independently, so
 	// document context is intentionally unused.
-	return e.embedTexts(ctx, "document", chunks)
+	return e.embedTexts(ctx, false, chunks)
 }
 
-func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose string, texts []string) ([][]float64, error) {
+func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, isQuery bool, texts []string) ([][]float64, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,21 +132,13 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 		return [][]float64{}, nil
 	}
 
-	input := make([]string, 0, len(texts))
-	for _, text := range texts {
+	vectors := make([][]float64, 0, len(texts))
+	for start := 0; start < len(texts); start += openAICompatibleEmbeddingBatchSize {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		input = append(input, prepareEmbeddingInput(e.strategy, purpose, text))
-	}
-
-	vectors := make([][]float64, 0, len(input))
-	for start := 0; start < len(input); start += openAICompatibleEmbeddingBatchSize {
-		end := start + openAICompatibleEmbeddingBatchSize
-		if end > len(input) {
-			end = len(input)
-		}
-		batchVectors, err := e.embedBatchAdaptive(ctx, input[start:end])
+		end := min(start+openAICompatibleEmbeddingBatchSize, len(texts))
+		batchVectors, err := e.embedBatchAdaptive(ctx, isQuery, texts[start:end])
 		if err != nil {
 			return nil, err
 		}
@@ -111,18 +147,18 @@ func (e *openAICompatibleEmbedder) embedTexts(ctx context.Context, purpose strin
 	return vectors, nil
 }
 
-func (e *openAICompatibleEmbedder) embedBatchAdaptive(ctx context.Context, input []string) ([][]float64, error) {
-	vectors, err := e.embedBatch(ctx, input)
-	if err == nil || !shouldSplitEmbeddingBatch(err, len(input)) {
+func (e *openAICompatibleEmbedder) embedBatchAdaptive(ctx context.Context, isQuery bool, batch []string) ([][]float64, error) {
+	vectors, err := e.embedBatch(ctx, isQuery, batch)
+	if err == nil || !shouldSplitEmbeddingBatch(err, len(batch)) {
 		return vectors, err
 	}
 
-	mid := len(input) / 2
-	left, err := e.embedBatchAdaptive(ctx, input[:mid])
+	mid := len(batch) / 2
+	left, err := e.embedBatchAdaptive(ctx, isQuery, batch[:mid])
 	if err != nil {
 		return nil, err
 	}
-	right, err := e.embedBatchAdaptive(ctx, input[mid:])
+	right, err := e.embedBatchAdaptive(ctx, isQuery, batch[mid:])
 	if err != nil {
 		return nil, err
 	}
@@ -145,32 +181,29 @@ func shouldSplitEmbeddingBatch(err error, batchSize int) bool {
 	return status == http.StatusRequestEntityTooLarge || status >= http.StatusInternalServerError
 }
 
-func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, input []string) ([][]float64, error) {
-	payload, err := e.client.Embeddings(ctx, input)
-	if err != nil {
-		return nil, err
+func (e *openAICompatibleEmbedder) embedBatch(ctx context.Context, isQuery bool, batch []string) ([][]float64, error) {
+	var (
+		vectors [][]float64
+		err     error
+	)
+	if isQuery {
+		vectors, err = e.client.EmbedQueries(ctx, batch)
+	} else {
+		vectors, err = e.client.EmbedDocuments(ctx, batch)
 	}
-	if len(payload.Data) != len(input) {
-		return nil, e.schemaMismatchError(len(input), "%s returned %d embedding(s) for %d input(s)", openAICompatibleEmbedderRuntime, len(payload.Data), len(input))
+	if err != nil {
+		return nil, runtimeerr.FromProviderError(err, e.embeddingFailureLabels(len(batch)))
 	}
 
-	vectors := make([][]float64, len(input))
-	for i, item := range payload.Data {
-		index := item.Index
-		if index < 0 || index >= len(input) {
-			index = i
-		}
-		if len(item.Embedding) == 0 {
-			return nil, e.schemaMismatchError(len(input), "%s returned an empty embedding for input %d", openAICompatibleEmbedderRuntime, index)
-		}
-		if err := e.cacheDimension(len(item.Embedding)); err != nil {
-			return nil, err
-		}
-		vectors[index] = item.Embedding
+	if len(vectors) != len(batch) {
+		return nil, e.schemaMismatchError(len(batch), "%s returned %d embedding(s) for %d input(s)", openAICompatibleEmbedderRuntime, len(vectors), len(batch))
 	}
 	for i, vector := range vectors {
 		if len(vector) == 0 {
-			return nil, e.schemaMismatchError(len(input), "%s omitted embedding for input %d", openAICompatibleEmbedderRuntime, i)
+			return nil, e.schemaMismatchError(len(batch), "%s omitted embedding for input %d", openAICompatibleEmbedderRuntime, i)
+		}
+		if err := e.cacheDimension(len(vector)); err != nil {
+			return nil, err
 		}
 	}
 	return vectors, nil
@@ -181,20 +214,6 @@ func embeddingStrategyForModel(model string) string {
 		return embeddingStrategyNomicSearchPrefix
 	}
 	return embeddingStrategyPlain
-}
-
-func prepareEmbeddingInput(strategy, purpose, text string) string {
-	switch strategy {
-	case embeddingStrategyNomicSearchPrefix:
-		switch purpose {
-		case "query":
-			return "search_query: " + text
-		default:
-			return "search_document: " + text
-		}
-	default:
-		return text
-	}
 }
 
 func (e *openAICompatibleEmbedder) cachedDimension() int {
@@ -220,15 +239,22 @@ func (e *openAICompatibleEmbedder) cacheDimension(dimension int) error {
 	return nil
 }
 
-func (e *openAICompatibleEmbedder) embeddingFailureDetails(inputCount int) openaicompat.FailureDetails {
-	details := e.client.RequestFailureDetails("embeddings")
-	details.BatchSize = inputCount
-	details.InputCount = inputCount
-	return details
+func (e *openAICompatibleEmbedder) embeddingFailureLabels(inputCount int) runtimeerr.FailureDetails {
+	return runtimeerr.FailureDetails{
+		Runtime:     e.runtime,
+		Provider:    e.provider,
+		Model:       e.model,
+		Endpoint:    e.endpoint,
+		RequestType: "embeddings",
+		TimeoutMS:   e.timeoutMS,
+		MaxRetries:  e.maxRetries,
+		BatchSize:   inputCount,
+		InputCount:  inputCount,
+	}
 }
 
-func (e *openAICompatibleEmbedder) schemaMismatchError(inputCount int, format string, args ...any) *openaicompat.DependencyUnavailableError {
-	details := e.embeddingFailureDetails(inputCount)
-	details.FailureClass = openaicompat.FailureClassSchemaMismatch
-	return openaicompat.NewDependencyUnavailableWithDetails(details, format, args...)
+func (e *openAICompatibleEmbedder) schemaMismatchError(inputCount int, format string, args ...any) *runtimeerr.DependencyUnavailableError {
+	details := e.embeddingFailureLabels(inputCount)
+	details.FailureClass = runtimeerr.FailureClassSchemaMismatch
+	return runtimeerr.NewDependencyUnavailableWithDetails(details, format, args...)
 }
