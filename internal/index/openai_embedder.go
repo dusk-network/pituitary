@@ -66,16 +66,16 @@ func newOpenAICompatibleEmbedder(cfg config.RuntimeProvider) (Embedder, error) {
 		timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
 	}
 
-	// stroma's embed.OpenAI does not yet expose MaxRetries
-	// (dusk-network/stroma#73); until it does, the outer batch loop here
-	// handles the 413/5xx case via adaptive split, and transient-network
-	// retries rely on the caller. This wrapper is retained precisely so
-	// that future knob lands with a one-line wire-through.
+	// Transient-failure retries (429/5xx/transport) are delegated to stroma
+	// via MaxRetries. The outer batch loop here still owns the adaptive
+	// 413/5xx split that halves a rejected batch — a behavior stroma does
+	// not provide at the substrate level.
 	client := stembed.NewOpenAI(stembed.OpenAIConfig{
 		BaseURL:      endpoint,
 		Model:        strings.TrimSpace(cfg.Model),
 		APIToken:     token,
 		Timeout:      timeout,
+		MaxRetries:   cfg.MaxRetries,
 		MaxBatchSize: openAICompatibleEmbeddingBatchSize,
 	})
 
