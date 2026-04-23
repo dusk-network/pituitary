@@ -722,6 +722,12 @@ func loadFixtureConfigWithIndexPath(tb testing.TB, indexPath string) *config.Con
 [workspace]
 root = "`+filepath.ToSlash(repoRoot)+`"
 index_path = "`+filepath.ToSlash(indexPath)+`"
+# Pin inference off because workspace.root is the full Pituitary repo:
+# the AST walker would otherwise parse every Go/TS/Py file in the
+# checkout through tree-sitter on every rebuild, turning the race
+# suite from ~12s into a 10m timeout. Tests that exercise inference
+# set this to true with their own scoped workspace.
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

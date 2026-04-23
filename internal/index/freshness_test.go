@@ -371,6 +371,9 @@ func loadFreshnessFixtureConfig(tb testing.TB) *config.Config {
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+# Freshness tests do not exercise inference; pin off so default-on
+# does not drag the race suite through tree-sitter on every rebuild.
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

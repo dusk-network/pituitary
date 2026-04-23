@@ -228,6 +228,8 @@ func loadMultiRepoFixtureConfig(tb testing.TB) *config.Config {
 root = "%s"
 repo_id = "primary"
 index_path = "%s"
+# Multi-repo coverage test does not exercise inference; pin off.
+infer_applies_to = false
 
 [[workspace.repos]]
 id = "shared"
@@ -332,6 +334,8 @@ func loadGovernanceHotspotFixtureConfig(tb testing.TB) *config.Config {
 [workspace]
 root = "%s"
 index_path = "%s"
+# Hotspot test does not exercise inference; pin off.
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"
