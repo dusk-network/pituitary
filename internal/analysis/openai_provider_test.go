@@ -20,8 +20,8 @@ func configureOpenAIAnalysisProvider(t *testing.T, cfg *config.Config, handler f
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/chat/completions" {
-			t.Fatalf("path = %s, want /chat/completions", r.URL.Path)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s, want /v1/chat/completions", r.URL.Path)
 		}
 
 		var request openAICompatibleChatRequest

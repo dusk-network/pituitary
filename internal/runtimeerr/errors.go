@@ -1,19 +1,30 @@
-package openaicompat
+// Package runtimeerr describes failures that a configured runtime surface
+// (embedder, analyzer, probe) could not satisfy. The substrate classification
+// already shipped by stroma's provider package is preserved; this package
+// overlays the Pituitary-specific product labels (runtime name, provider id,
+// request type) that governance callers branch on for diagnostics and
+// graceful degradation.
+package runtimeerr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/dusk-network/stroma/v2/provider"
 )
 
+// Failure classes are mirrored from stroma's provider package so callers
+// can classify failures without importing stroma directly.
 const (
-	FailureClassAuth           = "auth"
-	FailureClassDependency     = "dependency_unavailable"
-	FailureClassRateLimit      = "rate_limit"
-	FailureClassSchemaMismatch = "schema_mismatch"
-	FailureClassServer         = "server"
-	FailureClassTimeout        = "timeout"
-	FailureClassTransport      = "transport"
+	FailureClassAuth           = provider.FailureClassAuth
+	FailureClassDependency     = provider.FailureClassDependencyUnavailable
+	FailureClassRateLimit      = provider.FailureClassRateLimit
+	FailureClassSchemaMismatch = provider.FailureClassSchemaMismatch
+	FailureClassServer         = provider.FailureClassServer
+	FailureClassTimeout        = provider.FailureClassTimeout
+	FailureClassTransport      = provider.FailureClassTransport
 )
 
 // FailureDetails captures structured runtime metadata for provider failures.
@@ -73,13 +84,14 @@ func (d FailureDetails) Map() map[string]any {
 	return values
 }
 
-// DependencyUnavailableError indicates that an OpenAI-compatible runtime could
-// not satisfy the current request.
+// DependencyUnavailableError indicates that a runtime surface could not
+// satisfy the request.
 type DependencyUnavailableError struct {
 	Runtime    string
 	Message    string
 	HTTPStatus int
 	Details    *FailureDetails
+	cause      error
 }
 
 func (e *DependencyUnavailableError) Error() string {
@@ -112,6 +124,12 @@ func (e *DependencyUnavailableError) DiagnosticFields() map[string]any {
 	return details.Map()
 }
 
+// Unwrap exposes the wrapped cause, enabling errors.Is/errors.As traversal
+// back to the underlying stroma provider.Error when present.
+func (e *DependencyUnavailableError) Unwrap() error {
+	return e.cause
+}
+
 // NewDependencyUnavailable formats a dependency-unavailable runtime error.
 func NewDependencyUnavailable(runtime, format string, args ...any) *DependencyUnavailableError {
 	return &DependencyUnavailableError{
@@ -139,7 +157,8 @@ func NewDependencyUnavailableWithDetails(details FailureDetails, format string, 
 	}
 }
 
-// NewDependencyUnavailableStatusWithDetails records structured failure metadata plus an HTTP status.
+// NewDependencyUnavailableStatusWithDetails records structured failure
+// metadata plus an HTTP status.
 func NewDependencyUnavailableStatusWithDetails(details FailureDetails, status int, format string, args ...any) *DependencyUnavailableError {
 	details.HTTPStatus = status
 	return &DependencyUnavailableError{
@@ -150,49 +169,71 @@ func NewDependencyUnavailableStatusWithDetails(details FailureDetails, status in
 	}
 }
 
+// FromProviderError wraps a stroma *provider.Error with the supplied product
+// labels. Substrate classification, HTTP status, endpoint/model/batch metrics
+// recorded on the stroma error survive; labels overlay the Pituitary-specific
+// Runtime, Provider, RequestType fields. Non-provider errors pass through
+// unwrapped so callers retain errors.Is visibility to context cancellation.
+func FromProviderError(err error, labels FailureDetails) error {
+	if err == nil {
+		return nil
+	}
+	var perr *provider.Error
+	if !errors.As(err, &perr) {
+		return err
+	}
+
+	details := labels
+	if details.FailureClass == "" {
+		if class := strings.TrimSpace(perr.FailureClass()); class != "" {
+			details.FailureClass = class
+		} else {
+			details.FailureClass = FailureClassDependency
+		}
+	}
+	status := perr.HTTPStatusCode()
+	if details.HTTPStatus == 0 {
+		details.HTTPStatus = status
+	}
+	if substrate := perr.Details; substrate != nil {
+		if details.Model == "" {
+			details.Model = substrate.Model
+		}
+		if details.Endpoint == "" {
+			details.Endpoint = substrate.Endpoint
+		}
+		if details.TimeoutMS == 0 {
+			details.TimeoutMS = substrate.TimeoutMS
+		}
+		if details.MaxRetries == 0 {
+			details.MaxRetries = substrate.MaxRetries
+		}
+		if details.BatchSize == 0 {
+			details.BatchSize = substrate.BatchSize
+		}
+		if details.InputCount == 0 {
+			details.InputCount = substrate.InputCount
+		}
+	}
+
+	return &DependencyUnavailableError{
+		Runtime:    details.Runtime,
+		Message:    perr.Error(),
+		HTTPStatus: status,
+		Details:    &details,
+		cause:      perr,
+	}
+}
+
 // ExtractErrorMessage returns a human-readable error message from a full
-// OpenAI-compatible response body.
+// OpenAI-compatible response body. Delegates to stroma's provider helper so
+// callers do not need to import stroma directly.
 func ExtractErrorMessage(body []byte) string {
-	var payload struct {
-		Error   json.RawMessage `json:"error"`
-		Message string          `json:"message"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
-	}
-	if strings.TrimSpace(payload.Message) != "" {
-		return strings.TrimSpace(payload.Message)
-	}
-	return ExtractErrorValue(payload.Error)
+	return provider.ExtractErrorMessage(body)
 }
 
 // ExtractErrorValue returns a human-readable error message from an
 // OpenAI-compatible `error` field that may be either a string or an object.
 func ExtractErrorValue(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.TrimSpace(text)
-	}
-
-	var payload struct {
-		Message string `json:"message"`
-		Error   string `json:"error"`
-		Detail  string `json:"detail"`
-	}
-	if err := json.Unmarshal(raw, &payload); err == nil {
-		switch {
-		case strings.TrimSpace(payload.Message) != "":
-			return strings.TrimSpace(payload.Message)
-		case strings.TrimSpace(payload.Error) != "":
-			return strings.TrimSpace(payload.Error)
-		case strings.TrimSpace(payload.Detail) != "":
-			return strings.TrimSpace(payload.Detail)
-		}
-	}
-
-	return ""
+	return provider.ExtractErrorValue(raw)
 }

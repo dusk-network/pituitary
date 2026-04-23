@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	"github.com/dusk-network/pituitary/internal/openaicompat"
 	"github.com/dusk-network/pituitary/internal/ranking"
+	"github.com/dusk-network/pituitary/internal/runtimeerr"
+	stchat "github.com/dusk-network/stroma/v2/chat"
 )
 
 type qualitativeAnalyzer interface {
@@ -19,10 +22,30 @@ type qualitativeAnalyzer interface {
 }
 
 type openAICompatibleAnalysisProvider struct {
-	client *openaicompat.Client
+	runtime           string
+	provider          string
+	model             string
+	endpoint          string
+	timeoutMS         int
+	maxRetries        int
+	maxResponseTokens int
+	client            *stchat.OpenAI
 }
 
-type openAICompatibleChatRequest = openaicompat.ChatRequest
+// openAICompatibleChatRequest mirrors the OpenAI-compatible chat request
+// wire shape so tests can decode captured request bodies without depending
+// on stroma internals.
+type openAICompatibleChatRequest struct {
+	Model       string                        `json:"model"`
+	Messages    []openAICompatibleChatMessage `json:"messages"`
+	Temperature float64                       `json:"temperature"`
+	MaxTokens   int                           `json:"max_tokens,omitempty"`
+}
+
+type openAICompatibleChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
 
 type compareAnalysisPrompt struct {
 	Command     string               `json:"command"`
@@ -96,14 +119,46 @@ func newQualitativeAnalyzer(provider config.RuntimeProvider) (qualitativeAnalyze
 	}
 }
 
-func newOpenAICompatibleAnalysisProvider(provider config.RuntimeProvider) (qualitativeAnalyzer, error) {
-	client, err := openaicompat.NewClient(provider, openAICompatibleAnalysisRuntime)
-	if err != nil {
-		return nil, err
+func newOpenAICompatibleAnalysisProvider(cfg config.RuntimeProvider) (qualitativeAnalyzer, error) {
+	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")
+	token := ""
+	if envVar := strings.TrimSpace(cfg.APIKeyEnv); envVar != "" {
+		token = strings.TrimSpace(os.Getenv(envVar))
+		if token == "" {
+			return nil, runtimeerr.NewDependencyUnavailableWithDetails(runtimeerr.FailureDetails{
+				Runtime:      openAICompatibleAnalysisRuntime,
+				Provider:     config.RuntimeProviderOpenAI,
+				Model:        strings.TrimSpace(cfg.Model),
+				Endpoint:     endpoint,
+				FailureClass: runtimeerr.FailureClassAuth,
+				TimeoutMS:    cfg.TimeoutMS,
+				MaxRetries:   cfg.MaxRetries,
+			}, "missing API key for %s", openAICompatibleAnalysisRuntime)
+		}
 	}
 
+	var timeout time.Duration
+	if cfg.TimeoutMS > 0 {
+		timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
+	}
+
+	client := stchat.NewOpenAI(stchat.OpenAIConfig{
+		BaseURL:    endpoint,
+		Model:      strings.TrimSpace(cfg.Model),
+		APIToken:   token,
+		Timeout:    timeout,
+		MaxRetries: cfg.MaxRetries,
+	})
+
 	return &openAICompatibleAnalysisProvider{
-		client: client,
+		runtime:           openAICompatibleAnalysisRuntime,
+		provider:          config.RuntimeProviderOpenAI,
+		model:             strings.TrimSpace(cfg.Model),
+		endpoint:          endpoint,
+		timeoutMS:         cfg.TimeoutMS,
+		maxRetries:        cfg.MaxRetries,
+		maxResponseTokens: cfg.MaxResponseTokens,
+		client:            client,
 	}, nil
 }
 
@@ -128,7 +183,7 @@ func (p *openAICompatibleAnalysisProvider) Probe(ctx context.Context) error {
 		return err
 	}
 	if !response.OK {
-		return p.dependencyError(openaicompat.FailureClassDependency, "%s probe returned ok=false", openAICompatibleAnalysisRuntime)
+		return p.dependencyError(runtimeerr.FailureClassDependency, "%s probe returned ok=false", openAICompatibleAnalysisRuntime)
 	}
 	return nil
 }
@@ -185,7 +240,7 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, com
 		return fmt.Errorf("encode runtime.analysis prompt: %w", err)
 	}
 
-	responseBody, err := p.requestChatCompletion(ctx, command, []openaicompat.ChatMessage{
+	responseBody, err := p.requestChatCompletion(ctx, command, []stchat.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: string(body)},
 	})
@@ -194,22 +249,23 @@ func (p *openAICompatibleAnalysisProvider) completeJSON(ctx context.Context, com
 	}
 
 	if err := json.Unmarshal([]byte(responseBody), target); err != nil {
-		return p.dependencyError(openaicompat.FailureClassSchemaMismatch, "decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err)
+		return p.dependencyError(runtimeerr.FailureClassSchemaMismatch, "decode %s response as JSON object: %v", openAICompatibleAnalysisRuntime, err)
 	}
 	return nil
 }
 
-func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, command string, messages []openaicompat.ChatMessage) (string, error) {
-	text, err := p.client.ChatCompletionText(ctx, messages, 0, analysisResponseTokenLimit(command, p.client.MaxResponseTokens))
+func (p *openAICompatibleAnalysisProvider) requestChatCompletion(ctx context.Context, command string, messages []stchat.Message) (string, error) {
+	text, err := p.client.ChatCompletionText(ctx, messages, 0, analysisResponseTokenLimit(command, p.maxResponseTokens))
 	if err != nil {
-		return "", err
+		return "", runtimeerr.FromProviderError(err, p.analysisFailureLabels())
 	}
-	if text == "" {
-		return "", p.dependencyError(openaicompat.FailureClassSchemaMismatch, "%s returned an empty message", openAICompatibleAnalysisRuntime)
-	}
+	// stroma.chat already rejects empty or unrecognised-shape responses as
+	// schema_mismatch, so a non-nil err with empty text is not reachable.
+	// The remaining Pituitary concern is whether the returned text is a
+	// JSON object matching the prompt contract.
 	text = normalizeJSONResponseText(text)
 	if text == "" {
-		return "", p.dependencyError(openaicompat.FailureClassSchemaMismatch, "%s returned no JSON object", openAICompatibleAnalysisRuntime)
+		return "", p.dependencyError(runtimeerr.FailureClassSchemaMismatch, "%s returned no JSON object", openAICompatibleAnalysisRuntime)
 	}
 	return text, nil
 }
@@ -237,10 +293,22 @@ func normalizeJSONResponseText(text string) string {
 	return ""
 }
 
-func (p *openAICompatibleAnalysisProvider) dependencyError(failureClass, format string, args ...any) *openaicompat.DependencyUnavailableError {
-	details := p.client.RequestFailureDetails("analysis")
+func (p *openAICompatibleAnalysisProvider) analysisFailureLabels() runtimeerr.FailureDetails {
+	return runtimeerr.FailureDetails{
+		Runtime:     p.runtime,
+		Provider:    p.provider,
+		Model:       p.model,
+		Endpoint:    p.endpoint,
+		RequestType: "analysis",
+		TimeoutMS:   p.timeoutMS,
+		MaxRetries:  p.maxRetries,
+	}
+}
+
+func (p *openAICompatibleAnalysisProvider) dependencyError(failureClass, format string, args ...any) *runtimeerr.DependencyUnavailableError {
+	details := p.analysisFailureLabels()
 	details.FailureClass = strings.TrimSpace(failureClass)
-	return openaicompat.NewDependencyUnavailableWithDetails(details, format, args...)
+	return runtimeerr.NewDependencyUnavailableWithDetails(details, format, args...)
 }
 
 func analysisSpecsFromMap(specs map[string]specDocument, orderedRefs []string, sectionSelector func(specDocument) []analysisSectionPrompt) []analysisSpecPrompt {

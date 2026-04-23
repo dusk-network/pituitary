@@ -39,8 +39,8 @@ func TestRunBenchmarksCapturesAnalysisRuntimeTraffic(t *testing.T) {
 	copyTree(t, filepath.Join(root, "specs", "rate-limit-v2"), filepath.Join(workspace, "specs", "rate-limit-v2"))
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			t.Fatalf("path = %s, want /chat/completions", r.URL.Path)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s, want /v1/chat/completions", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{

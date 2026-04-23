@@ -17,7 +17,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"
-	"github.com/dusk-network/pituitary/internal/openaicompat"
+	"github.com/dusk-network/pituitary/internal/runtimeerr"
 	"github.com/dusk-network/pituitary/internal/source"
 )
 
@@ -241,13 +241,13 @@ func TestFormatDependencyUnavailableMessageUsesRuntimeSpecificAPIKeyEnv(t *testi
 func TestClassifyExecutionErrorCarriesDependencyDiagnostics(t *testing.T) {
 	t.Parallel()
 
-	err := openaicompat.NewDependencyUnavailableStatusWithDetails(openaicompat.FailureDetails{
+	err := runtimeerr.NewDependencyUnavailableStatusWithDetails(runtimeerr.FailureDetails{
 		Runtime:      "runtime.embedder",
 		Provider:     config.RuntimeProviderOpenAI,
 		Model:        "pituitary-embed",
 		Endpoint:     "http://127.0.0.1:1234/v1",
 		RequestType:  "embeddings",
-		FailureClass: openaicompat.FailureClassServer,
+		FailureClass: runtimeerr.FailureClassServer,
 		HTTPStatus:   http.StatusInternalServerError,
 		TimeoutMS:    1000,
 		MaxRetries:   2,
@@ -265,7 +265,7 @@ func TestClassifyExecutionErrorCarriesDependencyDiagnostics(t *testing.T) {
 	if got, want := issue.Details["provider"], config.RuntimeProviderOpenAI; got != want {
 		t.Fatalf("issue.details.provider = %#v, want %q", got, want)
 	}
-	if got, want := issue.Details["failure_class"], openaicompat.FailureClassServer; got != want {
+	if got, want := issue.Details["failure_class"], runtimeerr.FailureClassServer; got != want {
 		t.Fatalf("issue.details.failure_class = %#v, want %q", got, want)
 	}
 	if got, want := issue.Details["http_status"], http.StatusInternalServerError; got != want {
