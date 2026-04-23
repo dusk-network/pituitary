@@ -4,7 +4,7 @@ go 1.25.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/dusk-network/stroma/v2 v2.0.0
+	github.com/dusk-network/stroma/v2 v2.1.0
 	github.com/google/go-github/v79 v79.0.0
 	github.com/invopop/jsonschema v0.13.0
 	github.com/mark3labs/mcp-go v0.45.0
