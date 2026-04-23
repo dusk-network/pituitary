@@ -22,9 +22,6 @@ func Render(cfg *Config) (string, error) {
 		fmt.Fprintf(&builder, "repo_id = %s\n", strconv.Quote(repoID))
 	}
 	fmt.Fprintf(&builder, "index_path = %s\n", strconv.Quote(cfg.Workspace.IndexPath))
-	if cfg.Workspace.InferAppliesToSet {
-		fmt.Fprintf(&builder, "infer_applies_to = %t\n", cfg.Workspace.InferAppliesTo)
-	}
 	for _, repo := range cfg.Workspace.Repos {
 		builder.WriteString("\n[[workspace.repos]]\n")
 		fmt.Fprintf(&builder, "id = %s\n", strconv.Quote(repo.ID))

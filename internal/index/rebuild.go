@@ -117,7 +117,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
-	result.InferAppliesToEnabled = resolveInferAppliesTo(cfg, records.Specs)
+	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
 	return result, nil
 }
 
@@ -486,7 +486,7 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 	if err := upsertMetadataContext(ctx, tx, "chunking_config_fingerprint", chunkingConfigFingerprint(cfg.Runtime.Chunking)); err != nil {
 		return err
 	}
-	if err := upsertMetadataContext(ctx, tx, "infer_applies_to_enabled", strconv.FormatBool(resolveInferAppliesTo(cfg, records.Specs))); err != nil {
+	if err := upsertMetadataContext(ctx, tx, "infer_applies_to_enabled", strconv.FormatBool(cfg.Workspace.InferAppliesTo)); err != nil {
 		return err
 	}
 	if manifest := sourceManifestJSON(cfg); manifest != "" {
@@ -514,7 +514,7 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 
 	result.EdgeCount = edgeCount
 	result.InferredEdgeCount = inferredCount
-	result.InferAppliesToEnabled = resolveInferAppliesTo(cfg, records.Specs)
+	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
 	return nil
 }
 
@@ -978,33 +978,11 @@ func chunkingConfigFingerprint(cfg config.ChunkingConfig) string {
 	return fingerprint(parts)
 }
 
-// resolveInferAppliesTo is the single source of truth for whether AST
-// inference runs during a rebuild. Explicit workspace.infer_applies_to wins;
-// otherwise the default turns on for schema_version >= 3 corpora whose specs
-// declare at least one code:// applies_to target, since that is the signal the
-// feature was designed to serve.
-func resolveInferAppliesTo(cfg *config.Config, specs []model.SpecRecord) bool {
-	if cfg.Workspace.InferAppliesToSet {
-		return cfg.Workspace.InferAppliesTo
-	}
-	if cfg.SchemaVersion < 3 {
-		return false
-	}
-	for _, spec := range specs {
-		for _, target := range spec.AppliesTo {
-			if strings.HasPrefix(target, "code://") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // inferASTEdgesContext walks the workspace for code files, extracts symbols via
 // tree-sitter, matches them against spec body text, and inserts inferred
 // applies_to edges into the staging database.
 func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord, validFrom *string) (int, error) {
-	if !resolveInferAppliesTo(cfg, specs) {
+	if !cfg.Workspace.InferAppliesTo {
 		return 0, nil
 	}
 	workspaceRoot := cfg.Workspace.RootPath

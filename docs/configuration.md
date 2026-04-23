@@ -96,17 +96,6 @@ Pituitary keeps source paths repo-relative, adds `repo` to search/drift/impact/s
 
 Important path-resolution rule: `workspace.root` and `[[workspace.repos]].root` resolve relative to the config file's base directory, not the current working directory. That matters when you keep a scratch config outside the repo, for example `/tmp/pit-fake.toml` with `root = ".."`. In that case `..` resolves relative to `/tmp`, not relative to the shell directory where you invoked `pituitary`. If the resolved root is wrong, Pituitary now reports the derived absolute path in the validation error so the cause is visible immediately.
 
-### AST-inferred applies_to
-
-`workspace.infer_applies_to` controls whether `index --rebuild` runs tree-sitter AST inference to derive additional `applies_to` edges from spec body text and source symbols. The feature is described in #261.
-
-The default resolves at rebuild time:
-
-- If `infer_applies_to` is set explicitly to `true` or `false`, that value wins.
-- Otherwise, inference is enabled when `schema_version >= 3` and at least one spec declares a `code://` `applies_to` target, since that is the signal the feature was designed to serve. Corpora with no `code://` targets keep inference off by default — there is no work for it to do.
-
-`index --rebuild` and `status` both surface the effective value, and `pituitary index --freshness` flags a rebuild as needed if the effective value drifts from the value stored in the index (e.g., after you explicitly flip the flag). `index --update` cannot regenerate inferred edges on its own, so flag flips require `index --rebuild`.
-
 ### Runtime Profiles
 
 Runtime config also supports reusable named profiles under `[runtime.profiles.<name>]`. Select one from `[runtime.embedder]` or `[runtime.analysis]` with `profile = "..."`, then override only the fields that differ:

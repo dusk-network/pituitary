@@ -179,6 +179,21 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		})
 	}
 
+	currentInferAppliesTo := strconv.FormatBool(cfg.Workspace.InferAppliesTo)
+	switch stored := strings.TrimSpace(metadata["infer_applies_to_enabled"]); {
+	case stored == "":
+		// Legacy indexes without the metadata key predate the visibility fix;
+		// treat the absence as not-a-mismatch rather than flagging every
+		// pre-existing index as incompatible. A subsequent rebuild fills it in.
+	case !strings.EqualFold(stored, currentInferAppliesTo):
+		issues = append(issues, FreshnessIssue{
+			Kind:    "infer_applies_to_mismatch",
+			Message: fmt.Sprintf("index infer_applies_to %q does not match current workspace infer_applies_to %q; --update cannot regenerate inferred edges, run `pituitary index --rebuild`", stored, currentInferAppliesTo),
+			Indexed: stored,
+			Current: currentInferAppliesTo,
+		})
+	}
+
 	switch stored := strings.TrimSpace(metadata["source_fingerprint"]); {
 	case stored == "":
 		issues = append(issues, FreshnessIssue{
@@ -223,21 +238,6 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 			Message: fmt.Sprintf("index content fingerprint %q does not match current workspace content fingerprint %q", stored, currentContentFingerprint),
 			Indexed: stored,
 			Current: currentContentFingerprint,
-		})
-	}
-
-	currentInferAppliesTo := strconv.FormatBool(resolveInferAppliesTo(cfg, records.Specs))
-	switch stored := strings.TrimSpace(metadata["infer_applies_to_enabled"]); {
-	case stored == "":
-		// Legacy indexes without the metadata key predate the visibility fix;
-		// treat the absence as not-a-mismatch rather than flagging every
-		// pre-existing index as incompatible. A subsequent rebuild fills it in.
-	case !strings.EqualFold(stored, currentInferAppliesTo):
-		issues = append(issues, FreshnessIssue{
-			Kind:    "infer_applies_to_mismatch",
-			Message: fmt.Sprintf("index infer_applies_to %q does not match current workspace infer_applies_to %q; --update cannot regenerate inferred edges, run `pituitary index --rebuild`", stored, currentInferAppliesTo),
-			Indexed: stored,
-			Current: currentInferAppliesTo,
 		})
 	}
 
