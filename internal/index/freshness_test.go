@@ -265,6 +265,99 @@ func TestInspectFreshnessReturnsSourceMismatchBeforeReloadingWorkspaceContent(t 
 	}
 }
 
+func TestInspectFreshnessReportsIncompatibleWhenInferAppliesToFlips(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		firstFlag  string
+		secondFlag string
+	}{
+		{name: "false_to_true", firstFlag: "false", secondFlag: "true"},
+		{name: "true_to_false", firstFlag: "true", secondFlag: "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+			configPath := filepath.Join(dir, "pituitary.toml")
+
+			writeConfig := func(flag string) {
+				content := `
+[workspace]
+root = "` + filepath.ToSlash(dir) + `"
+index_path = "` + filepath.ToSlash(indexPath) + `"
+infer_applies_to = ` + flag + `
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`
+				mustWriteFile(t, configPath, content)
+			}
+
+			writeConfig(tc.firstFlag)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+			mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			records, err := source.LoadFromConfig(cfg)
+			if err != nil {
+				t.Fatalf("LoadFromConfig: %v", err)
+			}
+			if _, err := Rebuild(cfg, records); err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+
+			// Flip the flag in the config and re-inspect.
+			writeConfig(tc.secondFlag)
+			cfg2, err := config.Load(configPath)
+			if err != nil {
+				t.Fatalf("config.Load (post-flip): %v", err)
+			}
+
+			status, err := InspectFreshnessContext(context.Background(), cfg2)
+			if err != nil {
+				t.Fatalf("InspectFreshnessContext: %v", err)
+			}
+			if status.State != freshnessStateIncompatible {
+				t.Fatalf("freshness.state = %q, want %q", status.State, freshnessStateIncompatible)
+			}
+			found := false
+			for _, issue := range status.Issues {
+				if issue.Kind == "infer_applies_to_mismatch" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("freshness.issues missing infer_applies_to_mismatch: %+v", status.Issues)
+			}
+			if !strings.Contains(status.Action, "index --rebuild") {
+				t.Fatalf("freshness.action = %q, want rebuild guidance", status.Action)
+			}
+		})
+	}
+}
+
 func loadFreshnessFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 

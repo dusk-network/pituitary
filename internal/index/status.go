@@ -13,14 +13,15 @@ import (
 
 // Status reports whether the configured index exists and its basic counts.
 type Status struct {
-	IndexPath          string              `json:"index_path"`
-	Exists             bool                `json:"index_exists"`
-	SpecCount          int                 `json:"spec_count"`
-	DocCount           int                 `json:"doc_count"`
-	ChunkCount         int                 `json:"chunk_count"`
-	Repos              []RepoCoverage      `json:"repo_coverage,omitempty"`
-	GovernanceCoverage *GovernanceCoverage `json:"governance_coverage,omitempty"`
-	GovernanceHotspots *GovernanceHotspots `json:"governance_hotspots,omitempty"`
+	IndexPath             string              `json:"index_path"`
+	Exists                bool                `json:"index_exists"`
+	SpecCount             int                 `json:"spec_count"`
+	DocCount              int                 `json:"doc_count"`
+	ChunkCount            int                 `json:"chunk_count"`
+	InferAppliesToEnabled *bool               `json:"infer_applies_to_enabled,omitempty"`
+	Repos                 []RepoCoverage      `json:"repo_coverage,omitempty"`
+	GovernanceCoverage    *GovernanceCoverage `json:"governance_coverage,omitempty"`
+	GovernanceHotspots    *GovernanceHotspots `json:"governance_hotspots,omitempty"`
 }
 
 // GovernanceCoverage reports the percentage of indexed source files that have
@@ -111,6 +112,13 @@ func ReadStatusContext(ctx context.Context, path string) (*Status, error) {
 	status.Repos, err = repoCoverageFromDBContext(ctx, db)
 	if err != nil {
 		return nil, err
+	}
+
+	if metadata, err := readMetadataContext(ctx, db, "infer_applies_to_enabled"); err == nil {
+		if raw, ok := metadata["infer_applies_to_enabled"]; ok {
+			enabled := strings.EqualFold(strings.TrimSpace(raw), "true")
+			status.InferAppliesToEnabled = &enabled
+		}
 	}
 
 	// Governance coverage (schema v4+).

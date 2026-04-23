@@ -31,9 +31,18 @@ func renderIndexResult(w io.Writer, result *index.RebuildResult) {
 	}
 	fmt.Fprintf(w, "indexed %d artifact(s), %d chunk(s), and %d edge(s)\n", result.ArtifactCount, result.ChunkCount, result.EdgeCount)
 	fmt.Fprintf(w, "database: %s\n", result.IndexPath)
+	renderIndexInferenceSummary(w, result)
 	renderIndexReuseSummary(w, result)
 	renderIndexRepoCoverage(w, result.Repos)
 	renderIndexSourceSummaries(w, result.Sources)
+}
+
+func renderIndexInferenceSummary(w io.Writer, result *index.RebuildResult) {
+	if result.InferAppliesToEnabled {
+		fmt.Fprintf(w, "inference: enabled (%d inferred edge(s))\n", result.InferredEdgeCount)
+		return
+	}
+	fmt.Fprintln(w, "inference: disabled (set workspace.infer_applies_to = true to enable)")
 }
 
 func renderIndexReuseSummary(w io.Writer, result *index.RebuildResult) {
