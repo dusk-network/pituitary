@@ -550,6 +550,7 @@ max_retries = 0
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+infer_applies_to = false
 
 `+runtimeEmbedder+runtimeAnalysis+`
 [[sources]]

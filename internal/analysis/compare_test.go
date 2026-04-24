@@ -209,6 +209,7 @@ func loadCompareFixtureConfig(t *testing.T) *config.Config {
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

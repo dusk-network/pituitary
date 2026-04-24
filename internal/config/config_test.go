@@ -65,6 +65,56 @@ path = "docs"
 	}
 }
 
+func TestLoadTracksExplicitInferAppliesTo(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		line    string
+		want    bool
+		wantSet bool
+	}{
+		{name: "omitted", want: false, wantSet: false},
+		{name: "enabled", line: "infer_applies_to = true", want: true, wantSet: true},
+		{name: "disabled", line: "infer_applies_to = false", want: false, wantSet: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := t.TempDir()
+			workspace := filepath.Join(repo, "workspace")
+			mustMkdirAll(t, filepath.Join(workspace, "specs"))
+
+			configPath := filepath.Join(repo, "pituitary.toml")
+			writeFile(t, configPath, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`+tc.line+`
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Workspace.InferAppliesTo != tc.want {
+				t.Fatalf("InferAppliesTo = %v, want %v", cfg.Workspace.InferAppliesTo, tc.want)
+			}
+			if cfg.Workspace.InferAppliesToSet != tc.wantSet {
+				t.Fatalf("InferAppliesToSet = %v, want %v", cfg.Workspace.InferAppliesToSet, tc.wantSet)
+			}
+		})
+	}
+}
+
 func TestLoadResolvesMultiRepoSources(t *testing.T) {
 	t.Parallel()
 
@@ -1233,6 +1283,48 @@ func TestRenderRoundTripsSourceRole(t *testing.T) {
 	}
 	if got, want := loaded.Sources[0].Role, SourceRoleMirror; got != want {
 		t.Fatalf("loaded role = %q, want %q", got, want)
+	}
+}
+
+func TestRenderPreservesExplicitInferAppliesToFalse(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	cfg := &Config{
+		SchemaVersion: CurrentSchemaVersion,
+		ConfigPath:    configPath,
+		ConfigDir:     repo,
+		Workspace: Workspace{
+			Root:              ".",
+			IndexPath:         ".pituitary/pituitary.db",
+			InferAppliesTo:    false,
+			InferAppliesToSet: true,
+		},
+		Sources: []Source{
+			{
+				Name:    "specs",
+				Adapter: AdapterFilesystem,
+				Kind:    SourceKindSpecBundle,
+				Path:    "specs",
+			},
+		},
+	}
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if !strings.Contains(rendered, "infer_applies_to = false") {
+		t.Fatalf("rendered config %q does not preserve explicit infer_applies_to false", rendered)
+	}
+	loaded, err := LoadFromText(rendered, configPath)
+	if err != nil {
+		t.Fatalf("LoadFromText() error = %v", err)
+	}
+	if !loaded.Workspace.InferAppliesToSet || loaded.Workspace.InferAppliesTo {
+		t.Fatalf("loaded infer_applies_to = (%v, set=%v), want false set explicitly", loaded.Workspace.InferAppliesTo, loaded.Workspace.InferAppliesToSet)
 	}
 }
 

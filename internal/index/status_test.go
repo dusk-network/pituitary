@@ -330,6 +330,7 @@ func loadGovernanceHotspotFixtureConfig(tb testing.TB) *config.Config {
 [workspace]
 root = "%s"
 index_path = "%s"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

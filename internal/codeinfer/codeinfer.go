@@ -142,6 +142,20 @@ func Lookup(name string) (AppliesToInferer, bool) {
 	return factory(), true
 }
 
+// Registered reports whether an inferer factory is registered by name without
+// constructing an inferer instance.
+func Registered(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+
+	mu.RLock()
+	_, ok := inferers[name]
+	mu.RUnlock()
+	return ok
+}
+
 // RegisteredNames returns registered inferer names in stable order.
 func RegisteredNames() []string {
 	mu.RLock()

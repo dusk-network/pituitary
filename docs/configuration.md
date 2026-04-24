@@ -96,6 +96,8 @@ Pituitary keeps source paths repo-relative, adds `repo` to search/drift/impact/s
 
 Important path-resolution rule: `workspace.root` and `[[workspace.repos]].root` resolve relative to the config file's base directory, not the current working directory. That matters when you keep a scratch config outside the repo, for example `/tmp/pit-fake.toml` with `root = ".."`. In that case `..` resolves relative to `/tmp`, not relative to the shell directory where you invoked `pituitary`. If the resolved root is wrong, Pituitary now reports the derived absolute path in the validation error so the cause is visible immediately.
 
+AST-inferred `applies_to` links are enabled automatically when the loaded specs declare at least one `code://...` target. Set `workspace.infer_applies_to = false` to opt out, or `workspace.infer_applies_to = true` to force inference. When inference is enabled but the AST inferer is not registered, rebuild fails fast instead of silently producing a degraded index.
+
 ### Runtime Profiles
 
 Runtime config also supports reusable named profiles under `[runtime.profiles.<name>]`. Select one from `[runtime.embedder]` or `[runtime.analysis]` with `profile = "..."`, then override only the fields that differ:

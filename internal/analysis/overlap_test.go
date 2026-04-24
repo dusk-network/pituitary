@@ -153,6 +153,7 @@ func loadFixtureConfig(tb testing.TB) *config.Config {
 [workspace]
 root = "`+filepath.ToSlash(repoRoot)+`"
 index_path = "`+filepath.ToSlash(indexPath)+`"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

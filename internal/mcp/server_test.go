@@ -933,6 +933,7 @@ func writeMCPWorkspaceWithRuntime(t *testing.T, runtimeEmbedder string) string {
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+infer_applies_to = false
 
 `+strings.TrimSpace(runtimeEmbedder)+`
 

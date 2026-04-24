@@ -71,6 +71,7 @@ func TestRunBenchmarksCapturesAnalysisRuntimeTraffic(t *testing.T) {
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

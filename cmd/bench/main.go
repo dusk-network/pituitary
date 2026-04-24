@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/dusk-network/pituitary/extensions/astinfer"
 	"github.com/dusk-network/pituitary/internal/analysis"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/index"

@@ -117,7 +117,10 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	result := summarizeRebuild(records, dimension, reuseState, options)
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
-	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
+	result.InferAppliesToEnabled = effectiveInferAppliesTo(cfg, records.Specs)
+	if err := requireInfererRegistered(result.InferAppliesToEnabled); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -458,7 +461,8 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 		}
 	}
 
-	inferredCount, err := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, rebuildTimePtr)
+	inferAppliesToEnabled := effectiveInferAppliesTo(cfg, records.Specs)
+	inferredCount, err := inferASTEdgesContext(ctx, tx, edgeStmt, cfg, records.Specs, inferAppliesToEnabled, rebuildTimePtr)
 	if err != nil {
 		return fmt.Errorf("infer AST edges: %w", err)
 	}
@@ -486,7 +490,7 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 	if err := upsertMetadataContext(ctx, tx, "chunking_config_fingerprint", chunkingConfigFingerprint(cfg.Runtime.Chunking)); err != nil {
 		return err
 	}
-	if err := upsertMetadataContext(ctx, tx, "infer_applies_to_enabled", strconv.FormatBool(cfg.Workspace.InferAppliesTo)); err != nil {
+	if err := upsertMetadataContext(ctx, tx, "infer_applies_to_enabled", strconv.FormatBool(inferAppliesToEnabled)); err != nil {
 		return err
 	}
 	if manifest := sourceManifestJSON(cfg); manifest != "" {
@@ -514,7 +518,7 @@ func finalizeBusinessIndexContext(ctx context.Context, db *sql.DB, cfg *config.C
 
 	result.EdgeCount = edgeCount
 	result.InferredEdgeCount = inferredCount
-	result.InferAppliesToEnabled = cfg.Workspace.InferAppliesTo
+	result.InferAppliesToEnabled = inferAppliesToEnabled
 	return nil
 }
 
@@ -981,8 +985,8 @@ func chunkingConfigFingerprint(cfg config.ChunkingConfig) string {
 // inferASTEdgesContext asks the registered code inferer for inferred
 // applies_to edges and refreshed code-scan cache entries, then persists them
 // through the kernel-owned index transaction.
-func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord, validFrom *string) (int, error) {
-	if !cfg.Workspace.InferAppliesTo {
+func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord, inferAppliesToEnabled bool, validFrom *string) (int, error) {
+	if !inferAppliesToEnabled {
 		return 0, nil
 	}
 	workspaceRoot := cfg.Workspace.RootPath
@@ -1055,6 +1059,37 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 		count++
 	}
 	return count, nil
+}
+
+func effectiveInferAppliesTo(cfg *config.Config, specs []model.SpecRecord) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Workspace.InferAppliesToSet {
+		return cfg.Workspace.InferAppliesTo
+	}
+	if !specsDeclareCodeAppliesTo(specs) {
+		return false
+	}
+	return true
+}
+
+func requireInfererRegistered(inferAppliesToEnabled bool) error {
+	if !inferAppliesToEnabled || codeinfer.Registered(codeinfer.DefaultInfererName) {
+		return nil
+	}
+	return fmt.Errorf("infer_applies_to is enabled but code inferer %q is not registered", codeinfer.DefaultInfererName)
+}
+
+func specsDeclareCodeAppliesTo(specs []model.SpecRecord) bool {
+	for _, spec := range specs {
+		for _, ref := range spec.AppliesTo {
+			if strings.HasPrefix(strings.TrimSpace(ref), "code://") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeInferredCodePath(raw string) (string, error) {
