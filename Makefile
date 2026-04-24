@@ -33,6 +33,10 @@ vet:
 		echo 'internal/ must not import extensions/'; \
 		exit 1; \
 	}
+	@! grep -R --include='*.go' -n '"github.com/dusk-network/pituitary/internal/ast' internal/index/ internal/analysis/ >/dev/null || { \
+		echo 'internal/index and internal/analysis must not import internal/ast; use internal/codeinfer'; \
+		exit 1; \
+	}
 	$(GO) vet ./...
 
 analyze:

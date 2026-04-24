@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
@@ -347,7 +349,7 @@ func TestPrepareRebuildAcceptsSymlinkedStaleStagePathLikeRebuild(t *testing.T) {
 }
 
 func TestRebuildInfersASTEdges(t *testing.T) {
-	t.Parallel()
+	installCodeInfererForTest(t, testInferer{})
 
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
@@ -459,6 +461,190 @@ func NewSlidingWindowLimiter(w int) *SlidingWindowLimiter {
 	}
 }
 
+func TestRebuildErrorsWhenInferAppliesToEnabledWithoutRegisteredInferer(t *testing.T) {
+	restoreInferer := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, nil)
+	defer restoreInferer()
+
+	cfg, records := minimalInferAppliesToFixture(t, true)
+	_, err := Rebuild(cfg, records)
+	if err == nil {
+		t.Fatal("Rebuild() error = nil, want missing inferer error")
+	}
+	if !strings.Contains(err.Error(), `code inferer "ast" is not registered`) {
+		t.Fatalf("Rebuild() error = %q, want missing inferer message", err)
+	}
+}
+
+func TestRebuildRejectsInvalidInferencePaths(t *testing.T) {
+	cases := []struct {
+		name     string
+		inferer  codeinfer.AppliesToInferer
+		wantText string
+	}{
+		{
+			name:     "cache_absolute_path",
+			inferer:  invalidPathInferer{cachePath: "/tmp/outside.go"},
+			wantText: "invalid inferred cache path",
+		},
+		{
+			name:     "edge_uri_path",
+			inferer:  invalidPathInferer{edgePath: "code://src/limiter.go"},
+			wantText: "invalid inferred edge path",
+		},
+		{
+			name:     "edge_parent_traversal",
+			inferer:  invalidPathInferer{edgePath: "../outside.go"},
+			wantText: "invalid inferred edge path",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			installCodeInfererForTest(t, tc.inferer)
+
+			cfg, records := minimalInferAppliesToFixture(t, true)
+			_, err := Rebuild(cfg, records)
+			if err == nil {
+				t.Fatal("Rebuild() error = nil, want invalid path error")
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("Rebuild() error = %q, want substring %q", err, tc.wantText)
+			}
+		})
+	}
+}
+
+type testInferer struct{}
+
+func (testInferer) Name() string {
+	return codeinfer.DefaultInfererName
+}
+
+func (testInferer) InferAppliesTo(ctx context.Context, req codeinfer.Request) (*codeinfer.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, spec := range req.Specs {
+		if spec.Ref != "SPEC-042" || !strings.Contains(spec.BodyText, "SlidingWindowLimiter") {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(req.WorkspaceRoot, "src", "limiter.go")); err != nil {
+			return &codeinfer.Result{}, nil
+		}
+		return &codeinfer.Result{
+			CacheEntries: []codeinfer.CacheEntry{
+				{
+					ContentHash: "test-cache",
+					Path:        "src/limiter.go",
+					Symbols: []codeinfer.Symbol{
+						{Name: "SlidingWindowLimiter", Kind: codeinfer.SymbolType},
+					},
+				},
+			},
+			Edges: []codeinfer.InferredEdge{
+				{
+					SpecRef:   "SPEC-042",
+					FilePath:  "src/limiter.go",
+					MatchedOn: []string{"SlidingWindowLimiter"},
+				},
+			},
+		}, nil
+	}
+	return &codeinfer.Result{}, nil
+}
+
+type noopInferer struct{}
+
+func (noopInferer) Name() string {
+	return codeinfer.DefaultInfererName
+}
+
+func (noopInferer) InferAppliesTo(ctx context.Context, req codeinfer.Request) (*codeinfer.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return &codeinfer.Result{}, nil
+}
+
+type invalidPathInferer struct {
+	cachePath string
+	edgePath  string
+}
+
+func (invalidPathInferer) Name() string {
+	return codeinfer.DefaultInfererName
+}
+
+func (i invalidPathInferer) InferAppliesTo(ctx context.Context, req codeinfer.Request) (*codeinfer.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := &codeinfer.Result{}
+	if i.cachePath != "" {
+		result.CacheEntries = append(result.CacheEntries, codeinfer.CacheEntry{
+			ContentHash: "bad-cache",
+			Path:        i.cachePath,
+		})
+	}
+	if i.edgePath != "" {
+		result.Edges = append(result.Edges, codeinfer.InferredEdge{
+			SpecRef:  "SPEC-042",
+			FilePath: i.edgePath,
+		})
+	}
+	return result, nil
+}
+
+func installCodeInfererForTest(t testing.TB, inferer codeinfer.AppliesToInferer) {
+	t.Helper()
+	restore := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, func() codeinfer.AppliesToInferer {
+		return inferer
+	})
+	t.Cleanup(restore)
+}
+
+func minimalInferAppliesToFixture(t testing.TB, inferAppliesTo bool) (*config.Config, *source.LoadResult) {
+	t.Helper()
+
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
+	configPath := filepath.Join(dir, "pituitary.toml")
+	mustWriteFile(t, configPath, `
+[workspace]
+root = "`+filepath.ToSlash(dir)+`"
+index_path = "`+filepath.ToSlash(indexPath)+`"
+infer_applies_to = `+strconv.FormatBool(inferAppliesTo)+`
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig: %v", err)
+	}
+	return cfg, records
+}
+
 func TestPrepareRebuildReflectsInferAppliesToFromConfig(t *testing.T) {
 	t.Parallel()
 
@@ -524,7 +710,7 @@ body = "body.md"
 }
 
 func TestRebuildResultReflectsInferAppliesToFromConfig(t *testing.T) {
-	t.Parallel()
+	installCodeInfererForTest(t, noopInferer{})
 
 	cases := []struct {
 		name         string
@@ -538,8 +724,6 @@ func TestRebuildResultReflectsInferAppliesToFromConfig(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			dir := t.TempDir()
 			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
 

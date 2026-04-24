@@ -4,29 +4,23 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 )
 
-// RationaleKind classifies the type of rationale comment.
-type RationaleKind string
+type RationaleKind = codeinfer.RationaleKind
 
 const (
-	RationaleWhy       RationaleKind = "why"
-	RationaleRationale RationaleKind = "rationale"
-	RationaleNote      RationaleKind = "note"
-	RationaleHack      RationaleKind = "hack"
-	RationaleFixme     RationaleKind = "fixme"
-	RationaleTodo      RationaleKind = "todo"
-	RationaleDecision  RationaleKind = "decision"
+	RationaleWhy       = codeinfer.RationaleWhy
+	RationaleRationale = codeinfer.RationaleRationale
+	RationaleNote      = codeinfer.RationaleNote
+	RationaleHack      = codeinfer.RationaleHack
+	RationaleFixme     = codeinfer.RationaleFixme
+	RationaleTodo      = codeinfer.RationaleTodo
+	RationaleDecision  = codeinfer.RationaleDecision
 )
 
-// Rationale is a structured comment extracted from a source file that
-// documents a deliberate decision or known deviation.
-type Rationale struct {
-	Kind          RationaleKind `json:"kind"`
-	Text          string        `json:"text"`
-	Line          int           `json:"line"`
-	NearestSymbol string        `json:"nearest_symbol,omitempty"`
-}
+type Rationale = codeinfer.Rationale
 
 // tagPatterns match explicit rationale tags at the start of a comment.
 var tagPatterns = []struct {

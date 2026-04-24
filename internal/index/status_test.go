@@ -54,7 +54,7 @@ func TestReadStatusReadsFixtureCounts(t *testing.T) {
 }
 
 func TestReadStatusReportsInferAppliesToEnabled(t *testing.T) {
-	t.Parallel()
+	installCodeInfererForTest(t, noopInferer{})
 
 	cases := []struct {
 		name     string
@@ -67,8 +67,6 @@ func TestReadStatusReportsInferAppliesToEnabled(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			dir := t.TempDir()
 			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
 

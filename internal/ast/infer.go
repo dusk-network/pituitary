@@ -4,21 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 )
 
-// SpecSummary is the minimal spec data needed for inference matching.
-type SpecSummary struct {
-	Ref             string
-	Body            string
-	ManualAppliesTo []string // existing manual applies_to refs (e.g. "code://path")
-}
+type SpecSummary = codeinfer.SpecInput
 
-// InferredEdge is one inferred applies_to link from a spec to a code file.
-type InferredEdge struct {
-	SpecRef   string   `json:"spec_ref"`
-	FilePath  string   `json:"file_path"`
-	MatchedOn []string `json:"matched_on"`
-}
+type InferredEdge = codeinfer.InferredEdge
 
 // FileSymbols pairs a file path with its content hash and extracted symbols.
 type FileSymbols struct {
@@ -52,7 +44,7 @@ func InferEdges(fileSymbols map[string][]Symbol, specs []SpecSummary) []Inferred
 	var edges []InferredEdge
 	for _, spec := range specs {
 		manualSet := manualPathSet(spec.ManualAppliesTo)
-		specIdentifiers := ScanSpecIdentifiers(spec.Body)
+		specIdentifiers := ScanSpecIdentifiers(spec.BodyText)
 
 		// Track matches per file path.
 		fileMatches := make(map[string][]string)

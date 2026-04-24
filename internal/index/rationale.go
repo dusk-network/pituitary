@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dusk-network/pituitary/internal/ast"
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 )
 
 // FileRationale holds rationale entries for one code file.
 type FileRationale struct {
-	Path      string          `json:"path"`
-	Rationale []ast.Rationale `json:"rationale"`
+	Path      string                `json:"path"`
+	Rationale []codeinfer.Rationale `json:"rationale"`
 }
 
 // QueryRationaleContext returns rationale entries for the given file paths
@@ -59,7 +59,7 @@ func QueryRationaleContext(ctx context.Context, dbPath string, paths []string) (
 		if err := rows.Scan(&path, &rationaleJSON); err != nil {
 			return nil, fmt.Errorf("scan rationale: %w", err)
 		}
-		var rationale []ast.Rationale
+		var rationale []codeinfer.Rationale
 		if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
 			return nil, fmt.Errorf("decode rationale_json for path %q: %w", path, err)
 		}
@@ -71,8 +71,8 @@ func QueryRationaleContext(ctx context.Context, dbPath string, paths []string) (
 }
 
 // queryRationaleDBContext queries rationale from an already-open database connection.
-func queryRationaleDBContext(ctx context.Context, db *sql.DB, paths []string) (map[string][]ast.Rationale, error) {
-	result := make(map[string][]ast.Rationale)
+func queryRationaleDBContext(ctx context.Context, db *sql.DB, paths []string) (map[string][]codeinfer.Rationale, error) {
+	result := make(map[string][]codeinfer.Rationale)
 	if len(paths) == 0 {
 		return result, nil
 	}
@@ -106,7 +106,7 @@ func queryRationaleDBContext(ctx context.Context, db *sql.DB, paths []string) (m
 		if err := rows.Scan(&path, &rationaleJSON); err != nil {
 			continue
 		}
-		var rationale []ast.Rationale
+		var rationale []codeinfer.Rationale
 		if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
 			continue
 		}

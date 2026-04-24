@@ -20,12 +20,12 @@ func TestInferEdges(t *testing.T) {
 	specs := []SpecSummary{
 		{
 			Ref:             "SPEC-042",
-			Body:            "This spec governs the SlidingWindowLimiter. Use NewSlidingWindowLimiter to create instances.",
+			BodyText:        "This spec governs the SlidingWindowLimiter. Use NewSlidingWindowLimiter to create instances.",
 			ManualAppliesTo: []string{"code://src/api/middleware/ratelimiter.go"},
 		},
 		{
-			Ref:  "SPEC-099",
-			Body: "The ConfigStore handles all runtime configuration loading.",
+			Ref:      "SPEC-099",
+			BodyText: "The ConfigStore handles all runtime configuration loading.",
 		},
 	}
 
@@ -56,7 +56,7 @@ func TestInferEdgesSkipsShortSymbols(t *testing.T) {
 		},
 	}
 	specs := []SpecSummary{
-		{Ref: "SPEC-001", Body: "Run the main loop."},
+		{Ref: "SPEC-001", BodyText: "Run the main loop."},
 	}
 
 	edges := InferEdges(fileSymbols, specs)
@@ -75,8 +75,8 @@ func TestInferEdgesMultipleSpecsSameFile(t *testing.T) {
 		},
 	}
 	specs := []SpecSummary{
-		{Ref: "SPEC-A", Body: "The AuthHandler validates tokens."},
-		{Ref: "SPEC-B", Body: "The TokenValidator checks expiry."},
+		{Ref: "SPEC-A", BodyText: "The AuthHandler validates tokens."},
+		{Ref: "SPEC-B", BodyText: "The TokenValidator checks expiry."},
 	}
 
 	edges := InferEdges(fileSymbols, specs)

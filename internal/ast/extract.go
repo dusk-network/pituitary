@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 	"github.com/odvcencio/gotreesitter"
 )
 
@@ -13,21 +14,16 @@ import (
 // goroutine-safe, even through ParserPool.
 var parserMu sync.Mutex
 
-// SymbolKind classifies an extracted code symbol.
-type SymbolKind string
+type SymbolKind = codeinfer.SymbolKind
 
 const (
-	SymbolFunction SymbolKind = "function"
-	SymbolMethod   SymbolKind = "method"
-	SymbolType     SymbolKind = "type"
-	SymbolImport   SymbolKind = "import"
+	SymbolFunction = codeinfer.SymbolFunction
+	SymbolMethod   = codeinfer.SymbolMethod
+	SymbolType     = codeinfer.SymbolType
+	SymbolImport   = codeinfer.SymbolImport
 )
 
-// Symbol is a named code element extracted from a source file via tree-sitter.
-type Symbol struct {
-	Name string     `json:"name"`
-	Kind SymbolKind `json:"kind"`
-}
+type Symbol = codeinfer.Symbol
 
 // queryPatterns maps each language to its tree-sitter query for symbol extraction.
 var queryPatterns = map[LangID]string{
