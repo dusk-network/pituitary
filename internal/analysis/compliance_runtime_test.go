@@ -114,6 +114,7 @@ func HandleCreate() {
 [workspace]
 root = %q
 index_path = %q
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

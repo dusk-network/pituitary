@@ -179,19 +179,9 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		})
 	}
 
-	currentInferAppliesTo := strconv.FormatBool(cfg.Workspace.InferAppliesTo)
-	switch stored := strings.TrimSpace(metadata["infer_applies_to_enabled"]); {
-	case stored == "":
-		// Legacy indexes without the metadata key predate the visibility fix;
-		// treat the absence as not-a-mismatch rather than flagging every
-		// pre-existing index as incompatible. A subsequent rebuild fills it in.
-	case !strings.EqualFold(stored, currentInferAppliesTo):
-		issues = append(issues, FreshnessIssue{
-			Kind:    "infer_applies_to_mismatch",
-			Message: fmt.Sprintf("index infer_applies_to %q does not match current workspace infer_applies_to %q; --update cannot regenerate inferred edges, run `pituitary index --rebuild`", stored, currentInferAppliesTo),
-			Indexed: stored,
-			Current: currentInferAppliesTo,
-		})
+	storedInferAppliesTo := strings.TrimSpace(metadata["infer_applies_to_enabled"])
+	if cfg.Workspace.InferAppliesToSet {
+		issues = appendInferAppliesToFreshnessIssue(issues, storedInferAppliesTo, cfg.Workspace.InferAppliesTo)
 	}
 
 	switch stored := strings.TrimSpace(metadata["source_fingerprint"]); {
@@ -224,6 +214,9 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 	if err != nil {
 		return nil, fmt.Errorf("load current sources for freshness check: %w", err)
 	}
+	if !cfg.Workspace.InferAppliesToSet {
+		issues = appendInferAppliesToFreshnessIssue(issues, storedInferAppliesTo, effectiveInferAppliesTo(cfg, records.Specs))
+	}
 	currentContentFingerprint := contentFingerprint(records)
 
 	switch stored := strings.TrimSpace(metadata["content_fingerprint"]); {
@@ -245,6 +238,24 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 	status.State = deriveFreshnessState(issues)
 	status.Action = freshnessAction(status.State)
 	return status, nil
+}
+
+func appendInferAppliesToFreshnessIssue(issues []FreshnessIssue, stored string, current bool) []FreshnessIssue {
+	currentInferAppliesTo := strconv.FormatBool(current)
+	switch {
+	case stored == "":
+		// Legacy indexes without the metadata key predate the visibility fix;
+		// treat the absence as not-a-mismatch rather than flagging every
+		// pre-existing index as incompatible. A subsequent rebuild fills it in.
+	case !strings.EqualFold(stored, currentInferAppliesTo):
+		issues = append(issues, FreshnessIssue{
+			Kind:    "infer_applies_to_mismatch",
+			Message: fmt.Sprintf("index infer_applies_to %q does not match current effective workspace infer_applies_to %q; --update cannot regenerate inferred edges, run `pituitary index --rebuild`", stored, currentInferAppliesTo),
+			Indexed: stored,
+			Current: currentInferAppliesTo,
+		})
+	}
+	return issues
 }
 
 func freshnessAction(state string) string {

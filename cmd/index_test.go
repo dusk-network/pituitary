@@ -110,13 +110,12 @@ domain_pointer = "/meta/domain"
 	}
 }
 
-func TestRunIndexInfersASTEdgesThroughRegisteredExtension(t *testing.T) {
+func TestRunIndexDefaultsASTInferenceThroughRegisteredExtension(t *testing.T) {
 	repo := t.TempDir()
 	mustWriteIndexFixture(t, repo, `
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
-infer_applies_to = true
 
 [runtime.embedder]
 provider = "fixture"
@@ -136,6 +135,7 @@ status = "accepted"
 domain = "api"
 authors = ["test"]
 body = "body.md"
+applies_to = ["code://src/manual.go"]
 `)
 	mustWriteFileCmd(t, filepath.Join(repo, "specs", "rate-limit", "body.md"), `## Overview
 

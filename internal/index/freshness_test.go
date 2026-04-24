@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
 )
@@ -356,6 +357,71 @@ body = "body.md"
 	}
 }
 
+func TestInspectFreshnessComparesEffectiveDefaultInferAppliesTo(t *testing.T) {
+	installCodeInfererForTest(t, noopInferer{})
+
+	cfg, records := inferAppliesToFixture(t, "false", true)
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	mustWriteFile(t, cfg.ConfigPath, `
+[workspace]
+root = "`+filepath.ToSlash(cfg.Workspace.RootPath)+`"
+index_path = "`+filepath.ToSlash(cfg.Workspace.ResolvedIndexPath)+`"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	cfg2, err := config.Load(cfg.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	status, err := InspectFreshnessContext(context.Background(), cfg2)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if status.State != freshnessStateIncompatible {
+		t.Fatalf("freshness.state = %q, want %q", status.State, freshnessStateIncompatible)
+	}
+	if len(status.Issues) == 0 || status.Issues[0].Kind != "infer_applies_to_mismatch" {
+		t.Fatalf("freshness.issues = %+v, want infer_applies_to_mismatch", status.Issues)
+	}
+	if status.Issues[0].Current != "true" {
+		t.Fatalf("freshness current infer_applies_to = %q, want true", status.Issues[0].Current)
+	}
+}
+
+func TestInspectFreshnessDefaultInferAppliesToDoesNotDependOnRegisteredInferer(t *testing.T) {
+	restoreInferer := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, func() codeinfer.AppliesToInferer {
+		return noopInferer{}
+	})
+	cfg, records := inferAppliesToFixture(t, "", true)
+	if _, err := Rebuild(cfg, records); err != nil {
+		restoreInferer()
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	restoreInferer()
+	restoreMissingInferer := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, nil)
+	defer restoreMissingInferer()
+
+	status, err := InspectFreshnessContext(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("InspectFreshnessContext() error = %v", err)
+	}
+	if status.State != freshnessStateFresh {
+		t.Fatalf("freshness.state = %q, want %q; issues=%+v", status.State, freshnessStateFresh, status.Issues)
+	}
+}
+
 func loadFreshnessFixtureConfig(tb testing.TB) *config.Config {
 	tb.Helper()
 
@@ -369,6 +435,7 @@ func loadFreshnessFixtureConfig(tb testing.TB) *config.Config {
 [workspace]
 root = "."
 index_path = ".pituitary/pituitary.db"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"

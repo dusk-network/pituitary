@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -475,6 +476,82 @@ func TestRebuildErrorsWhenInferAppliesToEnabledWithoutRegisteredInferer(t *testi
 	}
 }
 
+func TestRebuildDefaultsInferAppliesToOnForCodeTargetsWhenInfererRegistered(t *testing.T) {
+	installCodeInfererForTest(t, testInferer{})
+
+	cfg, records := inferAppliesToFixture(t, "", true)
+	result, err := Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if !result.InferAppliesToEnabled {
+		t.Fatal("result.InferAppliesToEnabled = false, want true")
+	}
+	if result.InferredEdgeCount == 0 {
+		t.Fatal("result.InferredEdgeCount = 0, want inferred edge")
+	}
+
+	db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "infer_applies_to_enabled", "true")
+	var cacheCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ast_cache`).Scan(&cacheCount); err != nil {
+		t.Fatalf("count ast_cache: %v", err)
+	}
+	if cacheCount == 0 {
+		t.Fatal("ast_cache count = 0, want cache rows from registered inferer")
+	}
+}
+
+func TestRebuildDefaultInferAppliesToErrorsForCodeTargetsWithoutRegisteredInferer(t *testing.T) {
+	restoreInferer := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, nil)
+	defer restoreInferer()
+
+	cfg, records := inferAppliesToFixture(t, "", true)
+	_, err := Rebuild(cfg, records)
+	if err != nil {
+		if !strings.Contains(err.Error(), `code inferer "ast" is not registered`) {
+			t.Fatalf("Rebuild() error = %q, want missing inferer message", err)
+		}
+		return
+	}
+	t.Fatal("Rebuild() error = nil, want missing inferer error")
+}
+
+func TestRebuildDefaultNoCodeTargetsDoesNotCallRegisteredInferer(t *testing.T) {
+	installCodeInfererForTest(t, unexpectedInferer{})
+
+	cfg, records := inferAppliesToFixture(t, "", false)
+	result, err := Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if result.InferAppliesToEnabled {
+		t.Fatal("result.InferAppliesToEnabled = true, want false")
+	}
+
+	db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "infer_applies_to_enabled", "false")
+}
+
+func TestRebuildExplicitInferAppliesToFalseSuppressesCodeTargetDefault(t *testing.T) {
+	installCodeInfererForTest(t, unexpectedInferer{})
+
+	cfg, records := inferAppliesToFixture(t, "false", true)
+	result, err := Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if result.InferAppliesToEnabled {
+		t.Fatal("result.InferAppliesToEnabled = true, want false")
+	}
+
+	db := mustOpenReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "infer_applies_to_enabled", "false")
+}
+
 func TestRebuildRejectsInvalidInferencePaths(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -566,6 +643,19 @@ func (noopInferer) InferAppliesTo(ctx context.Context, req codeinfer.Request) (*
 	return &codeinfer.Result{}, nil
 }
 
+type unexpectedInferer struct{}
+
+func (unexpectedInferer) Name() string {
+	return codeinfer.DefaultInfererName
+}
+
+func (unexpectedInferer) InferAppliesTo(ctx context.Context, req codeinfer.Request) (*codeinfer.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("inferer should not be called")
+}
+
 type invalidPathInferer struct {
 	cachePath string
 	edgePath  string
@@ -606,14 +696,24 @@ func installCodeInfererForTest(t testing.TB, inferer codeinfer.AppliesToInferer)
 func minimalInferAppliesToFixture(t testing.TB, inferAppliesTo bool) (*config.Config, *source.LoadResult) {
 	t.Helper()
 
+	return inferAppliesToFixture(t, strconv.FormatBool(inferAppliesTo), false)
+}
+
+func inferAppliesToFixture(t testing.TB, inferAppliesToFlag string, codeTarget bool) (*config.Config, *source.LoadResult) {
+	t.Helper()
+
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
 	configPath := filepath.Join(dir, "pituitary.toml")
+	flagLine := ""
+	if strings.TrimSpace(inferAppliesToFlag) != "" {
+		flagLine = "infer_applies_to = " + strings.TrimSpace(inferAppliesToFlag) + "\n"
+	}
 	mustWriteFile(t, configPath, `
 [workspace]
 root = "`+filepath.ToSlash(dir)+`"
 index_path = "`+filepath.ToSlash(indexPath)+`"
-infer_applies_to = `+strconv.FormatBool(inferAppliesTo)+`
+`+flagLine+`
 
 [runtime.embedder]
 provider = "fixture"
@@ -631,8 +731,18 @@ status = "accepted"
 domain = "api"
 authors = ["test"]
 body = "body.md"
+`+specAppliesToLine(codeTarget)+`
 `)
-	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), "body text\n")
+	mustWriteFile(t, filepath.Join(dir, "specs", "rate-limit", "body.md"), `## Overview
+
+This spec governs the SlidingWindowLimiter implementation.
+`)
+	mustWriteFile(t, filepath.Join(dir, "src", "limiter.go"), `package limiter
+
+type SlidingWindowLimiter struct {
+	window int
+}
+`)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -645,8 +755,15 @@ body = "body.md"
 	return cfg, records
 }
 
+func specAppliesToLine(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return `applies_to = ["code://src/manual.go"]`
+}
+
 func TestPrepareRebuildReflectsInferAppliesToFromConfig(t *testing.T) {
-	t.Parallel()
+	installCodeInfererForTest(t, noopInferer{})
 
 	cases := []struct {
 		name     string
@@ -659,8 +776,6 @@ func TestPrepareRebuildReflectsInferAppliesToFromConfig(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			dir := t.TempDir()
 			indexPath := filepath.Join(dir, ".pituitary", "pituitary.db")
 
@@ -706,6 +821,33 @@ body = "body.md"
 				t.Errorf("PrepareRebuild result.InferAppliesToEnabled = %v, want %v", result.InferAppliesToEnabled, tc.want)
 			}
 		})
+	}
+}
+
+func TestPrepareRebuildDefaultsInferAppliesToFromCodeTargets(t *testing.T) {
+	installCodeInfererForTest(t, noopInferer{})
+
+	cfg, records := inferAppliesToFixture(t, "", true)
+	result, err := PrepareRebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("PrepareRebuild() error = %v", err)
+	}
+	if !result.InferAppliesToEnabled {
+		t.Fatal("PrepareRebuild result.InferAppliesToEnabled = false, want true")
+	}
+}
+
+func TestPrepareRebuildDefaultInferAppliesToErrorsForCodeTargetsWithoutRegisteredInferer(t *testing.T) {
+	restoreInferer := codeinfer.ReplaceForTest(codeinfer.DefaultInfererName, nil)
+	defer restoreInferer()
+
+	cfg, records := inferAppliesToFixture(t, "", true)
+	_, err := PrepareRebuild(cfg, records)
+	if err == nil {
+		t.Fatal("PrepareRebuild() error = nil, want missing inferer error")
+	}
+	if !strings.Contains(err.Error(), `code inferer "ast" is not registered`) {
+		t.Fatalf("PrepareRebuild() error = %q, want missing inferer message", err)
 	}
 }
 
@@ -796,6 +938,7 @@ func loadFixtureConfigWithIndexPath(tb testing.TB, indexPath string) *config.Con
 [workspace]
 root = "`+filepath.ToSlash(repoRoot)+`"
 index_path = "`+filepath.ToSlash(indexPath)+`"
+infer_applies_to = false
 
 [runtime.embedder]
 provider = "fixture"
