@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/index"
 )
 
 func TestRunIndexValidatesConfig(t *testing.T) {
@@ -106,6 +107,66 @@ domain_pointer = "/meta/domain"
 	}
 	if _, err := os.Stat(filepath.Join(repo, ".pituitary", "pituitary.db")); err != nil {
 		t.Fatalf("runIndex() did not create database: %v", err)
+	}
+}
+
+func TestRunIndexInfersASTEdgesThroughRegisteredExtension(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteIndexFixture(t, repo, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+infer_applies_to = true
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+timeout_ms = 1000
+max_retries = 0
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "rate-limit", "spec.toml"), `id = "SPEC-042"
+title = "Rate Limiting"
+status = "accepted"
+domain = "api"
+authors = ["test"]
+body = "body.md"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "rate-limit", "body.md"), `## Overview
+
+This spec governs SlidingWindowLimiter.
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "src", "limiter.go"), `package limiter
+
+type SlidingWindowLimiter struct {
+	window int
+}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runIndex([]string{"--rebuild"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runIndex() exit code = %d, want 0 (stderr: %q)", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "inference: enabled (1 inferred edge(s))") {
+		t.Fatalf("runIndex() output %q does not contain inferred edge summary", stdout.String())
+	}
+
+	result, err := index.GovernedByContext(t.Context(), filepath.Join(repo, ".pituitary", "pituitary.db"), "src/limiter.go", "", "")
+	if err != nil {
+		t.Fatalf("GovernedByContext() error = %v", err)
+	}
+	if len(result.Specs) != 1 || result.Specs[0].Ref != "SPEC-042" || result.Specs[0].Source != "inferred" {
+		t.Fatalf("governed-by specs = %+v, want inferred SPEC-042", result.Specs)
 	}
 }
 

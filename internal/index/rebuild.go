@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dusk-network/pituitary/internal/ast"
 	pchunk "github.com/dusk-network/pituitary/internal/chunk"
+	"github.com/dusk-network/pituitary/internal/codeinfer"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
@@ -978,9 +978,9 @@ func chunkingConfigFingerprint(cfg config.ChunkingConfig) string {
 	return fingerprint(parts)
 }
 
-// inferASTEdgesContext walks the workspace for code files, extracts symbols via
-// tree-sitter, matches them against spec body text, and inserts inferred
-// applies_to edges into the staging database.
+// inferASTEdgesContext asks the registered code inferer for inferred
+// applies_to edges and refreshed code-scan cache entries, then persists them
+// through the kernel-owned index transaction.
 func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, cfg *config.Config, specs []model.SpecRecord, validFrom *string) (int, error) {
 	if !cfg.Workspace.InferAppliesTo {
 		return 0, nil
@@ -989,96 +989,64 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	if workspaceRoot == "" {
 		return 0, nil
 	}
+	inferer, ok := codeinfer.Lookup(codeinfer.DefaultInfererName)
+	if !ok {
+		return 0, fmt.Errorf("infer_applies_to is enabled but code inferer %q is not registered", codeinfer.DefaultInfererName)
+	}
 
-	// Quick check: if no spec body contains matchable identifiers, skip the
-	// expensive filesystem walk and tree-sitter parsing entirely.
-	hasMatchable := false
-	for _, spec := range specs {
-		if len(ast.ScanSpecIdentifiers(spec.BodyText)) > 0 {
-			hasMatchable = true
-			break
+	specInputs := make([]codeinfer.SpecInput, len(specs))
+	for i, spec := range specs {
+		specInputs[i] = codeinfer.SpecInput{
+			Ref:             spec.Ref,
+			BodyText:        spec.BodyText,
+			ManualAppliesTo: spec.AppliesTo,
 		}
 	}
-	if !hasMatchable {
-		return 0, nil
-	}
 
-	codePaths, err := ast.WalkWorkspace(workspaceRoot)
+	result, err := inferer.InferAppliesTo(ctx, codeinfer.Request{
+		WorkspaceRoot: workspaceRoot,
+		Specs:         specInputs,
+		PreviousCache: loadCachedASTData(ctx, cfg.Workspace.ResolvedIndexPath),
+		Limits: codeinfer.Limits{
+			MaxFileSizeBytes: 1 << 20,
+		},
+	})
 	if err != nil {
-		return 0, fmt.Errorf("walk workspace for AST extraction: %w", err)
+		return 0, err
 	}
-	if len(codePaths) == 0 {
+	if result == nil {
 		return 0, nil
 	}
 
-	// Prepare cache insert statement.
 	cacheStmt, err := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO ast_cache (content_hash, path, symbols_json, rationale_json) VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare ast_cache insert: %w", err)
 	}
 	defer cacheStmt.Close()
 
-	// Load cached symbols from the previous index if available.
-	cachedData := loadCachedASTData(ctx, cfg.Workspace.ResolvedIndexPath)
-
-	// Extract symbols and rationale from each code file.
-	const maxFileSize = 1 << 20 // 1 MB — skip minified bundles and generated files
-	fileSymbols := make(map[string][]ast.Symbol, len(codePaths))
-	for _, relPath := range codePaths {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		fullPath := filepath.Join(workspaceRoot, relPath)
-		info, err := os.Stat(fullPath)
-		if err != nil || info.Size() > maxFileSize {
-			continue
-		}
-		content, err := os.ReadFile(fullPath)
+	for _, entry := range result.CacheEntries {
+		normalizedPath, err := normalizeInferredCodePath(entry.Path)
 		if err != nil {
-			continue
+			return 0, fmt.Errorf("invalid inferred cache path %q: %w", entry.Path, err)
 		}
-
-		hash := ast.ContentHash(content, relPath)
-
-		// Check cache first.
-		if cached, ok := cachedData[hash]; ok {
-			fileSymbols[relPath] = cached.Symbols
-			if err := insertASTCacheWithRationale(ctx, cacheStmt, hash, relPath, cached.Symbols, cached.Rationale); err != nil {
-				return 0, err
-			}
-			continue
+		if strings.TrimSpace(entry.ContentHash) == "" {
+			return 0, fmt.Errorf("invalid inferred cache path %q: content hash is required", entry.Path)
 		}
-
-		lang := ast.DetectLanguage(relPath)
-		if lang == "" {
-			continue
-		}
-		symbols, err := ast.ExtractSymbols(content, lang)
-		if err != nil {
-			continue
-		}
-		rationale := ast.ExtractRationale(content, symbols, lang)
-		fileSymbols[relPath] = symbols
-		if err := insertASTCacheWithRationale(ctx, cacheStmt, hash, relPath, symbols, rationale); err != nil {
+		if err := insertASTCacheWithRationale(ctx, cacheStmt, entry.ContentHash, normalizedPath, entry.Symbols, entry.Rationale); err != nil {
 			return 0, err
 		}
 	}
 
-	// Build spec summaries for matching.
-	specSummaries := make([]ast.SpecSummary, len(specs))
-	for i, spec := range specs {
-		specSummaries[i] = ast.SpecSummary{
-			Ref:             spec.Ref,
-			Body:            spec.BodyText,
-			ManualAppliesTo: spec.AppliesTo,
-		}
-	}
-
-	// Run inference and insert edges.
-	inferred := ast.InferEdges(fileSymbols, specSummaries)
 	count := 0
-	for _, edge := range inferred {
-		ref := "code://" + edge.FilePath
+	for _, edge := range result.Edges {
+		if strings.TrimSpace(edge.SpecRef) == "" {
+			return count, fmt.Errorf("invalid inferred edge: spec ref is required")
+		}
+		normalizedPath, err := normalizeInferredCodePath(edge.FilePath)
+		if err != nil {
+			return count, fmt.Errorf("invalid inferred edge path %q: %w", edge.FilePath, err)
+		}
+		ref := "code://" + normalizedPath
 		if err := insertEdgeContext(ctx, edgeStmt, edge.SpecRef, ref, "applies_to", "inferred", validFrom, nil, ConfidenceInferred); err != nil {
 			// INSERT OR IGNORE means duplicate-key errors won't happen,
 			// but handle unexpected errors.
@@ -1089,14 +1057,32 @@ func inferASTEdgesContext(ctx context.Context, tx *sql.Tx, edgeStmt *sql.Stmt, c
 	return count, nil
 }
 
-// cachedASTEntry holds both symbols and rationale from the ast_cache.
-type cachedASTEntry struct {
-	Symbols   []ast.Symbol
-	Rationale []ast.Rationale
+func normalizeInferredCodePath(raw string) (string, error) {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if strings.Contains(path, "://") {
+		return "", fmt.Errorf("path must be workspace-relative, not a URI")
+	}
+	if strings.Contains(path, ":") {
+		return "", fmt.Errorf("path must be a slash-separated workspace path")
+	}
+	if strings.Contains(path, `\`) {
+		return "", fmt.Errorf("path must use slash separators")
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("path must be workspace-relative, not absolute")
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("path must stay within the workspace")
+	}
+	return cleaned, nil
 }
 
-func loadCachedASTData(ctx context.Context, indexPath string) map[string]cachedASTEntry {
-	result := make(map[string]cachedASTEntry)
+func loadCachedASTData(ctx context.Context, indexPath string) []codeinfer.CacheEntry {
+	result := []codeinfer.CacheEntry{}
 	if indexPath == "" {
 		return result
 	}
@@ -1123,9 +1109,9 @@ func loadCachedASTData(ctx context.Context, indexPath string) map[string]cachedA
 		hasRationale = true
 	}
 
-	query := `SELECT content_hash, symbols_json FROM ast_cache`
+	query := `SELECT content_hash, path, symbols_json FROM ast_cache`
 	if hasRationale {
-		query = `SELECT content_hash, symbols_json, rationale_json FROM ast_cache`
+		query = `SELECT content_hash, path, symbols_json, rationale_json FROM ast_cache`
 	}
 
 	rows, err := db.QueryContext(ctx, query)
@@ -1134,39 +1120,44 @@ func loadCachedASTData(ctx context.Context, indexPath string) map[string]cachedA
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var hash, symbolsJSON string
+		var hash, path, symbolsJSON string
 		var rationaleJSON string
 		var scanErr error
 		if hasRationale {
-			scanErr = rows.Scan(&hash, &symbolsJSON, &rationaleJSON)
+			scanErr = rows.Scan(&hash, &path, &symbolsJSON, &rationaleJSON)
 		} else {
-			scanErr = rows.Scan(&hash, &symbolsJSON)
+			scanErr = rows.Scan(&hash, &path, &symbolsJSON)
 		}
 		if scanErr != nil {
 			continue
 		}
-		var symbols []ast.Symbol
+		var symbols []codeinfer.Symbol
 		if err := json.Unmarshal([]byte(symbolsJSON), &symbols); err != nil {
 			continue
 		}
-		var rationale []ast.Rationale
+		var rationale []codeinfer.Rationale
 		if rationaleJSON != "" {
 			if err := json.Unmarshal([]byte(rationaleJSON), &rationale); err != nil {
 				continue
 			}
 		}
-		result[hash] = cachedASTEntry{Symbols: symbols, Rationale: rationale}
+		result = append(result, codeinfer.CacheEntry{
+			ContentHash: hash,
+			Path:        path,
+			Symbols:     symbols,
+			Rationale:   rationale,
+		})
 	}
 	return result
 }
 
-func insertASTCacheWithRationale(ctx context.Context, stmt *sql.Stmt, hash, path string, symbols []ast.Symbol, rationale []ast.Rationale) error {
+func insertASTCacheWithRationale(ctx context.Context, stmt *sql.Stmt, hash, path string, symbols []codeinfer.Symbol, rationale []codeinfer.Rationale) error {
 	symbolData, err := json.Marshal(symbols)
 	if err != nil {
 		return fmt.Errorf("marshal AST symbols for cache: %w", err)
 	}
 	if rationale == nil {
-		rationale = []ast.Rationale{}
+		rationale = []codeinfer.Rationale{}
 	}
 	rationaleData, err := json.Marshal(rationale)
 	if err != nil {
