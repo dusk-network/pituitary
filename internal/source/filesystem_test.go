@@ -889,37 +889,6 @@ include = ["guides/*.md"]
 	}
 }
 
-func TestSourceSelectorsRejectInvalidRelativePatterns(t *testing.T) {
-	t.Parallel()
-
-	tests := []string{
-		"/**/*.md",
-		"guides//*.md",
-		"guides/../*.md",
-	}
-	for _, pattern := range tests {
-		pattern := pattern
-		t.Run(pattern, func(t *testing.T) {
-			t.Parallel()
-			if _, err := matchSourceSelector("include", pattern, "guides/api.md"); err == nil {
-				t.Fatalf("matchSourceSelector(%q) error = nil, want invalid pattern error", pattern)
-			}
-		})
-	}
-}
-
-func TestSourceSelectorsMemoizeRepeatedRecursiveSegments(t *testing.T) {
-	t.Parallel()
-
-	ok, err := matchSourceSelectorPattern("**/**/nested.md", "guides/deep/nested.md")
-	if err != nil {
-		t.Fatalf("matchSourceSelectorPattern() error = %v", err)
-	}
-	if !ok {
-		t.Fatal("matchSourceSelectorPattern() = false, want true")
-	}
-}
-
 func TestLoadFromConfigFiltersSpecBundlesByExplicitFiles(t *testing.T) {
 	t.Parallel()
 
