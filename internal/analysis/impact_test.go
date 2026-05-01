@@ -63,6 +63,38 @@ func TestAnalyzeImpactFindsDependentSpecsRefsAndDocs(t *testing.T) {
 	}
 }
 
+func TestAnalyzeImpactIncludesOutgoingRelatesToSpecs(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := AnalyzeImpact(cfg, AnalyzeImpactRequest{
+		SpecRef:    "SPEC-055",
+		ChangeType: "accepted",
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeImpact() error = %v", err)
+	}
+
+	for _, spec := range result.AffectedSpecs {
+		if spec.Ref != "SPEC-008" {
+			continue
+		}
+		if got, want := spec.Relationship, string(model.RelationRelatesTo); got != want {
+			t.Fatalf("SPEC-008 relationship = %q, want %q", got, want)
+		}
+		return
+	}
+	t.Fatalf("affected specs = %+v, want SPEC-008 from SPEC-055 relates_to edge", result.AffectedSpecs)
+}
+
 func TestAnalyzeImpactSupportsDraftSpecRecord(t *testing.T) {
 	t.Parallel()
 

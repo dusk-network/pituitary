@@ -71,6 +71,13 @@ path = "rfcs"
 include = ["**/*.md"]
 ```
 
+Filesystem source selectors use slash-separated paths relative to the source
+`path`. Selectors must not start with `/` or contain empty, `.`, or `..` path
+segments. `files` is an explicit allow-list, while `include` and `exclude` are
+glob selectors: `*` matches within one path segment (`guides/*.md`), and `**`
+matches zero or more whole path segments (`**/*.md` includes root-level and
+nested Markdown files).
+
 `workspace.root` is the primary repo root for the logical workspace. For cross-repo analysis, name it with `workspace.repo_id`, declare additional roots under `[[workspace.repos]]`, and bind a source to a secondary root with `repo = "..."`:
 
 ```toml
@@ -236,7 +243,7 @@ applies_to_pointer = "/x-pituitary/applies_to"
 
 **`markdown_docs`**: Free-form Markdown files such as guides and runbooks. Indexed for drift detection and search.
 
-**`markdown_contract`**: Markdown files treated as inferred specs. Pituitary extracts metadata from `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, and `Applies To:` lines when present, or falls back to stable workspace-derived refs like `contract://rfcs/auth/session-policy` with status `draft`.
+**`markdown_contract`**: Markdown files treated as inferred specs. Pituitary extracts metadata from `Ref:`, `Status:`, `Domain:`, `Depends On:`, `Supersedes:`, `Relates To:`, and `Applies To:` lines when present, or falls back to stable workspace-derived refs like `contract://rfcs/auth/session-policy` with status `draft`.
 
 **`issue`**: Optional adapter-defined kind used by the built-in GitHub source adapter. GitHub issues labeled like specs/RFCs are normalized as specs; other issues are normalized as docs.
 

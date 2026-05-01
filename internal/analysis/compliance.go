@@ -17,6 +17,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"github.com/dusk-network/pituitary/internal/temporal"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -263,13 +264,17 @@ func CheckComplianceContext(ctx context.Context, cfg *config.Config, request Com
 	if err != nil {
 		return nil, err
 	}
+	normalizedAtDate, err := temporal.NormalizeAtDate(request.AtDate)
+	if err != nil {
+		return nil, err
+	}
 
 	repo, err := openAnalysisRepositoryContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer repo.Close()
-	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.atDate = normalizedAtDate
 	repo.minConfidence = strings.TrimSpace(request.MinConfidence)
 
 	targets, err := loadComplianceTargetsContext(ctx, cfg, request)

@@ -549,6 +549,7 @@ func scoreMarkdownContractCandidate(pathTokens map[string]struct{}, titleLower s
 			strings.HasPrefix(trimmed, "Domain:"),
 			strings.HasPrefix(trimmed, "Depends On:"),
 			strings.HasPrefix(trimmed, "Supersedes:"),
+			strings.HasPrefix(trimmed, "Relates To:"),
 			strings.HasPrefix(trimmed, "Applies To:"):
 			metadataSignals++
 		}

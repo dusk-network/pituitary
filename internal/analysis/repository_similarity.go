@@ -349,7 +349,7 @@ func appendMinConfidenceEdgeClause(builder *strings.Builder, minConfidence strin
 }
 
 // appendTemporalEdgeClause adds WHERE conditions to filter edges by temporal
-// validity when atDate is non-empty.
+// validity when the normalized YYYY-MM-DD atDate is non-empty.
 func appendTemporalEdgeClause(builder *strings.Builder, args *[]any, atDate string) {
 	if atDate == "" {
 		return

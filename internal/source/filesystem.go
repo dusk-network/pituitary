@@ -684,6 +684,7 @@ func inferMarkdownContractFields(body []byte) markdownContractFields {
 	fields.Domain = strings.TrimSpace(fields.Domain)
 	fields.DependsOn = uniqueStringValues(fields.DependsOn)
 	fields.Supersedes = uniqueStringValues(fields.Supersedes)
+	fields.RelatesTo = uniqueStringValues(fields.RelatesTo)
 	fields.AppliesTo = uniqueStringValues(fields.AppliesTo)
 	return fields
 }
@@ -697,6 +698,8 @@ func normalizeMarkdownContractKey(key string) string {
 		return "ref"
 	case "dependson", "related", "related_refs":
 		return "depends_on"
+	case "relatesto", "related_to":
+		return "relates_to"
 	case "appliesto":
 		return "applies_to"
 	default:
@@ -706,7 +709,7 @@ func normalizeMarkdownContractKey(key string) string {
 
 func isMarkdownContractField(key string) bool {
 	switch key {
-	case "id", "ref", "status", "domain", "depends_on", "supersedes", "applies_to":
+	case "id", "ref", "status", "domain", "depends_on", "supersedes", "relates_to", "applies_to":
 		return true
 	default:
 		return false
@@ -715,7 +718,7 @@ func isMarkdownContractField(key string) bool {
 
 func isMarkdownContractListField(key string) bool {
 	switch key {
-	case "depends_on", "supersedes", "applies_to":
+	case "depends_on", "supersedes", "relates_to", "applies_to":
 		return true
 	default:
 		return false

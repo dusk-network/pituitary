@@ -389,7 +389,7 @@ func loadSpecEdgesContext(ctx context.Context, db *sql.DB, specs map[string]spec
 	builder.WriteString(`
 SELECT from_ref, to_ref, edge_type
 FROM edges
-WHERE edge_type IN ('depends_on', 'supersedes', 'applies_to')`)
+WHERE edge_type IN ('depends_on', 'supersedes', 'relates_to', 'applies_to')`)
 	appendRefFilterClause(&builder, &args, "from_ref", refs)
 	builder.WriteString(`
 ORDER BY from_ref ASC, edge_type ASC, to_ref ASC`)
@@ -416,7 +416,7 @@ ORDER BY from_ref ASC, edge_type ASC, to_ref ASC`)
 		switch edgeType {
 		case "applies_to":
 			document.Record.AppliesTo = append(document.Record.AppliesTo, toRef)
-		case string(model.RelationDependsOn), string(model.RelationSupersedes):
+		case string(model.RelationDependsOn), string(model.RelationSupersedes), string(model.RelationRelatesTo):
 			document.Record.Relations = append(document.Record.Relations, model.Relation{
 				Type: model.RelationType(edgeType),
 				Ref:  toRef,

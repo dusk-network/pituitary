@@ -15,6 +15,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"github.com/dusk-network/pituitary/internal/temporal"
 	stindex "github.com/dusk-network/stroma/v2/index"
 	"golang.org/x/sync/errgroup"
 )
@@ -219,13 +220,17 @@ func CheckDocDriftContext(ctx context.Context, cfg *config.Config, request DocDr
 	if err != nil {
 		return nil, err
 	}
+	normalizedAtDate, err := temporal.NormalizeAtDate(request.AtDate)
+	if err != nil {
+		return nil, err
+	}
 
 	repo, err := openAnalysisRepositoryContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer repo.Close()
-	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.atDate = normalizedAtDate
 	repo.minConfidence = strings.TrimSpace(request.MinConfidence)
 
 	analyzer, err := newQualitativeAnalyzer(cfg.Runtime.Analysis)

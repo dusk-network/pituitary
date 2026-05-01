@@ -1258,6 +1258,17 @@ func TestGovernedByTemporalFilter(t *testing.T) {
 		t.Errorf("future query returned %d specs, expected %d", len(futureResult.Specs), len(result.Specs))
 	}
 
+	// Timezone-aware timestamps normalize through UTC so governed-by matches
+	// analysis query semantics.
+	futureTimestamp := futureDate + "T16:33:49Z"
+	timestampResult, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", futureTimestamp, "")
+	if err != nil {
+		t.Fatalf("GovernedBy (future timestamp): %v", err)
+	}
+	if len(timestampResult.Specs) != len(futureResult.Specs) {
+		t.Errorf("timestamp query returned %d specs, expected %d", len(timestampResult.Specs), len(futureResult.Specs))
+	}
+
 	// With a very old date (before edges existed), should return no results
 	// because valid_from was set to the rebuild timestamp.
 	pastDate := "1970-01-01"
@@ -1267,6 +1278,10 @@ func TestGovernedByTemporalFilter(t *testing.T) {
 	}
 	if len(pastResult.Specs) != 0 {
 		t.Errorf("past query returned %d specs, expected 0", len(pastResult.Specs))
+	}
+
+	if _, err := GovernedByContext(context.Background(), cfg.Workspace.ResolvedIndexPath, "src/api/middleware/ratelimiter.go", "2026-02-30", ""); err == nil {
+		t.Fatal("GovernedBy invalid date error = nil, want validation error")
 	}
 }
 

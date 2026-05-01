@@ -603,6 +603,63 @@ files = ["../guide.md"]
 	}
 }
 
+func TestLoadRejectsNonRelativeFilesystemSourcePatterns(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		pattern string
+		want    string
+	}{
+		{
+			name:    "absolute",
+			pattern: "/**/*.md",
+			want:    `source "docs".include: invalid pattern "/**/*.md": must be relative to the source root`,
+		},
+		{
+			name:    "empty segment",
+			pattern: "guides//*.md",
+			want:    `source "docs".include: invalid pattern "guides//*.md": must not contain empty path segments`,
+		},
+		{
+			name:    "parent segment",
+			pattern: "../*.md",
+			want:    `source "docs".include: invalid pattern "../*.md": must not contain ".." path segments`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := t.TempDir()
+			mustMkdirAll(t, filepath.Join(repo, "docs"))
+			configPath := filepath.Join(repo, "pituitary.toml")
+			writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["`+tt.pattern+`"]
+`)
+
+			_, err := Load(configPath)
+			if err == nil {
+				t.Fatal("Load() error = nil, want invalid source pattern error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsJSONSourceWithoutPath(t *testing.T) {
 	t.Parallel()
 
