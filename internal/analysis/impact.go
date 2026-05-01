@@ -8,6 +8,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
+	"github.com/dusk-network/pituitary/internal/temporal"
 )
 
 const (
@@ -133,13 +134,17 @@ func AnalyzeImpactContext(ctx context.Context, cfg *config.Config, request Analy
 	if !isValidChangeType(request.ChangeType) {
 		return nil, fmt.Errorf("change_type %q is invalid", request.ChangeType)
 	}
+	normalizedAtDate, err := temporal.NormalizeAtDate(request.AtDate)
+	if err != nil {
+		return nil, err
+	}
 
 	repo, err := openAnalysisRepositoryContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer repo.Close()
-	repo.atDate = strings.TrimSpace(request.AtDate)
+	repo.atDate = normalizedAtDate
 
 	candidate, err := loadCandidate(repo, OverlapRequest{
 		SpecRef:    request.SpecRef,

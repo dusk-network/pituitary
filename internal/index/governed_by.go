@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/dusk-network/pituitary/internal/temporal"
 )
 
 // GoverningSpec reports one accepted spec that governs a set of code/config refs.
@@ -32,6 +34,10 @@ func GovernedByContext(ctx context.Context, dbPath string, path string, atDate s
 	normalized := normalizePath(path)
 	if normalized == "" || normalized == "." {
 		return nil, fmt.Errorf("governed_by requires a non-empty file path")
+	}
+	normalizedAtDate, err := temporal.NormalizeAtDate(atDate)
+	if err != nil {
+		return nil, err
 	}
 
 	db, err := OpenReadOnlyContext(ctx, dbPath)
@@ -88,7 +94,7 @@ WHERE a.kind = 'spec'
 	}
 	builder.WriteString(")")
 	appendMinConfidenceClause(&builder, &args, hasConfidence, minConfidence)
-	appendTemporalClause(&builder, &args, atDate)
+	appendTemporalClause(&builder, &args, normalizedAtDate)
 	if hasSource {
 		builder.WriteString("\nORDER BY e.edge_source, a.ref")
 	} else {
@@ -153,16 +159,11 @@ func ResolveGovernedRefsForPathContext(ctx context.Context, db *sql.DB, path str
 // appendTemporalClause adds a temporal validity filter to the SQL query when
 // atDate is non-empty. It filters for edges active at the given date using:
 // valid_from <= atDate AND (valid_to IS NULL OR valid_to >= atDate).
-// The date is normalized to YYYY-MM-DD for consistent TEXT comparison with
-// stored values.
+// The caller must pass a normalized YYYY-MM-DD value so TEXT comparison remains
+// consistent with stored values.
 func appendTemporalClause(builder *strings.Builder, args *[]any, atDate string) {
-	atDate = strings.TrimSpace(atDate)
 	if atDate == "" {
 		return
-	}
-	// Normalize: truncate to date-only (YYYY-MM-DD) for consistent comparison.
-	if len(atDate) > 10 {
-		atDate = atDate[:10]
 	}
 	builder.WriteString(` AND (e.valid_from IS NULL OR e.valid_from <= ?)`)
 	*args = append(*args, atDate)

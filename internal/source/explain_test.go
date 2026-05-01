@@ -100,6 +100,8 @@ Status: accepted
 Domain: identity
 Depends On:
 - SPEC-042
+Relates To:
+- SPEC-055
 Applies To:
 - code://src/auth/session_policy.go
 
@@ -131,6 +133,9 @@ All interactive sessions must use tenant-scoped policy evaluation.
 	}
 	if got, want := result.Sources[0].InferredSpec.Status, "accepted"; got != want {
 		t.Fatalf("inferred status = %q, want %q", got, want)
+	}
+	if got, want := result.Sources[0].InferredSpec.RelatesTo, []string{"SPEC-055"}; !equalStrings(got, want) {
+		t.Fatalf("inferred relates_to = %#v, want %#v", got, want)
 	}
 }
 

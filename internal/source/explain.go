@@ -410,11 +410,98 @@ func evaluateSourcePathSelection(source config.Source, relPath string) (sourcePa
 }
 
 func matchSourceSelector(kind, pattern, relPath string) (bool, error) {
-	ok, err := pathpkg.Match(pattern, relPath)
+	ok, err := matchSourceSelectorPattern(pattern, relPath)
 	if err != nil {
 		return false, fmt.Errorf("%s pattern %q is invalid: %w", kind, pattern, err)
 	}
 	return ok, nil
+}
+
+func matchSourceSelectorPattern(pattern, relPath string) (bool, error) {
+	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+	relPath = filepath.ToSlash(strings.TrimSpace(relPath))
+	patternParts, err := splitSelectorPath(pattern)
+	if err != nil {
+		return false, err
+	}
+	hasRecursiveSegment := false
+	for _, part := range patternParts {
+		if part == "**" {
+			hasRecursiveSegment = true
+			continue
+		}
+		if _, err := pathpkg.Match(part, "placeholder"); err != nil {
+			return false, err
+		}
+	}
+	if !hasRecursiveSegment {
+		return pathpkg.Match(pattern, relPath)
+	}
+	pathParts, err := splitSelectorPath(relPath)
+	if err != nil {
+		return false, err
+	}
+	return matchSourceSelectorParts(patternParts, pathParts)
+}
+
+func matchSourceSelectorParts(patternParts, pathParts []string) (bool, error) {
+	type matchState struct {
+		patternIndex int
+		pathIndex    int
+	}
+	memo := make(map[matchState]bool)
+	var match func(patternIndex, pathIndex int) (bool, error)
+	match = func(patternIndex, pathIndex int) (bool, error) {
+		state := matchState{patternIndex: patternIndex, pathIndex: pathIndex}
+		if failed, ok := memo[state]; ok && failed {
+			return false, nil
+		}
+		if patternIndex == len(patternParts) {
+			return pathIndex == len(pathParts), nil
+		}
+		if patternParts[patternIndex] == "**" {
+			for nextPathIndex := pathIndex; nextPathIndex <= len(pathParts); nextPathIndex++ {
+				if ok, err := match(patternIndex+1, nextPathIndex); ok || err != nil {
+					return ok, err
+				}
+			}
+			memo[state] = true
+			return false, nil
+		}
+		if pathIndex == len(pathParts) {
+			memo[state] = true
+			return false, nil
+		}
+		ok, err := pathpkg.Match(patternParts[patternIndex], pathParts[pathIndex])
+		if err != nil || !ok {
+			if err == nil {
+				memo[state] = true
+			}
+			return ok, err
+		}
+		ok, err = match(patternIndex+1, pathIndex+1)
+		if err == nil && !ok {
+			memo[state] = true
+		}
+		return ok, err
+	}
+	return match(0, 0)
+}
+
+func splitSelectorPath(value string) ([]string, error) {
+	if value == "" {
+		return nil, fmt.Errorf("value must not be empty")
+	}
+	parts := strings.Split(value, "/")
+	for _, part := range parts {
+		if part == "" {
+			return nil, fmt.Errorf("must be a relative path without empty segments")
+		}
+		if part == "." || part == ".." {
+			return nil, fmt.Errorf("must not contain %q path segments", part)
+		}
+	}
+	return parts, nil
 }
 
 func populateSelectionMatches(explanation *SourceFileExplanation, selection sourcePathSelection) {

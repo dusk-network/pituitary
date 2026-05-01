@@ -772,6 +772,154 @@ files = ["docs/guides/api-rate-limits.md", "docs/runbooks/rate-limit-rollout.md"
 	}
 }
 
+func TestSourceSelectorsSupportRecursiveDoublestar(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["**/*.md"]
+exclude = ["archive/**"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "docs", "root.md"), "# Root\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "api.md"), "# API\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "deep", "nested.md"), "# Nested\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "archive", "old.md"), "# Old\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	refs := make([]string, 0, len(result.Docs))
+	for _, doc := range result.Docs {
+		refs = append(refs, doc.Ref)
+	}
+	sort.Strings(refs)
+	wantRefs := []string{"doc://guides/api", "doc://guides/deep/nested", "doc://root"}
+	if !equalStrings(refs, wantRefs) {
+		t.Fatalf("doc refs = %#v, want %#v", refs, wantRefs)
+	}
+
+	preview, err := PreviewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("PreviewFromConfig() error = %v", err)
+	}
+	paths := make([]string, 0, len(preview.Sources[0].Items))
+	for _, item := range preview.Sources[0].Items {
+		paths = append(paths, item.Path)
+	}
+	sort.Strings(paths)
+	wantPaths := []string{"docs/guides/api.md", "docs/guides/deep/nested.md", "docs/root.md"}
+	if !equalStrings(paths, wantPaths) {
+		t.Fatalf("preview paths = %#v, want %#v", paths, wantPaths)
+	}
+
+	rootExplain, err := ExplainFile(cfg, filepath.Join(repo, "docs", "root.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile(root) error = %v", err)
+	}
+	if got, want := rootExplain.Sources[0].Reason, explainReasonIndexedMarkdownDoc; got != want {
+		t.Fatalf("root explain reason = %q, want %q", got, want)
+	}
+
+	archivedExplain, err := ExplainFile(cfg, filepath.Join(repo, "docs", "archive", "old.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile(archive) error = %v", err)
+	}
+	if got, want := archivedExplain.Sources[0].Reason, explainReasonExcludedBySelector; got != want {
+		t.Fatalf("archive explain reason = %q, want %q", got, want)
+	}
+}
+
+func TestSourceSelectorsKeepSingleStarSegmentLocal(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustWriteFile(t, filepath.Join(repo, "pituitary.toml"), `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md"]
+`)
+	mustWriteFile(t, filepath.Join(repo, "docs", "root.md"), "# Root\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "api.md"), "# API\n")
+	mustWriteFile(t, filepath.Join(repo, "docs", "guides", "deep", "nested.md"), "# Nested\n")
+
+	cfg, err := config.Load(filepath.Join(repo, "pituitary.toml"))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	result, err := LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("LoadFromConfig() error = %v", err)
+	}
+	if got, want := len(result.Docs), 1; got != want {
+		t.Fatalf("doc count = %d, want %d", got, want)
+	}
+	if got, want := result.Docs[0].Ref, "doc://guides/api"; got != want {
+		t.Fatalf("doc ref = %q, want %q", got, want)
+	}
+
+	nestedExplain, err := ExplainFile(cfg, filepath.Join(repo, "docs", "guides", "deep", "nested.md"))
+	if err != nil {
+		t.Fatalf("ExplainFile(nested) error = %v", err)
+	}
+	if got, want := nestedExplain.Sources[0].Reason, explainReasonNotMatchedByInclude; got != want {
+		t.Fatalf("nested explain reason = %q, want %q", got, want)
+	}
+}
+
+func TestSourceSelectorsRejectInvalidRelativePatterns(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"/**/*.md",
+		"guides//*.md",
+		"guides/../*.md",
+	}
+	for _, pattern := range tests {
+		pattern := pattern
+		t.Run(pattern, func(t *testing.T) {
+			t.Parallel()
+			if _, err := matchSourceSelector("include", pattern, "guides/api.md"); err == nil {
+				t.Fatalf("matchSourceSelector(%q) error = nil, want invalid pattern error", pattern)
+			}
+		})
+	}
+}
+
+func TestSourceSelectorsMemoizeRepeatedRecursiveSegments(t *testing.T) {
+	t.Parallel()
+
+	ok, err := matchSourceSelectorPattern("**/**/nested.md", "guides/deep/nested.md")
+	if err != nil {
+		t.Fatalf("matchSourceSelectorPattern() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("matchSourceSelectorPattern() = false, want true")
+	}
+}
+
 func TestLoadFromConfigFiltersSpecBundlesByExplicitFiles(t *testing.T) {
 	t.Parallel()
 
@@ -834,6 +982,9 @@ domain: identity
 supersedes: SPEC-008
 depends_on:
   - SPEC-042
+relates_to:
+  - SPEC-055
+  - SPEC-055
 applies_to:
   - code://src/auth/session_policy.go
   - config://config/auth/session.yaml
@@ -875,6 +1026,12 @@ All interactive sessions must use tenant-scoped policy evaluation.
 	}
 	if !hasRelation(spec.Relations, model.RelationDependsOn, "SPEC-042") {
 		t.Fatalf("relations = %+v, want depends_on SPEC-042", spec.Relations)
+	}
+	if !hasRelation(spec.Relations, model.RelationRelatesTo, "SPEC-055") {
+		t.Fatalf("relations = %+v, want relates_to SPEC-055", spec.Relations)
+	}
+	if got, want := relationCount(spec.Relations, model.RelationRelatesTo, "SPEC-055"), 1; got != want {
+		t.Fatalf("relates_to SPEC-055 relation count = %d, want %d", got, want)
 	}
 	if got, want := spec.AppliesTo, []string{"code://src/auth/session_policy.go", "config://config/auth/session.yaml"}; !equalStrings(got, want) {
 		t.Fatalf("applies_to = %#v, want %#v", got, want)
@@ -1176,12 +1333,17 @@ func mustWriteFile(t *testing.T, path, content string) {
 }
 
 func hasRelation(relations []model.Relation, typ model.RelationType, ref string) bool {
+	return relationCount(relations, typ, ref) > 0
+}
+
+func relationCount(relations []model.Relation, typ model.RelationType, ref string) int {
+	count := 0
 	for _, relation := range relations {
 		if relation.Type == typ && relation.Ref == ref {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func equalStrings(got, want []string) bool {

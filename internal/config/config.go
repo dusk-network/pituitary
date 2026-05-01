@@ -852,8 +852,8 @@ func validateSource(cfg *Config, source *Source, index int, errs *validationErro
 	if filesystemSource && len(source.Files) > 0 && strings.TrimSpace(source.Path) == "" {
 		errs.add("%s.files: path is required when files are set", label)
 	}
-	validateSourcePatterns(errs, label, "include", source.Include)
-	validateSourcePatterns(errs, label, "exclude", source.Exclude)
+	validateSourcePatterns(errs, label, "include", source.Include, filesystemSource)
+	validateSourcePatterns(errs, label, "exclude", source.Exclude, filesystemSource)
 
 	if cfg.Workspace.RootPath == "" {
 		return
@@ -892,16 +892,46 @@ func validateSourceFiles(errs *validationErrors, label string, source *Source, f
 	source.Files = files
 }
 
-func validateSourcePatterns(errs *validationErrors, label string, field string, patterns []string) {
+func validateSourcePatterns(errs *validationErrors, label string, field string, patterns []string, filesystemSource bool) {
 	for _, pattern := range patterns {
-		if strings.TrimSpace(pattern) == "" {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed == "" {
 			errs.add("%s.%s: patterns must not be empty", label, field)
+			continue
+		}
+		if filesystemSource {
+			if err := validateFilesystemSourcePattern(trimmed); err != nil {
+				errs.add("%s.%s: invalid pattern %q: %v", label, field, pattern, err)
+				continue
+			}
 			continue
 		}
 		if _, err := pathpkg.Match(pattern, "placeholder"); err != nil {
 			errs.add("%s.%s: invalid pattern %q: %v", label, field, pattern, err)
 		}
 	}
+}
+
+func validateFilesystemSourcePattern(pattern string) error {
+	normalized := filepath.ToSlash(pattern)
+	if filepath.IsAbs(pattern) || pathpkg.IsAbs(normalized) {
+		return fmt.Errorf("must be relative to the source root")
+	}
+	parts := strings.Split(normalized, "/")
+	for _, part := range parts {
+		switch part {
+		case "":
+			return fmt.Errorf("must not contain empty path segments")
+		case ".", "..":
+			return fmt.Errorf("must not contain %q path segments", part)
+		case "**":
+			continue
+		}
+		if _, err := pathpkg.Match(part, "placeholder"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveAndValidateSourcePaths(cfg *Config, errs *validationErrors, label string, source *Source, primaryRepoID string, filesystemSource bool) {
