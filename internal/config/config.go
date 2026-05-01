@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/dusk-network/pituitary/internal/pathselector"
 	"github.com/dusk-network/pituitary/sdk"
 )
 
@@ -900,7 +901,7 @@ func validateSourcePatterns(errs *validationErrors, label string, field string, 
 			continue
 		}
 		if filesystemSource {
-			if err := validateFilesystemSourcePattern(trimmed); err != nil {
+			if err := pathselector.Validate(trimmed); err != nil {
 				errs.add("%s.%s: invalid pattern %q: %v", label, field, pattern, err)
 				continue
 			}
@@ -910,28 +911,6 @@ func validateSourcePatterns(errs *validationErrors, label string, field string, 
 			errs.add("%s.%s: invalid pattern %q: %v", label, field, pattern, err)
 		}
 	}
-}
-
-func validateFilesystemSourcePattern(pattern string) error {
-	normalized := filepath.ToSlash(pattern)
-	if filepath.IsAbs(pattern) || pathpkg.IsAbs(normalized) {
-		return fmt.Errorf("must be relative to the source root")
-	}
-	parts := strings.Split(normalized, "/")
-	for _, part := range parts {
-		switch part {
-		case "":
-			return fmt.Errorf("must not contain empty path segments")
-		case ".", "..":
-			return fmt.Errorf("must not contain %q path segments", part)
-		case "**":
-			continue
-		}
-		if _, err := pathpkg.Match(part, "placeholder"); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func resolveAndValidateSourcePaths(cfg *Config, errs *validationErrors, label string, source *Source, primaryRepoID string, filesystemSource bool) {
