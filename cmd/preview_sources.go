@@ -56,21 +56,16 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 
 	request := previewSourcesRequest{Verbose: verbose}
 
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	resolvedConfigPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "preview-sources", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
+		return writeCLIError(stdout, stderr, format, "preview-sources", request, configErrorIssue(err.Error()), 2)
 	}
 
 	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "preview-sources", request, cliIssue{
-			Code:    "config_error",
-			Message: "invalid config:\n" + err.Error(),
-		}, 2)
+		return writeCLIError(stdout, stderr, format, "preview-sources", request, configLoadIssue("invalid config:\n"+err.Error(), resolution), 2)
 	}
+	emitMultirepoShadowWarning(resolution)
 
 	result, err := source.PreviewFromConfigWithOptions(cfg, source.PreviewOptions{
 		Logger:  cliLoggerFromContext(ctx),

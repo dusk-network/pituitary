@@ -534,12 +534,7 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = CurrentSchemaVersion
 	} else if enforceSchemaVersion && cfg.SchemaVersion != CurrentSchemaVersion {
-		return nil, fmt.Errorf(
-			"unsupported schema_version %d (supported: %d); run `pituitary migrate-config --path %s --write` if this is an older config",
-			cfg.SchemaVersion,
-			CurrentSchemaVersion,
-			filepath.ToSlash(configPath),
-		)
+		return nil, unsupportedSchemaVersionError(cfg.SchemaVersion)
 	}
 
 	if err := validate(cfg); err != nil {
@@ -547,6 +542,14 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 	}
 	cfg.SchemaVersion = CurrentSchemaVersion
 	return cfg, nil
+}
+
+func unsupportedSchemaVersionError(version int) error {
+	base := fmt.Sprintf("unsupported schema_version %d (supported: %d)", version, CurrentSchemaVersion)
+	if version < CurrentSchemaVersion {
+		return fmt.Errorf("%s; this config is older than this Pituitary version and cannot be migrated automatically; choose another config with --config or regenerate/update this config", base)
+	}
+	return fmt.Errorf("%s; this config was written for a newer Pituitary version; upgrade Pituitary", base)
 }
 
 func rawBoolValue(value *bool) bool {

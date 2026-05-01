@@ -19,6 +19,9 @@ const (
 	CodeNotFound              = "not_found"
 	CodeDependencyUnavailable = "dependency_unavailable"
 	CodeInternalError         = "internal_error"
+
+	IssueDetailPhase     = "phase"
+	IssuePhaseConfigLoad = "config_load"
 )
 
 // Issue is a transport-agnostic operation failure.
@@ -55,7 +58,10 @@ func (e *issueError) Error() string {
 func executeWithConfig[Req any, Res any](ctx context.Context, configPath string, request Req, run func(*config.Config) (*Res, error), classify func(*config.Config, error) *Issue) Response[Req, Res] {
 	cfg, issue := loadConfig(configPath)
 	if issue != nil {
-		return failure[Req, Res](request, issue.Code, issue.Message, issue.ExitCode)
+		return Response[Req, Res]{
+			Request: request,
+			Issue:   issue,
+		}
 	}
 
 	result, err := run(cfg)
@@ -217,6 +223,7 @@ func loadConfig(configPath string) (*config.Config, *Issue) {
 		return nil, &Issue{
 			Code:     CodeConfigError,
 			Message:  err.Error(),
+			Details:  map[string]any{IssueDetailPhase: IssuePhaseConfigLoad},
 			ExitCode: 2,
 		}
 	}

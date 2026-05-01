@@ -118,7 +118,13 @@ func (e *cliIssueError) Error() string {
 // default validation_error.
 func configLoadError(err error) error {
 	return &cliIssueError{
-		issue:    cliIssue{Code: "config_error", Message: err.Error()},
+		issue: cliIssue{
+			Code:    app.CodeConfigError,
+			Message: err.Error(),
+			Details: map[string]any{
+				app.IssueDetailPhase: app.IssuePhaseConfigLoad,
+			},
+		},
 		exitCode: 2,
 	}
 }
@@ -230,15 +236,12 @@ func runCommand[Req any, Res any](
 		}, 2)
 	}
 
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	resolvedConfigPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, configPath)
 	if err != nil {
 		// Standalone commands tolerate a missing workspace config; callbacks
 		// that can opportunistically use a config must handle an empty path.
 		if !plan.Options.Standalone {
-			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
-				Code:    "config_error",
-				Message: err.Error(),
-			}, 2)
+			return writeCLIError(stdout, stderr, format, plan.Name, nil, configErrorIssue(err.Error()), 2)
 		}
 		resolvedConfigPath = ""
 	}
@@ -256,10 +259,7 @@ func runCommand[Req any, Res any](
 		if plan.Options.ConfigForFile {
 			loaded, cfgErr := config.Load(resolvedConfigPath)
 			if cfgErr != nil {
-				return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
-					Code:    "config_error",
-					Message: cfgErr.Error(),
-				}, 2)
+				return writeCLIError(stdout, stderr, format, plan.Name, nil, configLoadIssue(cfgErr.Error(), resolution), 2)
 			}
 			cfg = loaded
 		}
@@ -270,7 +270,7 @@ func runCommand[Req any, Res any](
 				envelopeReq = *loaded
 			}
 			if issue, exitCode, ok := asCliIssue(loadErr); ok {
-				return writeCLIError(stdout, stderr, format, plan.Name, envelopeReq, issue, exitCode)
+				return writeCLIError(stdout, stderr, format, plan.Name, envelopeReq, enrichAppConfigLoadIssue(issue, resolution), exitCode)
 			}
 			return writeCLIError(stdout, stderr, format, plan.Name, envelopeReq, cliIssue{
 				Code:    "validation_error",
@@ -292,17 +292,14 @@ func runCommand[Req any, Res any](
 		if plan.Options.ConfigForFlags {
 			loaded, cfgErr := config.Load(resolvedConfigPath)
 			if cfgErr != nil {
-				return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
-					Code:    "config_error",
-					Message: cfgErr.Error(),
-				}, 2)
+				return writeCLIError(stdout, stderr, format, plan.Name, nil, configLoadIssue(cfgErr.Error(), resolution), 2)
 			}
 			cfg = loaded
 		}
 		request, err = plan.BuildRequest(ctx, cfg, resolvedConfigPath, positional)
 		if err != nil {
 			if issue, exitCode, ok := asCliIssue(err); ok {
-				return writeCLIError(stdout, stderr, format, plan.Name, nil, issue, exitCode)
+				return writeCLIError(stdout, stderr, format, plan.Name, nil, enrichAppConfigLoadIssue(issue, resolution), exitCode)
 			}
 			return writeCLIError(stdout, stderr, format, plan.Name, nil, cliIssue{
 				Code:    "validation_error",
@@ -315,7 +312,7 @@ func runCommand[Req any, Res any](
 		normalized, normErr := plan.Normalize(ctx, request, format)
 		if normErr != nil {
 			if issue, exitCode, ok := asCliIssue(normErr); ok {
-				return writeCLIError(stdout, stderr, format, plan.Name, normalized, issue, exitCode)
+				return writeCLIError(stdout, stderr, format, plan.Name, normalized, enrichAppConfigLoadIssue(issue, resolution), exitCode)
 			}
 			return writeCLIError(stdout, stderr, format, plan.Name, normalized, cliIssue{
 				Code:    "validation_error",
@@ -329,7 +326,7 @@ func runCommand[Req any, Res any](
 
 	enrichedReq, result, issue := plan.Execute(execCtx, resolvedConfigPath, request, format)
 	if issue != nil {
-		return writeCLIError(stdout, stderr, format, plan.Name, enrichedReq, cliIssueFromAppIssue(issue), issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, plan.Name, enrichedReq, enrichAppConfigLoadIssue(cliIssueFromAppIssue(issue), resolution), issue.ExitCode)
 	}
 
 	if plan.PostProcess != nil {
@@ -343,5 +340,6 @@ func runCommand[Req any, Res any](
 		result = postResult
 	}
 
+	emitMultirepoShadowWarning(resolution)
 	return writeCLISuccessWithTimings(stdout, stderr, format, plan.Name, enrichedReq, result, nil, snapshotCommandTimings(tracker, started))
 }

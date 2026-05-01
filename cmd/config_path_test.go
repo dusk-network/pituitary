@@ -3,11 +3,14 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dusk-network/pituitary/internal/config"
 )
 
 func TestRunIndexSupportsGlobalConfigFlag(t *testing.T) {
@@ -323,6 +326,172 @@ func TestResolveCommandConfigPathExplainsDiscoveredShadowedConfig(t *testing.T) 
 	if !strings.Contains(resolution.Reason, filepath.ToSlash(filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml"))) ||
 		!strings.Contains(resolution.Reason, filepath.ToSlash(filepath.Join(resolvedRepo, "pituitary.toml"))) {
 		t.Fatalf("reason = %q, want selected and shadowed discovered paths", resolution.Reason)
+	}
+}
+
+func mustWriteBasicPituitaryConfigCmd(t *testing.T, path string, schemaVersion int) {
+	t.Helper()
+
+	schemaLine := ""
+	if schemaVersion > 0 {
+		schemaLine = fmt.Sprintf("schema_version = %d\n\n", schemaVersion)
+	}
+	mustWriteFileCmd(t, path, schemaLine+`
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+}
+
+func TestStatusConfigErrorSuggestsValidShadowedConfig(t *testing.T) {
+	repo := t.TempDir()
+	resolvedRepo, resolveErr := filepath.EvalSymlinks(repo)
+	if resolveErr != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", repo, resolveErr)
+	}
+	olderSchemaVersion := config.CurrentSchemaVersion - 1
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), olderSchemaVersion)
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, "pituitary.toml"), config.CurrentSchemaVersion)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runStatus([]string{}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runStatus() exit code = %d, want 2", exitCode)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, fmt.Sprintf("unsupported schema_version %d", olderSchemaVersion)) {
+		t.Fatalf("stderr = %q, want unsupported schema detail", out)
+	}
+	if !strings.Contains(out, "selected config from working-directory search: "+filepath.ToSlash(filepath.Join(resolvedRepo, ".pituitary", "pituitary.toml"))) {
+		t.Fatalf("stderr = %q, want selected config detail", out)
+	}
+	if !strings.Contains(out, "shadowed config also loads; retry with `--config "+filepath.ToSlash(filepath.Join(resolvedRepo, "pituitary.toml"))+"`") {
+		t.Fatalf("stderr = %q, want valid shadowed config hint", out)
+	}
+	if strings.Contains(out, "migrate-config") {
+		t.Fatalf("stderr = %q, want no migrate-config hint for unsupported schema", out)
+	}
+}
+
+func TestSharedCommandConfigErrorSuggestsValidShadowedConfig(t *testing.T) {
+	repo := t.TempDir()
+	resolvedRepo, resolveErr := filepath.EvalSymlinks(repo)
+	if resolveErr != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", repo, resolveErr)
+	}
+	olderSchemaVersion := config.CurrentSchemaVersion - 1
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), olderSchemaVersion)
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, "pituitary.toml"), config.CurrentSchemaVersion)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runSearchSpecs([]string{"--query", "rate limiting"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runSearchSpecs() exit code = %d, want 2", exitCode)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, fmt.Sprintf("unsupported schema_version %d", olderSchemaVersion)) {
+		t.Fatalf("stderr = %q, want unsupported schema detail", out)
+	}
+	if !strings.Contains(out, "shadowed config also loads; retry with `--config "+filepath.ToSlash(filepath.Join(resolvedRepo, "pituitary.toml"))+"`") {
+		t.Fatalf("stderr = %q, want valid shadowed config hint", out)
+	}
+}
+
+func TestExplicitConfigErrorSuggestsAlternativeWithoutShadowedWording(t *testing.T) {
+	repo := t.TempDir()
+	resolvedRepo, resolveErr := filepath.EvalSymlinks(repo)
+	if resolveErr != nil {
+		t.Fatalf("filepath.EvalSymlinks(%q) error = %v", repo, resolveErr)
+	}
+	badConfigPath := filepath.Join(resolvedRepo, "stale.toml")
+	mustWriteBasicPituitaryConfigCmd(t, badConfigPath, config.CurrentSchemaVersion-1)
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(resolvedRepo, "pituitary.toml"), config.CurrentSchemaVersion)
+	mustMkdirAllCmd(t, filepath.Join(resolvedRepo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, resolvedRepo, func() int {
+		return runStatus([]string{"--config", badConfigPath}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runStatus() exit code = %d, want 2", exitCode)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "selected config from command-local --config: "+filepath.ToSlash(badConfigPath)) {
+		t.Fatalf("stderr = %q, want explicit selected config detail", out)
+	}
+	if !strings.Contains(out, "another config candidate also loads; inspect it or retry with `--config "+filepath.ToSlash(filepath.Join(resolvedRepo, "pituitary.toml"))+"`") {
+		t.Fatalf("stderr = %q, want non-presumptive alternative config hint", out)
+	}
+	if strings.Contains(out, "shadowed config is valid") {
+		t.Fatalf("stderr = %q, want no generic shadowed-is-valid wording for explicit config", out)
+	}
+}
+
+func TestMigrateConfigErrorDoesNotSuggestShadowedConfig(t *testing.T) {
+	repo := t.TempDir()
+	olderSchemaVersion := config.CurrentSchemaVersion - 1
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), olderSchemaVersion)
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, "pituitary.toml"), config.CurrentSchemaVersion)
+	mustMkdirAllCmd(t, filepath.Join(repo, "specs"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runMigrateConfig([]string{"--path", ".pituitary/pituitary.toml"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runMigrateConfig() exit code = %d, want 2", exitCode)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, fmt.Sprintf("cannot migrate unsupported schema_version %d automatically", olderSchemaVersion)) {
+		t.Fatalf("stderr = %q, want unsupported migration detail", out)
+	}
+	if strings.Contains(out, "--config") || strings.Contains(out, "selected config") {
+		t.Fatalf("stderr = %q, want no config-resolution recovery hint", out)
+	}
+}
+
+func TestMissingIndexConfigErrorDoesNotSuggestShadowedConfig(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, ".pituitary", "pituitary.toml"), config.CurrentSchemaVersion)
+	mustWriteBasicPituitaryConfigCmd(t, filepath.Join(repo, "pituitary.toml"), config.CurrentSchemaVersion)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "checkout", "spec.toml"), `
+id = "checkout"
+title = "Checkout"
+status = "accepted"
+domain = "payments"
+`)
+	mustWriteFileCmd(t, filepath.Join(repo, "specs", "checkout", "body.md"), "# Checkout\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := withWorkingDir(t, repo, func() int {
+		return runReviewSpec([]string{"--path", "specs/checkout/body.md"}, &stdout, &stderr)
+	})
+	if exitCode != 2 {
+		t.Fatalf("runReviewSpec() exit code = %d, want 2", exitCode)
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "index") {
+		t.Fatalf("stderr = %q, want missing-index detail", out)
+	}
+	if strings.Contains(out, "--config") || strings.Contains(out, "selected config") {
+		t.Fatalf("stderr = %q, want no config-resolution recovery hint", out)
 	}
 }
 

@@ -62,8 +62,46 @@ path = "specs"
 	if !strings.Contains(err.Error(), "unsupported schema_version 9") {
 		t.Fatalf("Load() error = %q, want schema-version detail", err)
 	}
-	if !strings.Contains(err.Error(), "migrate-config") {
-		t.Fatalf("Load() error = %q, want migrate-config hint", err)
+	if !strings.Contains(err.Error(), "newer Pituitary version") || !strings.Contains(err.Error(), "upgrade Pituitary") {
+		t.Fatalf("Load() error = %q, want newer-version guidance", err)
+	}
+	if strings.Contains(err.Error(), "migrate-config") {
+		t.Fatalf("Load() error = %q, want no migrate-config hint for unsupported schema", err)
+	}
+}
+
+func TestLoadRejectsOlderUnsupportedSchemaVersionWithRecoveryGuidance(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	mustMkdirAll(t, filepath.Join(repo, "specs"))
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+schema_version = 2
+
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[[sources]]
+name = "specs"
+adapter = "filesystem"
+kind = "spec_bundle"
+path = "specs"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want schema-version failure")
+	}
+	if !strings.Contains(err.Error(), "unsupported schema_version 2") {
+		t.Fatalf("Load() error = %q, want schema-version detail", err)
+	}
+	if !strings.Contains(err.Error(), "older than this Pituitary version") || !strings.Contains(err.Error(), "cannot be migrated automatically") {
+		t.Fatalf("Load() error = %q, want older-version guidance", err)
+	}
+	if strings.Contains(err.Error(), "migrate-config") {
+		t.Fatalf("Load() error = %q, want no migrate-config hint for unsupported schema", err)
 	}
 }
 

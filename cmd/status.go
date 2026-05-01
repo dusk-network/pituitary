@@ -134,15 +134,12 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	resolvedConfigPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
+		return writeCLIError(stdout, stderr, format, "status", request, configErrorIssue(err.Error()), 2)
 	}
 
 	response := app.Status(ctx, resolvedConfigPath, app.StatusRequest{CheckRuntime: scope})
 	if response.Issue != nil {
-		return writeCLIError(stdout, stderr, format, "status", request, cliIssueFromAppIssue(response.Issue), response.Issue.ExitCode)
+		return writeCLIError(stdout, stderr, format, "status", request, enrichAppConfigLoadIssue(cliIssueFromAppIssue(response.Issue), resolution), response.Issue.ExitCode)
 	}
 	result := response.Result
 
@@ -161,6 +158,7 @@ func runStatusContext(ctx context.Context, args []string, stdout, stderr io.Writ
 		}
 	}
 
+	emitMultirepoShadowWarning(resolution)
 	return writeCLISuccess(stdout, stderr, format, "status", request, statusOut, nil)
 }
 
