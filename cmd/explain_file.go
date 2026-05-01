@@ -39,6 +39,7 @@ func runExplainFileContext(ctx context.Context, args []string, stdout, stderr io
 					return req, nil, &app.Issue{
 						Code:     "config_error",
 						Message:  "invalid config:\n" + err.Error(),
+						Details:  map[string]any{app.IssueDetailPhase: app.IssuePhaseConfigLoad},
 						ExitCode: 2,
 					}
 				}

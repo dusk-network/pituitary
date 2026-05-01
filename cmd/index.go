@@ -111,21 +111,16 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		}, 2)
 	}
 
-	resolvedConfigPath, err := resolveCommandConfigPath(ctx, configPath)
+	resolvedConfigPath, resolution, err := resolveCommandConfigPathWithResolution(ctx, configPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
-			Code:    "config_error",
-			Message: err.Error(),
-		}, 2)
+		return writeCLIError(stdout, stderr, format, "index", request, configErrorIssue(err.Error()), 2)
 	}
 
 	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
-		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
-			Code:    "config_error",
-			Message: "invalid config:\n" + err.Error(),
-		}, 2)
+		return writeCLIError(stdout, stderr, format, "index", request, configLoadIssue("invalid config:\n"+err.Error(), resolution), 2)
 	}
+	emitMultirepoShadowWarning(resolution)
 	records, err := source.LoadFromConfigWithOptions(cfg, source.LoadOptions{Logger: cliLoggerFromContext(ctx)})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
