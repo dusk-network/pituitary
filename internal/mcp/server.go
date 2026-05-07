@@ -43,6 +43,8 @@ func Tools(options Options) []mcpserver.ServerTool {
 		analyzeImpactTool(options),
 		checkDocDriftTool(options),
 		reviewSpecTool(options),
+		getIntentOutlineTool(options),
+		expandIntentContextTool(options),
 		checkComplianceTool(options),
 		checkTerminologyTool(options),
 		governedByTool(options),

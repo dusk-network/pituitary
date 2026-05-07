@@ -146,7 +146,7 @@ Your agent writes specs, reviews PRs, and proposes changes — but it doesn't kn
 }
 ```
 
-Your agent gets 13 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`.
+Your agent gets 15 tools: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `get_intent_outline`, `expand_intent_context`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, and `explain_file`. For focused context, search first, inspect the returned record with `get_intent_outline`, then expand selected chunk ids with `expand_intent_context` using the same `snapshot_fingerprint`.
 
 ### Shared Skills (Claude Code, Cowork)
 

@@ -17,6 +17,8 @@ const (
 	CodeConfigError           = "config_error"
 	CodeValidationError       = "validation_error"
 	CodeNotFound              = "not_found"
+	CodeFiltered              = "filtered"
+	CodeStaleHandle           = "stale_handle"
 	CodeDependencyUnavailable = "dependency_unavailable"
 	CodeInternalError         = "internal_error"
 
@@ -41,6 +43,9 @@ type Response[Req any, Res any] struct {
 
 type operationExecutionPolicy struct {
 	NotFound    func(error) bool
+	Filtered    func(error) bool
+	StaleHandle func(error) bool
+	Internal    func(error) bool
 	DefaultCode string
 }
 
@@ -102,6 +107,24 @@ func classifyExecutionError(cfg *config.Config, err error, policy operationExecu
 	case policy.NotFound != nil && policy.NotFound(err):
 		return &Issue{
 			Code:     CodeNotFound,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	case policy.Filtered != nil && policy.Filtered(err):
+		return &Issue{
+			Code:     CodeFiltered,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	case policy.StaleHandle != nil && policy.StaleHandle(err):
+		return &Issue{
+			Code:     CodeStaleHandle,
+			Message:  err.Error(),
+			ExitCode: 2,
+		}
+	case policy.Internal != nil && policy.Internal(err):
+		return &Issue{
+			Code:     CodeInternalError,
 			Message:  err.Error(),
 			ExitCode: 2,
 		}
@@ -205,6 +228,28 @@ func ReviewSpec(ctx context.Context, configPath string, request analysis.ReviewR
 		NotFound: analysis.IsNotFound,
 	}, func(cfg *config.Config) (*analysis.ReviewResult, error) {
 		return analysis.ReviewSpecContext(ctx, cfg, request)
+	})
+}
+
+// GetIntentOutline loads config and returns a bounded indexed record outline.
+func GetIntentOutline(ctx context.Context, configPath string, request index.IntentOutlineRequest) Response[index.IntentOutlineRequest, index.IntentOutlineResult] {
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound: index.IsIntentContextNotFound,
+		Filtered: index.IsRecordFiltered,
+	}, func(cfg *config.Config) (*index.IntentOutlineResult, error) {
+		return index.GetIntentOutlineContext(ctx, cfg, request)
+	})
+}
+
+// ExpandIntentContext loads config and expands one indexed chunk handle.
+func ExpandIntentContext(ctx context.Context, configPath string, request index.ExpandIntentContextRequest) Response[index.ExpandIntentContextRequest, index.ExpandIntentContextResult] {
+	return executeWithFreshConfig(ctx, configPath, request, operationExecutionPolicy{
+		NotFound:    index.IsIntentContextNotFound,
+		Filtered:    index.IsRecordFiltered,
+		StaleHandle: index.IsStaleSnapshot,
+		Internal:    index.IsIntentExpansionInvariant,
+	}, func(cfg *config.Config) (*index.ExpandIntentContextResult, error) {
+		return index.ExpandIntentContextContext(ctx, cfg, request)
 	})
 }
 
