@@ -2,7 +2,7 @@
 
 Generated: 2026-05-07T15:44:58.842238Z
 
-Cases file: `/Users/emanuele/devel/pituitary/testdata/retrieval-bench/armb-rag-cases.json`
+Cases file: `testdata/retrieval-bench/armb-rag-cases.json`
 
 Case count: 21 (mid-body: 21)
 

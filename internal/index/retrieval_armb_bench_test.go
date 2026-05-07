@@ -139,6 +139,11 @@ func TestRetrievalArmBBench(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run Arm B benchmark: %v", err)
 	}
+	if os.Getenv("PITUITARY_ARMB_STRICT") == "1" {
+		if err := validateArmBReportNoErrors(report); err != nil {
+			t.Fatalf("Arm B strict validation: %v", err)
+		}
+	}
 	if reportPath := strings.TrimSpace(os.Getenv("PITUITARY_ARMB_REPORT")); reportPath != "" {
 		if err := writeArmBReport(reportPath, report); err != nil {
 			t.Fatalf("write Arm B report: %v", err)
@@ -468,6 +473,24 @@ func buildArmBDelta(arms []armBArm) *armBDelta {
 		BaselineMeanContextTokens: meanArmBInt(baseline.ContextTokenEstimate, len(arms[0].Cases)),
 		ParentMeanContextTokens:   meanArmBInt(parent.ContextTokenEstimate, len(arms[1].Cases)),
 	}
+}
+
+func validateArmBReportNoErrors(report *armBReport) error {
+	if report == nil {
+		return nil
+	}
+	var bad []string
+	for _, arm := range report.Arms {
+		for _, result := range arm.Cases {
+			if result.Error != "" {
+				bad = append(bad, fmt.Sprintf("%s/%s: %s", arm.Name, result.ID, result.Error))
+			}
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("%d errored case(s): %s", len(bad), strings.Join(bad, "; "))
+	}
+	return nil
 }
 
 func countArmBMidBodyCases(cases []armBCase) int {

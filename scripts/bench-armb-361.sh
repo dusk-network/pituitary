@@ -80,12 +80,13 @@ run_variant() {
     PITUITARY_ARMB_CASES="${BENCH_CASES}" \
     PITUITARY_ARMB_REPORT="${report}" \
     PITUITARY_ARMB_LABEL="${variant}" \
+    PITUITARY_ARMB_STRICT=1 \
     go test -tags=precision_bench -run TestRetrievalArmBBench -count=1 \
       -timeout=120m -v ./internal/index/
 
   local stroma_pattern="${variant_index%.*}.stroma.*.${variant_index##*.}"
   local stroma_path
-  stroma_path="$(ls -1 ${stroma_pattern} 2>/dev/null | head -1)"
+  stroma_path="$(compgen -G "${stroma_pattern}" | head -1 || true)"
   local size_bytes
   if [[ -n "${stroma_path}" && -f "${stroma_path}" ]]; then
     size_bytes="$(bench_file_size_bytes "${stroma_path}")"
@@ -108,12 +109,13 @@ for v in "${VARIANTS[@]}"; do
   run_variant "${v}"
 done
 
-python3 - "${BENCH_REPORT_MD}" "${BENCH_OUT_DIR}" "${VARIANTS[@]}" <<'PY'
+python3 - "${BENCH_REPORT_MD}" "${BENCH_OUT_DIR}" "${REPO_ROOT}" "${VARIANTS[@]}" <<'PY'
 import json, os, sys, datetime
 
 out_path = sys.argv[1]
 out_dir = sys.argv[2]
-variants = sys.argv[3:]
+repo_root = os.path.abspath(sys.argv[3])
+variants = sys.argv[4:]
 
 rows = []
 for v in variants:
@@ -130,12 +132,21 @@ def dist_text(summary):
     dist = summary.get("distribution", {})
     return " ".join(f"{i}:{dist.get(str(i), 0)}" for i in range(6))
 
-os.makedirs(os.path.dirname(out_path), exist_ok=True)
+def display_path(path):
+    abs_path = os.path.abspath(path)
+    root_prefix = repo_root + os.sep
+    if abs_path.startswith(root_prefix):
+        return os.path.relpath(abs_path, repo_root)
+    return path
+
+out_dirname = os.path.dirname(out_path)
+if out_dirname:
+    os.makedirs(out_dirname, exist_ok=True)
 with open(out_path, "w") as f:
     first = rows[0][1]
     f.write("# Retrieval Arm B benchmark - #361\n\n")
     f.write(f"Generated: {datetime.datetime.utcnow().isoformat()}Z\n\n")
-    f.write(f"Cases file: `{first['cases_path']}`\n\n")
+    f.write(f"Cases file: `{display_path(first['cases_path'])}`\n\n")
     f.write(f"Case count: {first['case_count']} (mid-body: {first['mid_body_case_count']})\n\n")
     f.write(f"Corpus doc count: {first.get('corpus_doc_count', 0)}\n\n")
     f.write(f"Analysis model: `{first['analysis_model']}`\n\n")

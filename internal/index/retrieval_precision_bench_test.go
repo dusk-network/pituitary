@@ -103,12 +103,12 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		cr, ccr, chunkEligible, err := runPrecisionBenchCase(ctx, snapshot, embedder, sqlDB, c)
+		cr, ccr, chunkResolvedOK, err := runPrecisionBenchCase(ctx, snapshot, embedder, sqlDB, c)
 		if err != nil {
 			t.Fatal(err)
 		}
 		rep.addPrecisionCase(cr)
-		rep.addChunkPrecisionCase(ccr, chunkEligible)
+		rep.addChunkPrecisionCase(ccr, chunkResolvedOK)
 	}
 	rep.finalizeAverages()
 
