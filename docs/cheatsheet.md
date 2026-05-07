@@ -97,7 +97,7 @@ pituitary serve --config .pituitary/pituitary.toml  # start MCP server over stdi
 
 Tools exposed: `search_specs`, `check_overlap`, `compare_specs`, `analyze_impact`, `check_doc_drift`, `review_spec`, `get_intent_outline`, `expand_intent_context`, `check_compliance`, `check_terminology`, `governed_by`, `compile_preview`, `fix_preview`, `status`, `explain_file`.
 
-Focused context sequence: run `search_specs`, inspect a selected ref with `get_intent_outline`, then expand chosen chunk ids with `expand_intent_context` using the same `snapshot_fingerprint`.
+Focused context sequence: run `search_specs`, inspect a selected ref with `get_intent_outline`, then expand chosen chunk IDs with `expand_intent_context` using the same `snapshot_fingerprint`.
 
 ## Output Formats
 

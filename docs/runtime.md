@@ -214,6 +214,6 @@ The MCP server exposes 15 tools:
 - `status`
 - `explain_file`
 
-For focused context, use `search_specs` first, inspect a selected record with `get_intent_outline`, then call `expand_intent_context` on selected chunk ids. Pass the returned `snapshot_fingerprint` into every expansion call; expansion rejects missing or stale fingerprints so chunk handles cannot silently cross snapshot boundaries.
+For focused context, use `search_specs` first, inspect a selected record with `get_intent_outline`, then call `expand_intent_context` on selected chunk IDs. Pass the returned `snapshot_fingerprint` into every expansion call; expansion rejects missing or stale fingerprints so chunk handles cannot silently cross snapshot boundaries.
 
 `index --rebuild` remains CLI-only by design.

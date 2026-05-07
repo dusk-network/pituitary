@@ -165,11 +165,19 @@ func TestValidateExpandedIntentShapeRejectsCrossRecordSections(t *testing.T) {
 	t.Parallel()
 
 	_, err := validateExpandedIntentShape([]stindex.Section{
-		{ChunkID: 10, Ref: "SPEC-042"},
-		{ChunkID: 11, Ref: "SPEC-008"},
+		{ChunkID: 10, Ref: "SPEC-042", Kind: model.ArtifactKindSpec},
+		{ChunkID: 11, Ref: "SPEC-008", Kind: model.ArtifactKindSpec},
 	}, 10)
 	if !IsIntentExpansionInvariant(err) {
 		t.Fatalf("validateExpandedIntentShape() error = %T (%v), want invariant error", err, err)
+	}
+
+	_, err = validateExpandedIntentShape([]stindex.Section{
+		{ChunkID: 10, Ref: "shared-ref", Kind: model.ArtifactKindSpec},
+		{ChunkID: 11, Ref: "shared-ref", Kind: model.ArtifactKindDoc},
+	}, 10)
+	if !IsIntentExpansionInvariant(err) {
+		t.Fatalf("validateExpandedIntentShape(kind mismatch) error = %T (%v), want invariant error", err, err)
 	}
 }
 

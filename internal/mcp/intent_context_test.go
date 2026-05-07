@@ -38,7 +38,7 @@ func TestIntentContextToolsReturnStructuredResults(t *testing.T) {
 		t.Fatalf("outline payload missing provenance: %+v", outlinePayload)
 	}
 	if len(outlinePayload.Outline) == 0 || outlinePayload.Outline[0].ChunkID == 0 || outlinePayload.Outline[0].Heading == "" {
-		t.Fatalf("outline = %+v, want rows with chunk ids and headings", outlinePayload.Outline)
+		t.Fatalf("outline = %+v, want rows with chunk IDs and headings", outlinePayload.Outline)
 	}
 
 	expandResult, err := srv.Client().CallTool(context.Background(), mcpgo.CallToolRequest{

@@ -184,7 +184,7 @@ func reviewSpecTool(options Options) mcpserver.ServerTool {
 func getIntentOutlineTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"get_intent_outline",
-		mcpgo.WithDescription("Inspect a bounded outline for a spec or doc returned by search_specs. Intended sequence: search first, inspect outline, then call expand_intent_context for selected chunk ids."),
+		mcpgo.WithDescription("Inspect a bounded outline for a spec or doc returned by search_specs. Intended sequence: search first, inspect outline, then call expand_intent_context for selected chunk IDs."),
 		mcpgo.WithInputSchema[index.IntentOutlineRequest](),
 		mcpgo.WithOutputSchema[index.IntentOutlineResult](),
 	)
@@ -197,7 +197,7 @@ func getIntentOutlineTool(options Options) mcpserver.ServerTool {
 func expandIntentContextTool(options Options) mcpserver.ServerTool {
 	tool := mcpgo.NewTool(
 		"expand_intent_context",
-		mcpgo.WithDescription("Expand a chunk id from get_intent_outline or review_spec outline_context into bounded local context. snapshot_fingerprint from the same prior result is required to detect stale handles."),
+		mcpgo.WithDescription("Expand a chunk ID from get_intent_outline or review_spec outline_context into bounded local context. snapshot_fingerprint from the same prior result is required to detect stale handles."),
 		mcpgo.WithInputSchema[index.ExpandIntentContextRequest](),
 		mcpgo.WithOutputSchema[index.ExpandIntentContextResult](),
 	)

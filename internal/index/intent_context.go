@@ -41,7 +41,7 @@ type IntentOutlineResult struct {
 // ExpandIntentContextRequest expands one known chunk handle into bounded local
 // context.
 type ExpandIntentContextRequest struct {
-	ChunkID             int64             `json:"chunk_id" jsonschema_description:"Chunk id from get_intent_outline or review_spec outline_context"`
+	ChunkID             int64             `json:"chunk_id" jsonschema_description:"Chunk ID from get_intent_outline or review_spec outline_context"`
 	SnapshotFingerprint string            `json:"snapshot_fingerprint" jsonschema_description:"Snapshot fingerprint from the result that supplied chunk_id; required to reject stale handles"`
 	Filters             SearchSpecFilters `json:"filters,omitempty" jsonschema_description:"Optional spec domain/status filters; default statuses are draft, review, and accepted"`
 	IncludeParent       bool              `json:"include_parent,omitempty" jsonschema_description:"Include the parent section when lineage is available"`
@@ -112,7 +112,7 @@ func (e *MissingChunkError) Error() string {
 	if strings.TrimSpace(e.SnapshotFingerprint) != "" {
 		return fmt.Sprintf("chunk handle %d was not found in snapshot %q; the handle may be stale", e.ChunkID, e.SnapshotFingerprint)
 	}
-	return fmt.Sprintf("chunk handle %d was not found in the current snapshot; refresh chunk ids with get_intent_outline", e.ChunkID)
+	return fmt.Sprintf("chunk handle %d was not found in the current snapshot; refresh chunk IDs with get_intent_outline", e.ChunkID)
 }
 
 // StaleSnapshotError reports that a caller supplied a snapshot fingerprint that
@@ -197,11 +197,8 @@ func GetIntentOutlineContext(ctx context.Context, cfg *config.Config, request In
 		if err != nil {
 			return nil, err
 		}
-		state, err := loadIntentRecordState(ctx, db, record.Ref)
+		state, err := loadIntentRecordStateForSpec(ctx, db, record, request.Filters)
 		if err != nil {
-			return nil, err
-		}
-		if err := validateIntentRecordFilters(record, state, request.Filters); err != nil {
 			return nil, err
 		}
 		outline, err := loadIntentOutlineRows(ctx, snapshot, record.Ref, record.Kind, request.MaxOutlineRows+1)
@@ -239,7 +236,7 @@ func ExpandIntentContextContext(ctx context.Context, cfg *config.Config, request
 		}
 		if len(expanded) == 0 {
 			// Stroma's ExpandContext contract is empty result + nil error for
-			// absent chunk ids; found chunks always include the selected chunk.
+			// absent chunk IDs; found chunks always include the selected chunk.
 			return nil, &MissingChunkError{
 				ChunkID:             request.ChunkID,
 				SnapshotFingerprint: stats.ContentFingerprint,
@@ -388,6 +385,17 @@ func loadIntentRecordState(ctx context.Context, db *sql.DB, ref string) (searchA
 	return states[ref], nil
 }
 
+func loadIntentRecordStateForSpec(ctx context.Context, db *sql.DB, record stcorpus.Record, filters SearchSpecFilters) (searchArtifactState, error) {
+	if record.Kind != model.ArtifactKindSpec {
+		return searchArtifactState{}, nil
+	}
+	state, err := loadIntentRecordState(ctx, db, record.Ref)
+	if err != nil {
+		return searchArtifactState{}, err
+	}
+	return state, validateIntentRecordFilters(record, state, filters)
+}
+
 func validateIntentRecordFilters(record stcorpus.Record, state searchArtifactState, filters SearchSpecFilters) error {
 	if record.Kind != model.ArtifactKindSpec {
 		return nil
@@ -464,10 +472,10 @@ func validateExpandedIntentShape(expanded []stindex.Section, selectedID int64) (
 		}
 	}
 	for _, section := range expanded {
-		if section.Ref != selected.Ref {
+		if section.Ref != selected.Ref || section.Kind != selected.Kind {
 			return nil, &IntentExpansionInvariantError{
 				ChunkID: selectedID,
-				Message: fmt.Sprintf("expanded section %d belongs to ref %q, not selected ref %q", section.ChunkID, section.Ref, selected.Ref),
+				Message: fmt.Sprintf("expanded section %d belongs to %s %q, not selected %s %q", section.ChunkID, section.Kind, section.Ref, selected.Kind, selected.Ref),
 			}
 		}
 	}

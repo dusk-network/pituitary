@@ -208,7 +208,7 @@ pituitary check-compliance --request-file request.json --format json
 
 Use `--format markdown` for PR-friendly reports and `--format html` for a richer shareable report with expandable evidence.
 
-Use `--outline-context --format json` when an agent needs the PageIndex-style context path: candidate record search, outline rows, deterministic section selection, and `ExpandContext` payloads with record refs, chunk ids, headings, snapshot fingerprint, and source spans where available.
+Use `--outline-context --format json` when an agent needs the PageIndex-style context path: candidate record search, outline rows, deterministic section selection, and `ExpandContext` payloads with record refs, chunk IDs, headings, snapshot fingerprint, and source spans where available.
 
 `analyze-impact` uses the same pattern for docs it shortlists: each impacted doc can include a `classification`, a source-linked `evidence` object, and `suggested_targets` with likely doc sections to inspect first.
 
