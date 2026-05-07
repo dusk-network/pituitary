@@ -11,7 +11,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/runtimeerr"
-	stembed "github.com/dusk-network/stroma/v2/embed"
+	stembed "github.com/dusk-network/stroma/v3/embed"
 )
 
 const (

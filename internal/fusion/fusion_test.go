@@ -3,7 +3,7 @@ package fusion
 import (
 	"testing"
 
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 func TestResolveZeroConfigReturnsNil(t *testing.T) {

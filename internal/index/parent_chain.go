@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	stchunk "github.com/dusk-network/stroma/v2/chunk"
+	stchunk "github.com/dusk-network/stroma/v3/chunk"
 
 	"github.com/dusk-network/pituitary/sdk"
 )

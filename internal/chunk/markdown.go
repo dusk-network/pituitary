@@ -1,6 +1,6 @@
 package chunk
 
-import stchunk "github.com/dusk-network/stroma/v2/chunk"
+import stchunk "github.com/dusk-network/stroma/v3/chunk"
 
 // Section is one heading-aware Markdown chunk.
 type Section = stchunk.Section

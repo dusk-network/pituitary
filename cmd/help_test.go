@@ -25,7 +25,7 @@ func TestRunCommandHelpAcrossSurface(t *testing.T) {
 		"check-compliance":  {"usage: pituitary [--config PATH] check-compliance (--path PATH... | --diff-file PATH|- | --request-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--diff-file VALUE", "--request-file VALUE"},
 		"check-doc-drift":   {"usage: pituitary [--config PATH] check-doc-drift ([--doc-ref REF | --path PATH]... | [--scope all] | [--diff-file PATH|-]) [--request-file PATH|-] [--format FORMAT]", "shared config resolution:", "--doc-ref VALUE", "--path VALUE", "--scope VALUE", "--diff-file VALUE", "--request-file VALUE"},
 		"fix":               {"usage: pituitary [--config PATH] fix (--path PATH | --scope VALUE) [--dry-run] [--yes] [--format FORMAT]", "shared config resolution:", "--path VALUE", "--scope VALUE", "--dry-run", "--yes"},
-		"review-spec":       {"usage: pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-record-file VALUE", "--request-file VALUE"},
+		"review-spec":       {"usage: pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--outline-context] [--format FORMAT]", "shared config resolution:", "--path VALUE", "--spec-record-file VALUE", "--outline-context", "--request-file VALUE"},
 		"schema":            {"usage: pituitary schema [COMMAND] [--format FORMAT]", "--format VALUE"},
 		"serve":             {"usage: pituitary [--config PATH] serve", "shared config resolution:", "--transport VALUE"},
 	}

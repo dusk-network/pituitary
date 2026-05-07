@@ -3,8 +3,8 @@ package chunk
 import (
 	"fmt"
 
-	stchunk "github.com/dusk-network/stroma/v2/chunk"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stchunk "github.com/dusk-network/stroma/v3/chunk"
+	stindex "github.com/dusk-network/stroma/v3/index"
 
 	"github.com/dusk-network/pituitary/sdk"
 )

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	stchunk "github.com/dusk-network/stroma/v2/chunk"
-	stcorpus "github.com/dusk-network/stroma/v2/corpus"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stchunk "github.com/dusk-network/stroma/v3/chunk"
+	stcorpus "github.com/dusk-network/stroma/v3/corpus"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 // PrefixFormat selects the layout of the per-chunk context prefix.

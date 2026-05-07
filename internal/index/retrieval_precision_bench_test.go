@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"

@@ -159,6 +159,86 @@ func TestRunReviewSpecWithSpecRefJSON(t *testing.T) {
 	}
 }
 
+func TestRunReviewSpecWithOutlineContextJSON(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runReviewSpec([]string{
+			"--spec-ref", "SPEC-042",
+			"--outline-context",
+			"--outline-context-limit", "2",
+			"--format", "json",
+		}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runReviewSpec() exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runReviewSpec() wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			SpecRef             string `json:"spec_ref"`
+			OutlineContext      bool   `json:"outline_context"`
+			OutlineContextLimit int    `json:"outline_context_limit"`
+		} `json:"request"`
+		Result struct {
+			OutlineContext struct {
+				SnapshotFingerprint string `json:"snapshot_fingerprint"`
+				Records             []struct {
+					Ref     string `json:"ref"`
+					Outline []struct {
+						ChunkID int64  `json:"chunk_id"`
+						Heading string `json:"heading"`
+					} `json:"outline"`
+					Selections []struct {
+						ChunkID         int64  `json:"chunk_id"`
+						SelectionSource string `json:"selection_source"`
+						Expanded        []struct {
+							ChunkID int64  `json:"chunk_id"`
+							Role    string `json:"role"`
+							Content string `json:"content"`
+						} `json:"expanded"`
+					} `json:"selections"`
+				} `json:"records"`
+			} `json:"outline_context"`
+		} `json:"result"`
+		Errors []cliIssue `json:"errors"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal review payload: %v", err)
+	}
+	if payload.Request.SpecRef != "SPEC-042" || !payload.Request.OutlineContext || payload.Request.OutlineContextLimit != 2 {
+		t.Fatalf("request = %+v, want outline context request", payload.Request)
+	}
+	if payload.Result.OutlineContext.SnapshotFingerprint == "" {
+		t.Fatal("snapshot_fingerprint is empty")
+	}
+	if len(payload.Result.OutlineContext.Records) == 0 {
+		t.Fatalf("outline_context = %+v, want records", payload.Result.OutlineContext)
+	}
+	first := payload.Result.OutlineContext.Records[0]
+	if first.Ref == "" || len(first.Outline) == 0 || first.Outline[0].ChunkID == 0 {
+		t.Fatalf("first outline-context record = %+v, want outline rows", first)
+	}
+	if len(first.Selections) == 0 || first.Selections[0].SelectionSource != "deterministic" {
+		t.Fatalf("selections = %+v, want deterministic selection", first.Selections)
+	}
+	if len(first.Selections[0].Expanded) == 0 || first.Selections[0].Expanded[0].Content == "" {
+		t.Fatalf("expanded = %+v, want expanded context content", first.Selections[0].Expanded)
+	}
+	if len(payload.Errors) != 0 {
+		t.Fatalf("errors = %+v, want none", payload.Errors)
+	}
+}
+
 func TestRunReviewSpecWithMarkdownContractPathJSON(t *testing.T) {
 	repo := writePathFirstWorkspace(t)
 

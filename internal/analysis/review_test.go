@@ -2,7 +2,10 @@ package analysis
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
@@ -45,6 +48,130 @@ func TestReviewSpecComposesIndexedWorkflow(t *testing.T) {
 	}
 	if len(result.DocDrift.DriftItems) != 1 || result.DocDrift.DriftItems[0].DocRef != "doc://guides/api-rate-limits" {
 		t.Fatalf("doc_drift items = %+v, want guide drift only", result.DocDrift.DriftItems)
+	}
+}
+
+func TestReviewSpecCanIncludeOutlineContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := ReviewSpec(cfg, ReviewRequest{
+		SpecRef:             "SPEC-042",
+		OutlineContext:      true,
+		OutlineContextLimit: 2,
+	})
+	if err != nil {
+		t.Fatalf("ReviewSpec() error = %v", err)
+	}
+	if result.OutlineContext == nil {
+		t.Fatal("OutlineContext is nil")
+	}
+	if result.OutlineContext.SnapshotFingerprint == "" {
+		t.Fatal("OutlineContext.SnapshotFingerprint is empty")
+	}
+	if len(result.OutlineContext.Records) == 0 {
+		t.Fatalf("OutlineContext = %+v, want records", result.OutlineContext)
+	}
+	first := result.OutlineContext.Records[0]
+	if first.Ref == "" || len(first.Outline) == 0 || len(first.Selections) == 0 {
+		t.Fatalf("first outline-context record = %+v, want outline and selections", first)
+	}
+	if len(first.Selections[0].Expanded) == 0 {
+		t.Fatalf("selection = %+v, want expanded context", first.Selections[0])
+	}
+}
+
+func TestReviewSpecWarnsWhenOutlineContextFails(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := index.Rebuild(cfg, records); err != nil {
+		t.Fatalf("index.Rebuild() error = %v", err)
+	}
+
+	result, err := ReviewSpec(cfg, ReviewRequest{
+		SpecRef:             "SPEC-042",
+		OutlineContext:      true,
+		OutlineContextLimit: 999,
+	})
+	if err != nil {
+		t.Fatalf("ReviewSpec() error = %v, want non-fatal outline-context warning", err)
+	}
+	if result.OutlineContext != nil {
+		t.Fatalf("OutlineContext = %+v, want nil after invalid outline-context request", result.OutlineContext)
+	}
+	var found bool
+	for _, warning := range result.Warnings {
+		if warning.Code == "outline_context_unavailable" && warning.Ref == "SPEC-042" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Warnings = %+v, want outline_context_unavailable", result.Warnings)
+	}
+	if result.Overlap == nil || result.Impact == nil || result.DocDrift == nil {
+		t.Fatalf("result = %+v, want regular review result retained", result)
+	}
+}
+
+func TestReviewOutlineContextRefsAreBounded(t *testing.T) {
+	t.Parallel()
+
+	affectedDocs := make([]ImpactedDoc, 12)
+	for i := range affectedDocs {
+		affectedDocs[i].Ref = fmt.Sprintf("doc://guide/%02d", i)
+	}
+	refs := reviewOutlineContextRefs(
+		specDocument{Record: model.SpecRecord{Ref: "SPEC-042"}},
+		&OverlapResult{Overlaps: []OverlapItem{{Ref: "SPEC-008"}, {Ref: "SPEC-055"}, {Ref: "SPEC-099"}}},
+		&AnalyzeImpactResult{AffectedDocs: affectedDocs},
+	)
+	if len(refs) > maxReviewOutlineContextRefs {
+		t.Fatalf("refs = %v, want at most %d", refs, maxReviewOutlineContextRefs)
+	}
+	for _, want := range []string{"SPEC-042", "SPEC-008", "SPEC-055"} {
+		if !reviewTestContainsString(refs, want) {
+			t.Fatalf("refs = %v, want %s retained", refs, want)
+		}
+	}
+}
+
+func reviewTestContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReviewOutlineContextQueryIsBoundedAndUTF8Safe(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("é", maxReviewOutlineContextQueryBytes)
+	query := reviewOutlineContextQuery(specDocument{Record: model.SpecRecord{
+		Ref:      "SPEC-042",
+		Title:    "Unicode Spec",
+		BodyText: body,
+	}})
+	if !utf8.ValidString(query) {
+		t.Fatalf("query is invalid UTF-8")
+	}
+	if len(query) > maxReviewOutlineContextQueryBytes+utf8.UTFMax {
+		t.Fatalf("query length = %d, want bounded", len(query))
 	}
 }
 

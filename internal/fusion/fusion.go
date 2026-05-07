@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 const (
