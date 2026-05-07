@@ -102,53 +102,15 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 		CaseCount:   len(cases),
 	}
 
-	chunkEligible := 0
 	for _, c := range cases {
-		hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
-			SearchParams: stindex.SearchParams{
-				Text:     c.Query,
-				Limit:    10,
-				Kinds:    []string{sdk.ArtifactKindDoc},
-				Embedder: embedder,
-			},
-		})
+		cr, ccr, chunkEligible, err := runPrecisionBenchCase(ctx, snapshot, embedder, sqlDB, c)
 		if err != nil {
-			t.Fatalf("case %s: search: %v", c.ID, err)
+			t.Fatal(err)
 		}
-		cr := evaluatePrecisionCase(c, hits)
-		rep.Cases = append(rep.Cases, cr)
-		rep.MeanPrecisionAt5 += cr.PrecisionAt5
-		rep.MeanPrecisionAt10 += cr.PrecisionAt10
-		rep.MeanRecallAt10 += cr.RecallAt10
-		rep.MeanReciprocalRank += cr.ReciprocalRank
-
-		relevant, status, err := resolveChunkRelevance(sqlDB, c.RelevantSourceSpans)
-		if err != nil {
-			t.Fatalf("case %s: resolve chunk relevance: %v", c.ID, err)
-		}
-		ccr := evaluateChunkPrecisionCase(c, hits, relevant, status)
-		rep.ChunkCases = append(rep.ChunkCases, ccr)
-		if status == resolveStatusOK {
-			chunkEligible++
-			rep.MeanChunkPrecisionAt5 += ccr.ChunkPrecisionAt5
-			rep.MeanChunkPrecisionAt10 += ccr.ChunkPrecisionAt10
-			rep.MeanChunkRecallAt10 += ccr.ChunkRecallAt10
-			rep.MeanChunkReciprocalRank += ccr.ChunkReciprocalRank
-		}
+		rep.addPrecisionCase(cr)
+		rep.addChunkPrecisionCase(ccr, chunkEligible)
 	}
-	n := float64(len(cases))
-	rep.MeanPrecisionAt5 /= n
-	rep.MeanPrecisionAt10 /= n
-	rep.MeanRecallAt10 /= n
-	rep.MeanReciprocalRank /= n
-	rep.ChunkCaseCount = chunkEligible
-	if chunkEligible > 0 {
-		cn := float64(chunkEligible)
-		rep.MeanChunkPrecisionAt5 /= cn
-		rep.MeanChunkPrecisionAt10 /= cn
-		rep.MeanChunkRecallAt10 /= cn
-		rep.MeanChunkReciprocalRank /= cn
-	}
+	rep.finalizeAverages()
 
 	// Strict mode (for published runs): fail if any case carries spans but
 	// the chunk-level metric silently dropped it from the denominator. This
@@ -158,19 +120,7 @@ func TestRetrievalPrecisionBench(t *testing.T) {
 	// PASS. Opt-in via PITUITARY_PRECISION_STRICT=1 so iteration runs can
 	// still surface labeling bugs without blocking.
 	if os.Getenv("PITUITARY_PRECISION_STRICT") == "1" {
-		var bad []string
-		for i, c := range cases {
-			if len(c.RelevantSourceSpans) == 0 {
-				continue
-			}
-			if rep.ChunkCases[i].ResolveStatus != resolveStatusOK {
-				bad = append(bad, fmt.Sprintf("%s (status=%s)", c.ID, rep.ChunkCases[i].ResolveStatus))
-			}
-		}
-		if len(bad) > 0 {
-			t.Fatalf("PITUITARY_PRECISION_STRICT=1 and %d case(s) with spans did not resolve to OK: %s",
-				len(bad), strings.Join(bad, ", "))
-		}
+		requirePrecisionStrictResolved(t, cases, rep)
 	}
 
 	if reportPath := strings.TrimSpace(os.Getenv("PITUITARY_PRECISION_REPORT")); reportPath != "" {
@@ -255,6 +205,61 @@ type precisionReport struct {
 	SnapshotSizeBytes int64 `json:"snapshot_size_bytes,omitempty"`
 }
 
+func (rep *precisionReport) addPrecisionCase(cr precisionCaseResult) {
+	rep.Cases = append(rep.Cases, cr)
+	rep.MeanPrecisionAt5 += cr.PrecisionAt5
+	rep.MeanPrecisionAt10 += cr.PrecisionAt10
+	rep.MeanRecallAt10 += cr.RecallAt10
+	rep.MeanReciprocalRank += cr.ReciprocalRank
+}
+
+func (rep *precisionReport) addChunkPrecisionCase(ccr chunkPrecisionCaseResult, eligible bool) {
+	rep.ChunkCases = append(rep.ChunkCases, ccr)
+	if !eligible {
+		return
+	}
+	rep.ChunkCaseCount++
+	rep.MeanChunkPrecisionAt5 += ccr.ChunkPrecisionAt5
+	rep.MeanChunkPrecisionAt10 += ccr.ChunkPrecisionAt10
+	rep.MeanChunkRecallAt10 += ccr.ChunkRecallAt10
+	rep.MeanChunkReciprocalRank += ccr.ChunkReciprocalRank
+}
+
+func (rep *precisionReport) finalizeAverages() {
+	if rep.CaseCount > 0 {
+		n := float64(rep.CaseCount)
+		rep.MeanPrecisionAt5 /= n
+		rep.MeanPrecisionAt10 /= n
+		rep.MeanRecallAt10 /= n
+		rep.MeanReciprocalRank /= n
+	}
+	if rep.ChunkCaseCount > 0 {
+		n := float64(rep.ChunkCaseCount)
+		rep.MeanChunkPrecisionAt5 /= n
+		rep.MeanChunkPrecisionAt10 /= n
+		rep.MeanChunkRecallAt10 /= n
+		rep.MeanChunkReciprocalRank /= n
+	}
+}
+
+func requirePrecisionStrictResolved(t *testing.T, cases []precisionCase, rep *precisionReport) {
+	t.Helper()
+
+	var bad []string
+	for i, c := range cases {
+		if len(c.RelevantSourceSpans) == 0 {
+			continue
+		}
+		if rep.ChunkCases[i].ResolveStatus != resolveStatusOK {
+			bad = append(bad, fmt.Sprintf("%s (status=%s)", c.ID, rep.ChunkCases[i].ResolveStatus))
+		}
+	}
+	if len(bad) > 0 {
+		t.Fatalf("PITUITARY_PRECISION_STRICT=1 and %d case(s) with spans did not resolve to OK: %s",
+			len(bad), strings.Join(bad, ", "))
+	}
+}
+
 func loadPrecisionCases(path string) ([]precisionCase, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -289,6 +294,26 @@ func loadPrecisionCases(path string) ([]precisionCase, error) {
 		}
 	}
 	return cases, nil
+}
+
+func runPrecisionBenchCase(ctx context.Context, snapshot *stindex.Snapshot, embedder Embedder, sqlDB *sql.DB, c precisionCase) (precisionCaseResult, chunkPrecisionCaseResult, bool, error) {
+	hits, err := snapshot.Search(ctx, stindex.SnapshotSearchQuery{
+		SearchParams: stindex.SearchParams{
+			Text:     c.Query,
+			Limit:    10,
+			Kinds:    []string{sdk.ArtifactKindDoc},
+			Embedder: embedder,
+		},
+	})
+	if err != nil {
+		return precisionCaseResult{}, chunkPrecisionCaseResult{}, false, fmt.Errorf("case %s: search: %w", c.ID, err)
+	}
+
+	relevant, status, err := resolveChunkRelevance(sqlDB, c.RelevantSourceSpans)
+	if err != nil {
+		return precisionCaseResult{}, chunkPrecisionCaseResult{}, false, fmt.Errorf("case %s: resolve chunk relevance: %w", c.ID, err)
+	}
+	return evaluatePrecisionCase(c, hits), evaluateChunkPrecisionCase(c, hits, relevant, status), status == resolveStatusOK, nil
 }
 
 func evaluatePrecisionCase(c precisionCase, hits []stindex.SearchHit) precisionCaseResult {
