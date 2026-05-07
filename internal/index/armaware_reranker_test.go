@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 // TestArmAwareRerankerBoostsFTSOnlyTerminologyMatch documents the one

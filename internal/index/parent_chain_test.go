@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	stchunk "github.com/dusk-network/stroma/v2/chunk"
+	stchunk "github.com/dusk-network/stroma/v3/chunk"
 
 	pchunk "github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	stembed "github.com/dusk-network/stroma/v2/embed"
+	stembed "github.com/dusk-network/stroma/v3/embed"
 )
 
 // DependencyUnavailableError indicates that a required runtime dependency

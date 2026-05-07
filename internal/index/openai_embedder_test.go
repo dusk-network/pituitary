@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
-	stembed "github.com/dusk-network/stroma/v2/embed"
+	stembed "github.com/dusk-network/stroma/v3/embed"
 )
 
 func TestOpenAICompatibleEmbedderUsesNomicSearchPrefixes(t *testing.T) {

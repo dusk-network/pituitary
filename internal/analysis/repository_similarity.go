@@ -7,7 +7,7 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/ranking"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 const (
@@ -439,8 +439,8 @@ func shortlistRefProbeLimit(limit int) int {
 
 func shortlistChunkProbeLimit(limit int) int {
 	probeLimit := shortlistRefProbeLimit(limit) * 4
-	if probeLimit > 256 {
-		probeLimit = 256
+	if probeLimit > stindex.MaxSearchLimit {
+		probeLimit = stindex.MaxSearchLimit
 	}
 	return probeLimit
 }

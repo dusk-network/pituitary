@@ -19,8 +19,8 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
-	stcorpus "github.com/dusk-network/stroma/v2/corpus"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stcorpus "github.com/dusk-network/stroma/v3/corpus"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 const schemaVersion = 10
@@ -41,6 +41,7 @@ type RebuildResult struct {
 	ReusedArtifactCount   int                        `json:"reused_artifact_count,omitempty"`
 	ReusedChunkCount      int                        `json:"reused_chunk_count,omitempty"`
 	EmbeddedChunkCount    int                        `json:"embedded_chunk_count,omitempty"`
+	ReuseDisabledReason   string                     `json:"reuse_disabled_reason,omitempty"`
 	AddedCount            int                        `json:"added_count,omitempty"`
 	UpdatedCount          int                        `json:"updated_count,omitempty"`
 	RemovedCount          int                        `json:"removed_count,omitempty"`
@@ -114,7 +115,10 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 		return nil, err
 	}
 
-	result := summarizeRebuild(records, dimension, reuseState, options)
+	result, err := summarizeRebuild(records, dimension, reuseState, options)
+	if err != nil {
+		return nil, err
+	}
 	result.IndexPath = cfg.Workspace.ResolvedIndexPath
 	result.DryRun = true
 	result.InferAppliesToEnabled = effectiveInferAppliesTo(cfg, records.Specs)
@@ -234,7 +238,10 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		}
 	}
 
-	result := summarizeRebuild(records, dimension, reuseState, options)
+	result, err := summarizeRebuild(records, dimension, reuseState, options)
+	if err != nil {
+		return nil, err
+	}
 	result.ContentFingerprint = contentFP
 	result.IndexPath = indexPath
 

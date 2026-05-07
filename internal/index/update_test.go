@@ -11,7 +11,8 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
-	ststore "github.com/dusk-network/stroma/v2/store"
+	stindex "github.com/dusk-network/stroma/v3/index"
+	ststore "github.com/dusk-network/stroma/v3/store"
 )
 
 func TestUpdateNoOp(t *testing.T) {
@@ -559,7 +560,6 @@ func TestNormalizeStromaUpdateErrorTreatsCompatibilityErrorsAsPreconditions(t *t
 	t.Parallel()
 
 	markers := []string{
-		"schema version mismatch",
 		"embedder fingerprint mismatch",
 		"embedder dimension mismatch",
 		"quantization mismatch",
@@ -581,6 +581,21 @@ func TestNormalizeStromaUpdateErrorTreatsCompatibilityErrorsAsPreconditions(t *t
 				t.Fatalf("normalized error = %q, want rebuild guidance", err)
 			}
 		})
+	}
+}
+
+func TestNormalizeStromaUpdateErrorTreatsUnsupportedSchemaAsPrecondition(t *testing.T) {
+	t.Parallel()
+
+	err := normalizeStromaUpdateError("snapshot.db", fmt.Errorf("%w: index=%q update=%q", stindex.ErrUnsupportedSchemaVersion, "1", "10"))
+	if !IsUpdatePrecondition(err) {
+		t.Fatalf("expected UpdatePreconditionError, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "unsupported snapshot schema version") {
+		t.Fatalf("normalized error = %q, want unsupported schema marker", err)
+	}
+	if !strings.Contains(err.Error(), "pituitary index --rebuild") {
+		t.Fatalf("normalized error = %q, want rebuild guidance", err)
 	}
 }
 

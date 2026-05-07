@@ -16,7 +16,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
 	"github.com/dusk-network/pituitary/internal/temporal"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 	"golang.org/x/sync/errgroup"
 )
 

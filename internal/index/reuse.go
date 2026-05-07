@@ -10,11 +10,12 @@ import (
 	"github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 type reuseState struct {
-	artifacts map[string]storedArtifact
+	artifacts      map[string]storedArtifact
+	disabledReason string
 }
 
 type storedArtifact struct {
@@ -38,28 +39,35 @@ func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprin
 	info, err := os.Stat(snapshotPath)
 	switch {
 	case os.IsNotExist(err):
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+		return emptyReuseState("no existing stroma snapshot"), nil
 	case err != nil:
 		return nil, fmt.Errorf("stat existing snapshot %s: %w", snapshotPath, err)
 	case info.IsDir():
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+		return emptyReuseState(fmt.Sprintf("existing stroma snapshot %s is a directory", snapshotPath)), nil
 	}
 
 	snapshot, err := stindex.OpenSnapshot(ctx, snapshotPath)
 	if err != nil {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+		return emptyReuseState(fmt.Sprintf("open existing stroma snapshot: %v", err)), nil
 	}
 	defer snapshot.Close()
 
 	stats, err := snapshot.Stats(ctx)
 	if err != nil {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+		return emptyReuseState(fmt.Sprintf("read existing stroma snapshot stats: %v", err)), nil
 	}
 	if stats.EmbedderFingerprint != embedderFingerprint || stats.EmbedderDimension != embedderDimension {
-		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
+		return emptyReuseState("existing stroma snapshot embedder does not match current runtime"), nil
 	}
 
 	return loadStoredArtifactsContext(ctx, snapshot)
+}
+
+func emptyReuseState(reason string) *reuseState {
+	return &reuseState{
+		artifacts:      map[string]storedArtifact{},
+		disabledReason: reason,
+	}
 }
 
 func loadStoredArtifactsContext(ctx context.Context, snapshot *stindex.Snapshot) (*reuseState, error) {
@@ -127,29 +135,39 @@ func storedArtifactForRecord(state *reuseState, ref string) storedArtifact {
 	return state.artifacts[ref]
 }
 
-func updateRebuildReuseCountsForSpecs(result *RebuildResult, records []model.SpecRecord, state *reuseState) {
+func updateRebuildReuseCountsForSpecs(result *RebuildResult, records []model.SpecRecord, state *reuseState) error {
 	for _, spec := range records {
-		plan := planArtifactReuse(spec.Title, spec.ContentHash, spec.BodyText, storedArtifactForRecord(state, spec.Ref))
+		record, err := corpusRecordFromSpec(spec)
+		if err != nil {
+			return fmt.Errorf("normalize spec %s for reuse accounting: %w", spec.Ref, err)
+		}
+		plan := planArtifactReuse(spec.Title, record.ContentHash, spec.BodyText, storedArtifactForRecord(state, spec.Ref))
 		if plan.artifactUnchanged {
 			result.ReusedArtifactCount++
 		}
 		result.ReusedChunkCount += plan.reusedChunkCount
 		result.EmbeddedChunkCount += plan.embeddedChunkCount
 	}
+	return nil
 }
 
-func updateRebuildReuseCountsForDocs(result *RebuildResult, records []model.DocRecord, state *reuseState) {
+func updateRebuildReuseCountsForDocs(result *RebuildResult, records []model.DocRecord, state *reuseState) error {
 	for _, doc := range records {
-		plan := planArtifactReuse(doc.Title, doc.ContentHash, doc.BodyText, storedArtifactForRecord(state, doc.Ref))
+		record, err := corpusRecordFromDoc(doc)
+		if err != nil {
+			return fmt.Errorf("normalize doc %s for reuse accounting: %w", doc.Ref, err)
+		}
+		plan := planArtifactReuse(doc.Title, record.ContentHash, doc.BodyText, storedArtifactForRecord(state, doc.Ref))
 		if plan.artifactUnchanged {
 			result.ReusedArtifactCount++
 		}
 		result.ReusedChunkCount += plan.reusedChunkCount
 		result.EmbeddedChunkCount += plan.embeddedChunkCount
 	}
+	return nil
 }
 
-func summarizeRebuild(records *source.LoadResult, dimension int, state *reuseState, options RebuildOptions) *RebuildResult {
+func summarizeRebuild(records *source.LoadResult, dimension int, state *reuseState, options RebuildOptions) (*RebuildResult, error) {
 	result := &RebuildResult{
 		ArtifactCount:     len(records.Specs) + len(records.Docs),
 		SpecCount:         len(records.Specs),
@@ -159,6 +177,9 @@ func summarizeRebuild(records *source.LoadResult, dimension int, state *reuseSta
 		Repos:             repoCoverageFromRecords(records),
 		Sources:           append([]source.LoadSourceSummary(nil), records.Sources...),
 	}
+	if state != nil {
+		result.ReuseDisabledReason = state.disabledReason
+	}
 
 	for _, spec := range records.Specs {
 		result.ChunkCount += len(chunk.Markdown(spec.Title, spec.BodyText))
@@ -167,8 +188,12 @@ func summarizeRebuild(records *source.LoadResult, dimension int, state *reuseSta
 	for _, doc := range records.Docs {
 		result.ChunkCount += len(chunk.Markdown(doc.Title, doc.BodyText))
 	}
-	updateRebuildReuseCountsForSpecs(result, records.Specs, state)
-	updateRebuildReuseCountsForDocs(result, records.Docs, state)
+	if err := updateRebuildReuseCountsForSpecs(result, records.Specs, state); err != nil {
+		return nil, err
+	}
+	if err := updateRebuildReuseCountsForDocs(result, records.Docs, state); err != nil {
+		return nil, err
+	}
 	result.ContentFingerprint = contentFingerprint(records)
-	return result
+	return result, nil
 }

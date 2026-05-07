@@ -12,7 +12,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/ranking"
 	"github.com/dusk-network/pituitary/internal/runtimeerr"
-	stchat "github.com/dusk-network/stroma/v2/chat"
+	stchat "github.com/dusk-network/stroma/v3/chat"
 )
 
 type qualitativeAnalyzer interface {

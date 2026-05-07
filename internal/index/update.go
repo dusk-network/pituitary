@@ -13,8 +13,8 @@ import (
 	pchunk "github.com/dusk-network/pituitary/internal/chunk"
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/source"
-	stindex "github.com/dusk-network/stroma/v2/index"
-	ststore "github.com/dusk-network/stroma/v2/store"
+	stindex "github.com/dusk-network/stroma/v3/index"
+	ststore "github.com/dusk-network/stroma/v3/store"
 )
 
 // UpdatePreconditionError reports that the existing index is structurally
@@ -137,7 +137,10 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 	if err != nil {
 		return nil, err
 	}
-	result := summarizeRebuild(records, dimension, reuseState, RebuildOptions{})
+	result, err := summarizeRebuild(records, dimension, reuseState, RebuildOptions{})
+	if err != nil {
+		return nil, err
+	}
 	result.IndexPath = indexPath
 	result.Update = true
 	result.FullRebuild = false
@@ -553,9 +556,14 @@ func normalizeStromaUpdateError(snapshotPath string, err error) error {
 			Action: "run `pituitary index --rebuild`",
 		}
 	}
+	if errors.Is(err, stindex.ErrUnsupportedSchemaVersion) {
+		return &UpdatePreconditionError{
+			Reason: strings.TrimSpace(err.Error()),
+			Action: "run `pituitary index --rebuild`",
+		}
+	}
 	message := strings.TrimSpace(err.Error())
 	for _, marker := range []string{
-		"schema version mismatch",
 		"embedder fingerprint mismatch",
 		"embedder dimension mismatch",
 		"quantization mismatch",

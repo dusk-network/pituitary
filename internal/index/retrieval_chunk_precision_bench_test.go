@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	stindex "github.com/dusk-network/stroma/v2/index"
+	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
 // ResolveStatus values for resolveChunkRelevance. Centralized as unexported

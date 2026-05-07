@@ -59,6 +59,7 @@ Text output now also promotes the strongest per-finding guidance into a short `T
 | `fix --path PATH --dry-run` | Preview deterministic doc-drift remediations before writing |
 | `fix --scope all --yes` | Apply deterministic doc-drift remediations without prompting |
 | `review-spec --path SPEC` | Full review: overlap + comparison + impact + drift + remediation |
+| `review-spec --path SPEC --outline-context --format json` | Include bounded outline-guided retrieval context with chunk provenance |
 | `schema COMMAND --format json` | Inspect the machine-readable request/response contract for one command |
 | `serve --config FILE` | Start MCP server over stdio |
 
@@ -206,6 +207,8 @@ pituitary check-compliance --request-file request.json --format json
 - remediation suggestions
 
 Use `--format markdown` for PR-friendly reports and `--format html` for a richer shareable report with expandable evidence.
+
+Use `--outline-context --format json` when an agent needs the PageIndex-style context path: candidate record search, outline rows, deterministic section selection, and `ExpandContext` payloads with record refs, chunk ids, headings, snapshot fingerprint, and source spans where available.
 
 `analyze-impact` uses the same pattern for docs it shortlists: each impacted doc can include a `classification`, a source-linked `evidence` object, and `suggested_targets` with likely doc sections to inspect first.
 

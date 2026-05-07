@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dusk-network/stroma/v2/provider"
+	"github.com/dusk-network/stroma/v3/provider"
 )
 
 // Failure classes are mirrored from stroma's provider package so callers

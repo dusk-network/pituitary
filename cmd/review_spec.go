@@ -18,16 +18,18 @@ func runReviewSpec(args []string, stdout, stderr io.Writer) int {
 
 func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var (
-		specRef        string
-		specPath       string
-		specRecordFile string
+		specRef             string
+		specPath            string
+		specRecordFile      string
+		outlineContext      bool
+		outlineContextLimit int
 	)
 
 	return runCommand[analysis.ReviewRequest, analysis.ReviewResult](
 		ctx, args, stdout, stderr,
 		commandRun[analysis.ReviewRequest, analysis.ReviewResult]{
 			Name:  "review-spec",
-			Usage: "pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--format FORMAT]",
+			Usage: "pituitary [--config PATH] review-spec (--path PATH | --spec-ref REF | --spec-record-file PATH|- | --request-file PATH|-) [--outline-context] [--format FORMAT]",
 			Options: commandRunOptions{
 				RequestFile:   true,
 				ConfigForFile: true,
@@ -36,11 +38,15 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 				fs.StringVar(&specRef, "spec-ref", "", "indexed spec ref")
 				fs.StringVar(&specPath, "path", "", "workspace-relative or absolute path to an indexed spec")
 				fs.StringVar(&specRecordFile, "spec-record-file", "", "path to canonical spec_record JSON, or - for stdin")
+				fs.BoolVar(&outlineContext, "outline-context", false, "include bounded outline-guided context in the result")
+				fs.IntVar(&outlineContextLimit, "outline-context-limit", 0, "maximum outline-context candidate records")
 			},
 			InlineFlagsSet: func(_ *flag.FlagSet) bool {
 				return strings.TrimSpace(specRef) != "" ||
 					strings.TrimSpace(specPath) != "" ||
-					strings.TrimSpace(specRecordFile) != ""
+					strings.TrimSpace(specRecordFile) != "" ||
+					outlineContext ||
+					outlineContextLimit != 0
 			},
 			LoadRequestFile: autoLoadWorkspaceRequest[analysis.ReviewRequest],
 			BuildRequest: func(ctx context.Context, _ *config.Config, resolvedConfigPath string, _ []string) (analysis.ReviewRequest, error) {
@@ -69,7 +75,13 @@ func runReviewSpecContext(ctx context.Context, args []string, stdout, stderr io.
 					}
 					trimmedSpecRef = resolved
 				}
-				return reviewRequestFromFlags(workspaceRoot, trimmedSpecRef, trimmedRecord)
+				request, err := reviewRequestFromFlags(workspaceRoot, trimmedSpecRef, trimmedRecord)
+				if err != nil {
+					return request, err
+				}
+				request.OutlineContext = outlineContext
+				request.OutlineContextLimit = outlineContextLimit
+				return request, nil
 			},
 			Execute: func(ctx context.Context, cfgPath string, req analysis.ReviewRequest, _ string) (analysis.ReviewRequest, *analysis.ReviewResult, *app.Issue) {
 				op := app.ReviewSpec(ctx, cfgPath, req)

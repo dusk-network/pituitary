@@ -70,6 +70,7 @@ pituitary review-spec --path specs/X            # full composite review
 pituitary review-spec --path specs/X --format markdown  # shareable report
 pituitary review-spec --path specs/X --format html      # rich HTML report
 pituitary review-spec --path specs/X --format json      # machine-readable
+pituitary review-spec --path specs/X --outline-context --format json  # outline-guided context
 pituitary compare-specs --request-file request.json --format json  # structured request input
 ```
 
