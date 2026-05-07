@@ -196,7 +196,7 @@ Typical client config:
 }
 ```
 
-The MCP server exposes 13 tools:
+The MCP server exposes 15 tools:
 
 - `search_specs`
 - `check_overlap`
@@ -204,6 +204,8 @@ The MCP server exposes 13 tools:
 - `analyze_impact`
 - `check_doc_drift`
 - `review_spec`
+- `get_intent_outline`
+- `expand_intent_context`
 - `check_compliance`
 - `check_terminology`
 - `governed_by`
@@ -211,5 +213,7 @@ The MCP server exposes 13 tools:
 - `fix_preview`
 - `status`
 - `explain_file`
+
+For focused context, use `search_specs` first, inspect a selected record with `get_intent_outline`, then call `expand_intent_context` on selected chunk IDs. Pass the returned `snapshot_fingerprint` into every expansion call; expansion rejects missing or stale fingerprints so chunk handles cannot silently cross snapshot boundaries.
 
 `index --rebuild` remains CLI-only by design.

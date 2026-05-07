@@ -166,6 +166,18 @@ func TestClassifyExecutionErrorDefaultsToValidationError(t *testing.T) {
 	}
 }
 
+func TestClassifyExecutionErrorSupportsInternalPolicy(t *testing.T) {
+	t.Parallel()
+
+	issue := classifyExecutionError(nil, &index.IntentExpansionInvariantError{
+		ChunkID: 42,
+		Message: "selected chunk missing",
+	}, operationExecutionPolicy{Internal: index.IsIntentExpansionInvariant})
+	if issue.Code != CodeInternalError {
+		t.Fatalf("classifyExecutionError() code = %q, want %q", issue.Code, CodeInternalError)
+	}
+}
+
 func TestOperationsShareNotFoundClassification(t *testing.T) {
 	t.Parallel()
 
@@ -197,6 +209,43 @@ func TestOperationsShareNotFoundClassification(t *testing.T) {
 		if !strings.Contains(issue.Message, "SPEC-404") {
 			t.Fatalf("%s issue.message = %q, want missing spec ref detail", name, issue.Message)
 		}
+	}
+}
+
+func TestIntentContextClassifiesFilteredAndStaleHandles(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeOperationWorkspace(t, false)
+	filtered := GetIntentOutline(context.Background(), configPath, index.IntentOutlineRequest{
+		Ref:  "SPEC-008",
+		Kind: "spec",
+	}).Issue
+	if filtered == nil {
+		t.Fatal("GetIntentOutline() issue = nil, want filtered classification")
+	}
+	if filtered.Code != CodeFiltered {
+		t.Fatalf("GetIntentOutline() issue.code = %q, want %q", filtered.Code, CodeFiltered)
+	}
+
+	outline := GetIntentOutline(context.Background(), configPath, index.IntentOutlineRequest{
+		Ref:  "SPEC-042",
+		Kind: "spec",
+	})
+	if outline.Issue != nil {
+		t.Fatalf("GetIntentOutline(SPEC-042) issue = %+v, want result", outline.Issue)
+	}
+	if len(outline.Result.Outline) == 0 {
+		t.Fatal("GetIntentOutline(SPEC-042) returned no outline rows")
+	}
+	stale := ExpandIntentContext(context.Background(), configPath, index.ExpandIntentContextRequest{
+		ChunkID:             outline.Result.Outline[0].ChunkID,
+		SnapshotFingerprint: "old-snapshot",
+	}).Issue
+	if stale == nil {
+		t.Fatal("ExpandIntentContext() issue = nil, want stale-handle classification")
+	}
+	if stale.Code != CodeStaleHandle {
+		t.Fatalf("ExpandIntentContext() issue.code = %q, want %q", stale.Code, CodeStaleHandle)
 	}
 }
 
