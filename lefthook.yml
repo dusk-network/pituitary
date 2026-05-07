@@ -22,7 +22,7 @@ pre-commit:
       tags: safety
       run: |
         bad=$(printf '%s\n' {staged_files} | grep -E \
-          '(^|/)\.env(\.|$)|/secrets?\.(ya?ml|json|toml)$|\.pem$|(^|/)id_rsa(\.|$)' \
+          '(^|/)\.env(\.|$)|(^|/)secrets?\.(ya?ml|json|toml)$|\.pem$|(^|/)id_rsa(\.|$)' \
           || true)
         if [ -n "$bad" ]; then
           printf 'refusing to commit secret-shaped files:\n%s\n' "$bad" >&2
@@ -39,7 +39,7 @@ pre-commit:
     # ── Generated mirrors should be regenerated, not hand-edited ────────
     # AGENTS.md is canonical; CLAUDE.md and GEMINI.md are mirrors.
     # Soft warning rather than a hard block — legitimate regeneration must
-    # still be commitable. If/when a generator script lands, switch to
+    # still be committable. If/when a generator script lands, switch to
     # `exit 1` here.
     warn-mirror-edits:
       tags: governance
@@ -52,7 +52,7 @@ pre-commit:
     # ── Go: format check on staged files only (fast) ────────────────────
     gofmt:
       tags: go
-      glob: "*.go"
+      glob: "**/*.go"
       run: |
         out=$(gofmt -l {staged_files})
         if [ -n "$out" ]; then
@@ -66,7 +66,7 @@ pre-commit:
     #   internal/{index,analysis} ↛ internal/ast
     go-vet:
       tags: go
-      glob: "*.go"
+      glob: "**/*.go"
       run: make vet
 
     # ── Docs: link integrity when docs change ───────────────────────────
