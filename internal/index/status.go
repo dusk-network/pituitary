@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/model"
@@ -410,26 +409,4 @@ func governanceAmbiguousEdgeExpr(hasConfidence bool) string {
 		return `SUM(CASE WHEN e.confidence = 'ambiguous' THEN 1 ELSE 0 END)`
 	}
 	return `0`
-}
-
-func splitGovernanceSpecRefs(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	values := strings.Split(raw, ",")
-	refs := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		ref := strings.TrimSpace(value)
-		if ref == "" {
-			continue
-		}
-		if _, ok := seen[ref]; ok {
-			continue
-		}
-		seen[ref] = struct{}{}
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	return refs
 }

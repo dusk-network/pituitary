@@ -164,9 +164,7 @@ func buildCompileFileResult(cfg *config.Config, finding analysis.TerminologyFind
 	}
 
 	patchEdits := make([]plannedEdit, len(edits))
-	for i, e := range edits {
-		patchEdits[i] = e
-	}
+	copy(patchEdits, edits)
 	if err := applyEdits(path, body, fileResult.originalChecksum, patchEdits); err != nil {
 		fileResult.Status = "skipped"
 		fileResult.Reason = err.Error()

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"io"
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -17,13 +16,8 @@ func resolveIndexedSpecRefsWithConfigContext(ctx context.Context, cfg *config.Co
 	return index.ResolveIndexedSpecRefsWithConfigContext(ctx, cfg, rawPaths)
 }
 
-func writeSpecPathResolutionError(stdout, stderr io.Writer, format, command string, request any, err error) int {
-	issue := specPathResolutionIssue(err)
-	return writeCLIError(stdout, stderr, format, command, request, issue, 2)
-}
-
 // specPathResolutionIssue classifies a spec-path resolution error into the
-// cliIssue code previously emitted by writeSpecPathResolutionError.
+// cliIssue code surfaced via specPathResolutionError.
 func specPathResolutionIssue(err error) cliIssue {
 	code := "validation_error"
 	switch {
