@@ -264,6 +264,7 @@ Retrieval-precision benchmark reports:
 
 - [docs/development/retrieval-precision-344.md](docs/development/retrieval-precision-344.md) — doc-level precision@k on the bootstrap corpus, gating the `LateChunkPolicy` default (see #344).
 - [docs/development/retrieval-precision-358.md](docs/development/retrieval-precision-358.md) — chunk-level precision benchmark on the next-iteration corpus (post-#344 follow-up; see #358).
+- [docs/development/governance-section-summaries-2026-05-07.md](docs/development/governance-section-summaries-2026-05-07.md) — evaluation contract for optional governance-scoped section summaries in outline-guided retrieval (see #387).
 
 </details>
 
