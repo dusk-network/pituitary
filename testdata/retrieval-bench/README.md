@@ -6,6 +6,8 @@ gates #344 (default docs to `LateChunkPolicy`).
 ## Files
 
 - `ccd-guide-cases.json` — hand-curated query → relevant doc refs.
+- `armb-rag-cases.json` — #361 LLM-graded RAG cases with reference answers
+  for `ExpandContext(IncludeParent)` off/on comparison.
 - `base-config.example.toml` — portable template for the base pituitary config
   the runner consumes. Copy, edit `[workspace].root` and `[runtime.embedder].endpoint`
   for your environment.
@@ -29,3 +31,15 @@ BENCH_BASE_CONFIG=/tmp/pituitary-bench-base.toml \
 Outputs three JSON reports under `/tmp/pituitary-bench-344/` (override with
 `BENCH_OUT_DIR`) and a consolidated markdown summary at
 `docs/development/retrieval-precision-344.md` (override with `BENCH_REPORT_MD`).
+
+For the #361 Arm B answer-quality run, configure both `[runtime.embedder]` and
+`[runtime.analysis]`, then run:
+
+```
+BENCH_BASE_CONFIG=/tmp/pituitary-bench-base.toml \
+  scripts/bench-armb-361.sh
+```
+
+Outputs three JSON reports under `/tmp/pituitary-bench-361/` (override with
+`BENCH_OUT_DIR`) and a consolidated markdown summary at
+`docs/development/retrieval-armb-361.md` (override with `BENCH_REPORT_MD`).

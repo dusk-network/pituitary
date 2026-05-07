@@ -1,0 +1,215 @@
+[
+  {
+    "id": "quickstart_bootstrap",
+    "query": "how do I bootstrap a new CCD session for the first time",
+    "reference_answer": "Attach the repo if needed, then start the session with the runtime lifecycle path or `ccd start --activate --path .`. CCD locates the CLI, loads policy, memory, and handoff state for the workspace, and creates the local state needed for future sessions.",
+    "relevant_doc_refs": ["doc://guide/02-quickstart", "doc://reference/bootstrap-prompt"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/02-quickstart", "anchor": "bootstraps CCD state for the current workspace", "start_line": 35, "end_line": 42},
+      {"doc_ref": "doc://reference/bootstrap-prompt", "anchor": "Find the CCD CLI in this order", "start_line": 5, "end_line": 14}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "handoff_semantics",
+    "query": "what goes into a handoff and how does it get surfaced to the next session",
+    "reference_answer": "A handoff records session intent, immediate next actions, completed state with evidence, operational guardrails, key files, and a definition of done. Close-out writes that state to the workspace-local CCD runtime store, and the next `ccd start` or runtime integration reads it back as continuity context.",
+    "relevant_doc_refs": ["doc://guide/05-memory-architecture", "doc://reference/cheatsheet"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/05-memory-architecture", "anchor": "Definition of done** - how to know the next session succeeded", "start_line": 56, "end_line": 73},
+      {"doc_ref": "doc://reference/cheatsheet", "anchor": "full close-out and continuity evaluation", "start_line": 37, "end_line": 46}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "execution_gate_lifecycle",
+    "query": "when does an execution gate fire and how is it cleared",
+    "reference_answer": "An execution gate fires when a structural condition makes autonomous progress unsafe, such as a kill switch, ambiguous validation, repeated failures, or a scope/ring violation. It is cleared only after the operator diagnoses the cause, fixes or narrows the task, records the debrief, and explicitly restores normal execution.",
+    "relevant_doc_refs": ["doc://guide/07-guardrails", "doc://guide/08-patterns"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/07-guardrails", "anchor": "Kill switches are not punishment. They are circuit breakers", "start_line": 95, "end_line": 98},
+      {"doc_ref": "doc://guide/08-patterns", "anchor": "60-second operator debrief at the end of every session", "start_line": 34, "end_line": 40}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "memory_promotion_flow",
+    "query": "how memories get promoted from session to profile scope",
+    "reference_answer": "Session progress stays in the workspace-local handoff. A lesson becomes remembered guidance only when it repeats or proves durable; the promotion heuristic is that a pattern learned twice deserves a memory entry. Promote cautiously from workspace or work-stream memory toward project or profile memory only when the rule should outlive the current session or branch.",
+    "relevant_doc_refs": ["doc://guide/05-memory-architecture"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/05-memory-architecture", "anchor": "This is the only heuristic in the system. Everything else is structural", "start_line": 241, "end_line": 244}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "guardrails_why",
+    "query": "why do I need guardrails around autonomous agents",
+    "reference_answer": "Prompts alone are not reliable guardrails because agents optimize for likely next tokens and can drop earlier constraints under context pressure or ambiguity. Important constraints need mechanical enforcement through isolation boundaries, deterministic gates, schemas, path scopes, and explicit escalation.",
+    "relevant_doc_refs": ["doc://guide/07-guardrails"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/07-guardrails", "anchor": "they optimize for the most probable next token given everything in context", "start_line": 14, "end_line": 18}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "adoption_ladder_levels",
+    "query": "what are the CCD adoption levels and when should I move from level 1 to level 2",
+    "reference_answer": "Level 1 is Operator: establish persistent context, start and end sessions through CCD, and keep local session state out of repo truth. Move to Level 2 when you need deterministic source ordering, stronger review loops, file scope control, or multiple people working with AI in the same repo.",
+    "relevant_doc_refs": ["doc://guide/03-adoption-ladder"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/03-adoption-ladder", "anchor": "You want deterministic source ordering instead of", "start_line": 58, "end_line": 63}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "machine_team_lead_role",
+    "query": "what does becoming a machine team lead mean for the developer's role",
+    "reference_answer": "The developer shifts from using AI as a direct coding assistant to operating a machine team: defining policy, scope, source ordering, review gates, escalation boundaries, and coordination state so agents can safely execute delegated work.",
+    "relevant_doc_refs": ["doc://guide/03-adoption-ladder"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/03-adoption-ladder", "anchor": "You stop being a developer who uses AI tools and start being an operator", "start_line": 112, "end_line": 118}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "memory_scope_layout",
+    "query": "where on disk does CCD store profile, repo, branch, and workspace memory files",
+    "reference_answer": "Profile memory lives under `~/.ccd/profiles/{profile}/memory.md`; project memory under `~/.ccd/profiles/{profile}/repos/{locality_id}/memory.md`; work-stream memory under the branch-specific directory below that repo path; workspace memory and handoff state live under the repo's git-local CCD path for the active profile.",
+    "relevant_doc_refs": ["doc://guide/05-memory-architecture"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/05-memory-architecture", "anchor": "Work-stream memory** - `~/.ccd/profiles/{profile}/repos/{locality_id}/branches", "start_line": 102, "end_line": 112}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "infrastructure_level2_signals",
+    "query": "when should I add deterministic source ordering and stronger review loops",
+    "reference_answer": "Add deterministic source ordering and stronger review loops when the default source detection is no longer enough: the agent touches the right repo but wrong files, context loading is noisy, multiple operators share a repo, or critical code needs explicit scope and approval boundaries.",
+    "relevant_doc_refs": ["doc://guide/06-infrastructure"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/06-infrastructure", "anchor": "falls back to built-in source detection. The sources section is how you make", "start_line": 44, "end_line": 52}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "ai_doc_sync_runtimes",
+    "query": "how do I keep CLAUDE.md, GEMINI.md, and AGENTS.md aligned across runtimes",
+    "reference_answer": "Edit the canonical `AGENTS.md` policy, then run the sync script to regenerate runtime-specific mirrors such as `CLAUDE.md` and `GEMINI.md`. Verify with the script's check mode so generated files do not drift from the source policy.",
+    "relevant_doc_refs": ["doc://guide/06-infrastructure"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/06-infrastructure", "anchor": "run `scripts/sync-ai-docs.sh --write` to regenerate the mirrors", "start_line": 120, "end_line": 126}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "fail_closed_principle",
+    "query": "why does CCD fail closed when a gate is missing or ambiguous",
+    "reference_answer": "CCD fails closed because the cost of an unnecessary interruption is lower than the cost of silent corruption. Missing gates block, ambiguous verdicts reject, and unknown states escalate rather than letting the agent improvise without a reliable safety signal.",
+    "relevant_doc_refs": ["doc://guide/07-guardrails"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/07-guardrails", "anchor": "The cost of fail-closed is occasional unnecessary interruptions", "start_line": 132, "end_line": 136}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "deterministic_vs_prompt",
+    "query": "why prefer hard-coded validators over prompt-based instructions for guardrails",
+    "reference_answer": "Prompt instructions describe expectations but can be lost or reinterpreted. Hard-coded validators, state machines, schemas, path checks, and merge gates enforce the boundary outside the model, producing an auditable pass/fail result.",
+    "relevant_doc_refs": ["doc://guide/07-guardrails"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/07-guardrails", "anchor": "Prompt-based rules are documentation for the developer. Mechanical gates are what actually prevent bad outcomes", "start_line": 20, "end_line": 24}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "session_patterns_recipes",
+    "query": "operational recipes for starting, executing, and closing a session cleanly",
+    "reference_answer": "A clean CCD session starts by loading the policy, memory, and handoff, executes one scoped task with status and diff checks, and closes with a short radar-style debrief that writes the next-step handoff and any durable lessons.",
+    "relevant_doc_refs": ["doc://guide/08-patterns"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/08-patterns", "anchor": "The power of this pattern is its cold-start speed", "start_line": 12, "end_line": 20}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "doc_accuracy_patterns",
+    "query": "patterns for keeping documentation accurate as the system evolves",
+    "reference_answer": "Keep one canonical policy source, regenerate mirrors, validate docs with deterministic checks, and avoid silently canonizing workarounds. Documentation updates should follow the feature surface being changed and be verified in the same task.",
+    "relevant_doc_refs": ["doc://guide/08-patterns"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://guide/08-patterns", "anchor": "doc-sync never silently canonizes a workaround", "start_line": 71, "end_line": 76}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_authoritative_state",
+    "query": "what counts as authoritative state versus derived cache state in Pituitary",
+    "reference_answer": "Repo docs, specs, source bundles, and reviewed configuration are authoritative project truth. The SQLite index and Stroma snapshot are rebuildable cache state: they must be correct and atomic, but they are derived from source inputs and not the source of truth.",
+    "relevant_doc_refs": ["doc://development/repo-governance"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/repo-governance", "anchor": "rebuildable cache state. It must be correct and atomic, but it is not the source of truth", "start_line": 52, "end_line": 58}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_null_delta_reasons",
+    "query": "why did the #344 precision benchmark show no delta between chunking policies",
+    "reference_answer": "The #344 benchmark was insensitive to the expected benefit because it scored doc-level retrieval and deduplicated chunks by doc ref. The corpus was also too small and many queries aligned with headings or TLDR text, so chunk boundaries and parent context could not move the metric.",
+    "relevant_doc_refs": ["doc://development/retrieval-precision-344"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/retrieval-precision-344", "anchor": "Corpus is too small to stress retrieval", "start_line": 51, "end_line": 52}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_data_flow_packages",
+    "query": "which packages does a query pass through from the filesystem to CLI output in Pituitary",
+    "reference_answer": "A Pituitary query starts with filesystem loading, is normalized by `internal/source`, chunked through `internal/chunk`, indexed and retrieved by `internal/index`, analyzed by `internal/analysis`, and rendered through the CLI command layer.",
+    "relevant_doc_refs": ["doc://development/architecture-guide"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/architecture-guide", "anchor": "filesystem -> internal/source -> internal/chunk -> internal/index -> internal/analysis", "start_line": 107, "end_line": 113}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_review_spec_action_failon",
+    "query": "how does the review-spec GitHub action decide when to fail a pull request",
+    "reference_answer": "The review-spec action's `fail-on` setting controls failure behavior. In the documented recipe, `error` fails only when a touched spec review finds deterministic doc-drift items; broader possible-drift or warning output is reported without necessarily failing the PR.",
+    "relevant_doc_refs": ["doc://development/ci-recipes"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/ci-recipes", "anchor": "fail only when a touched spec review finds deterministic doc-drift items", "start_line": 33, "end_line": 40}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_deterministic_providers",
+    "query": "why do Pituitary tests avoid live API credentials and network access",
+    "reference_answer": "Pituitary tests use deterministic provider behavior so CI is repeatable, offline, and credential-free. Live API calls are reserved for opt-in benchmarks or runtime probes, not normal unit tests.",
+    "relevant_doc_refs": ["doc://development/testing-guide"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/testing-guide", "anchor": "Tests and CI use deterministic provider behavior rather than live APIs", "start_line": 35, "end_line": 42}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_rate_limit_rollback",
+    "query": "how should the rate limit rollout be rolled back if overload behavior is unclear",
+    "reference_answer": "If overload behavior is unclear, disable burst handling first, then return tenants to the last known fixed-window configuration while preserving telemetry and diagnostics needed to explain the rollback.",
+    "relevant_doc_refs": ["doc://runbooks/rate-limit-rollout"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://runbooks/rate-limit-rollout", "anchor": "Disable burst handling first if overload behavior becomes difficult to interpret", "start_line": 29, "end_line": 33}
+    ],
+    "tags": ["mid_body"]
+  },
+  {
+    "id": "pituitary_docs_update_rules",
+    "query": "which doc should I update when adding a new Pituitary user-facing command or flag",
+    "reference_answer": "When adding a user-facing command or flag, update the command map in the cheatsheet, the relevant topic doc under `docs/`, and the full reference when configuration, runtime, or command contracts change. Development-only workflow changes belong under `docs/development/`.",
+    "relevant_doc_refs": ["doc://development/documentation-guide"],
+    "relevant_source_spans": [
+      {"doc_ref": "doc://development/documentation-guide", "anchor": "New user-facing command or flag:", "start_line": 20, "end_line": 25}
+    ],
+    "tags": ["mid_body"]
+  }
+]

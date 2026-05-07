@@ -165,7 +165,7 @@ with open(out_path, "w") as f:
         )
 
     f.write("\n## Arm B (parent-inclusion, LLM-graded RAG)\n\n")
-    f.write("_Reserved — closes on the upstream ExpandContext issue; not measured here._\n")
+    f.write("Measured separately in `docs/development/retrieval-armb-361.md` by the #361 Arm B harness.\n")
 PY
 
 echo "==> wrote consolidated markdown: ${BENCH_REPORT_MD}"

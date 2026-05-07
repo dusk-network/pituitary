@@ -24,4 +24,4 @@ Case count: 27 (chunk-eligible: 27)
 
 ## Arm B (parent-inclusion, LLM-graded RAG)
 
-_Reserved — closes on the upstream ExpandContext issue; not measured here._
+Measured separately in [`retrieval-armb-361.md`](retrieval-armb-361.md) by the #361 Arm B harness.

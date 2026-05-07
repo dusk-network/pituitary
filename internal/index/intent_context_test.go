@@ -2,6 +2,7 @@ package index
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,6 +124,84 @@ func TestExpandIntentContextReturnsSelectedSection(t *testing.T) {
 	}
 }
 
+func TestExpandIntentContextIncludeParentReturnsParentSection(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	indexPath := filepath.Join(t.TempDir(), "pituitary.db")
+	configPath := filepath.Join(t.TempDir(), "pituitary.toml")
+	body := "# Long Guide\n\n" + strings.Repeat("parent lineage context marker ", 260) + "\n"
+	mustWriteFile(t, filepath.Join(repoDir, "docs", "guides", "long.md"), body)
+	mustWriteFile(t, configPath, `
+[workspace]
+root = "`+filepath.ToSlash(repoDir)+`"
+index_path = "`+filepath.ToSlash(indexPath)+`"
+
+[runtime.embedder]
+provider = "fixture"
+model = "fixture-8d"
+
+[runtime.chunking.doc]
+policy = "late_chunk"
+max_tokens = 512
+child_max_tokens = 48
+child_overlap_tokens = 8
+
+[[sources]]
+name = "docs"
+adapter = "filesystem"
+kind = "markdown_docs"
+path = "docs"
+include = ["guides/*.md"]
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	outline, err := GetIntentOutline(cfg, IntentOutlineRequest{
+		Ref:  "doc://guides/long",
+		Kind: model.ArtifactKindDoc,
+	})
+	if err != nil {
+		t.Fatalf("GetIntentOutline() error = %v", err)
+	}
+	leafID, parentID, ok := firstOutlineLeafWithParent(outline.Outline)
+	if !ok {
+		t.Fatalf("outline = %+v, want at least one leaf with parent_chunk_id", outline.Outline)
+	}
+
+	withoutParent, err := ExpandIntentContext(cfg, ExpandIntentContextRequest{
+		ChunkID:             leafID,
+		SnapshotFingerprint: outline.SnapshotFingerprint,
+	})
+	if err != nil {
+		t.Fatalf("ExpandIntentContext(include_parent=false) error = %v", err)
+	}
+	if containsSectionRole(withoutParent.Sections, parentID, "parent") {
+		t.Fatalf("sections = %+v, want no parent section when include_parent=false", withoutParent.Sections)
+	}
+
+	withParent, err := ExpandIntentContext(cfg, ExpandIntentContextRequest{
+		ChunkID:             leafID,
+		SnapshotFingerprint: outline.SnapshotFingerprint,
+		IncludeParent:       true,
+	})
+	if err != nil {
+		t.Fatalf("ExpandIntentContext(include_parent=true) error = %v", err)
+	}
+	if !containsSectionRole(withParent.Sections, parentID, "parent") {
+		t.Fatalf("sections = %+v, want parent chunk %d returned with role parent", withParent.Sections, parentID)
+	}
+}
+
 func TestExpandIntentContextDistinguishesStaleAndMissingHandles(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +228,24 @@ func TestExpandIntentContextDistinguishesStaleAndMissingHandles(t *testing.T) {
 	if !IsMissingChunk(err) || !strings.Contains(err.Error(), "handle may be stale") {
 		t.Fatalf("ExpandIntentContext(missing chunk) error = %T (%v), want MissingChunkError", err, err)
 	}
+}
+
+func firstOutlineLeafWithParent(rows []OutlineContextOutlineRow) (int64, int64, bool) {
+	for _, row := range rows {
+		if row.ParentChunkID != nil {
+			return row.ChunkID, *row.ParentChunkID, true
+		}
+	}
+	return 0, 0, false
+}
+
+func containsSectionRole(sections []OutlineContextSection, chunkID int64, role string) bool {
+	for _, section := range sections {
+		if section.ChunkID == chunkID && section.Role == role {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExpandIntentContextRequiresSnapshotFingerprint(t *testing.T) {
