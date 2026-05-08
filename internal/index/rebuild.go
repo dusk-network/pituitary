@@ -19,7 +19,6 @@ import (
 	"github.com/dusk-network/pituitary/internal/config"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/source"
-	stcorpus "github.com/dusk-network/stroma/v3/corpus"
 	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
@@ -199,10 +198,6 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		return nil, err
 	}
 
-	corpusRecords, err := corpusRecordsFromLoadResult(records)
-	if err != nil {
-		return nil, err
-	}
 	emitPlannedRebuildProgress(records, reuseState, reporter)
 
 	chunkPolicy, err := pchunk.Resolve(chunkConfigFromRuntime(cfg.Runtime.Chunking))
@@ -225,7 +220,14 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		// snapshot remains safe even when the content-addressed path is unchanged.
 		stromaOptions.ReuseFromPath = currentSnapshotPath
 	}
-	if _, err := stindex.Rebuild(ctx, corpusRecords, stromaOptions); err != nil {
+	// RebuildFromSource lets stroma chunk and embed records one at a
+	// time in bounded internal batches. Compared to the materialized
+	// Rebuild call it replaced, stroma no longer keeps the full set of
+	// chunks-and-vectors resident before commit. The LoadResult passed
+	// in here is still fully materialized — the caller-side resident
+	// reduction (yielding records lazily from disk inside the source
+	// loader) is a separate change tracked in the issue thread.
+	if _, err := stindex.RebuildFromSource(ctx, source.NewLoadResultRecordSource(records), stromaOptions); err != nil {
 		return nil, fmt.Errorf("build stroma snapshot: %w", err)
 	}
 
@@ -284,29 +286,6 @@ func refreshRebuildChunkCountFromSnapshotContext(ctx context.Context, snapshotPa
 	return nil
 }
 
-func corpusRecordsFromLoadResult(records *source.LoadResult) ([]stcorpus.Record, error) {
-	if records == nil {
-		return nil, fmt.Errorf("records are required")
-	}
-
-	corpusRecords := make([]stcorpus.Record, 0, len(records.Specs)+len(records.Docs))
-	for _, spec := range records.Specs {
-		record, err := corpusRecordFromSpec(spec)
-		if err != nil {
-			return nil, err
-		}
-		corpusRecords = append(corpusRecords, record)
-	}
-	for _, doc := range records.Docs {
-		record, err := corpusRecordFromDoc(doc)
-		if err != nil {
-			return nil, err
-		}
-		corpusRecords = append(corpusRecords, record)
-	}
-	return corpusRecords, nil
-}
-
 // chunkConfigFromRuntime adapts the config-layer chunking shape to the
 // chunk package's Config. It is a pure data translation: config holds
 // raw TOML-validated values, chunk.Resolve turns them into a
@@ -337,34 +316,6 @@ func chunkContextualizerFromRuntime(cfg config.ChunkingConfig) pchunk.Contextual
 	return pchunk.ContextualizerConfig{
 		Format: pchunk.PrefixFormat(cfg.Contextualizer.Format),
 	}
-}
-
-func corpusRecordFromSpec(spec model.SpecRecord) (stcorpus.Record, error) {
-	metadata := cloneMetadata(spec.Metadata)
-
-	return stcorpus.Record{
-		Ref:         spec.Ref,
-		Kind:        spec.Kind,
-		Title:       spec.Title,
-		SourceRef:   spec.SourceRef,
-		BodyFormat:  spec.BodyFormat,
-		BodyText:    spec.BodyText,
-		ContentHash: spec.ContentHash,
-		Metadata:    metadata,
-	}.Normalize()
-}
-
-func corpusRecordFromDoc(doc model.DocRecord) (stcorpus.Record, error) {
-	return stcorpus.Record{
-		Ref:         doc.Ref,
-		Kind:        doc.Kind,
-		Title:       doc.Title,
-		SourceRef:   doc.SourceRef,
-		BodyFormat:  doc.BodyFormat,
-		BodyText:    doc.BodyText,
-		ContentHash: doc.ContentHash,
-		Metadata:    cloneMetadata(doc.Metadata),
-	}.Normalize()
 }
 
 func publishBusinessIndexContext(ctx context.Context, cfg *config.Config, records *source.LoadResult, result *RebuildResult, snapshotPath string) error {

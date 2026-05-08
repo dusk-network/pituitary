@@ -421,13 +421,6 @@ func updateStromaSnapshotContext(
 
 	selected := selectedLoadResultForRefs(records, append(append([]string{}, diff.added...), diff.updated...))
 	emitPlannedRebuildProgress(selected, reuseState, reporter)
-	selectedRecords, err := corpusRecordsFromLoadResult(selected)
-	if err != nil {
-		if cleanupSnapshot != nil {
-			cleanupSnapshot()
-		}
-		return "", nil, err
-	}
 	// Thread the same chunking config through stroma's Update path
 	// that rebuild.go threads through stroma's Rebuild path. Without
 	// this, a repo configured with per-kind chunking or an opt-in
@@ -448,7 +441,24 @@ func updateStromaSnapshotContext(
 		}
 		return "", nil, fmt.Errorf("resolve chunk contextualizer: %w", err)
 	}
-	if _, err := stindex.Update(ctx, selectedRecords, diff.removed, stindex.UpdateOptions{
+	// SyncFromSource streams the full desired corpus into stroma. It
+	// computes the (ref, content_hash) diff against the existing
+	// snapshot itself — unchanged records are reused without loading
+	// their bodies, and stored records absent from the stream are
+	// removed. Pituitary's per-source loader produces the union of all
+	// configured sources, so SyncFromSource's auto-removal preserves
+	// today's "configure source change → next update reflects
+	// removals" contract without paying full-rebuild cost. Callers
+	// that want partial-feed semantics (do not delete records absent
+	// from the stream) should switch to UpdateFromSource explicitly.
+	//
+	// MaxPlannedRecords is intentionally not set here, so a single
+	// update that touches a very large fraction of the corpus retains
+	// the changed-record plan in memory until commit (today's behavior
+	// before the streaming switch). For mass edits prefer
+	// `pituitary index --rebuild`; an opt-in cap with a fall-back-to-
+	// rebuild branch is tracked separately.
+	if _, err := stindex.SyncFromSource(ctx, source.NewLoadResultRecordSource(records), stindex.UpdateOptions{
 		Path:           targetSnapshotPath,
 		Embedder:       embedder,
 		ChunkPolicy:    chunkPolicy,
