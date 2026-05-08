@@ -187,6 +187,28 @@ func WriteDiscoveredConfig(path, content string) error {
 	return writeDiscoveredConfig(path, content)
 }
 
+// dirEntryIsRegular reports whether d describes a regular file. It first
+// trusts d.Type(), which on Linux/macOS is populated from the readdir d_type
+// entry (with a kernel-side lstat fallback for DT_UNKNOWN). On filesystems
+// that report unset type bits via a non-zero non-regular type mask, it
+// reaches for d.Info() as a defensive double-check, so an Info() error or a
+// non-regular resolved mode rejects the entry rather than letting an
+// ambiguous type slip through.
+func dirEntryIsRegular(d os.DirEntry) bool {
+	typ := d.Type()
+	if typ == 0 {
+		// Type bits unset: could be a regular file, or could be a
+		// filesystem that did not populate d_type. Resolve via Info to
+		// disambiguate so we never read a non-regular target.
+		info, err := d.Info()
+		if err != nil {
+			return false
+		}
+		return info.Mode().IsRegular()
+	}
+	return typ.IsRegular()
+}
+
 func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]discoveredCandidate, map[string]struct{}, int, error) {
 	var candidates []discoveredCandidate
 	bundleDirs := make(map[string]struct{})
@@ -206,7 +228,7 @@ func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]
 		if d.Name() != "spec.toml" {
 			return nil
 		}
-		if !d.Type().IsRegular() {
+		if !dirEntryIsRegular(d) {
 			rejected++
 			logger.Debugf("discover", "rejected spec bundle %s: spec.toml is not a regular file", workspaceRelative(workspaceRoot, path))
 			return nil
@@ -325,7 +347,7 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 		if filepath.Ext(path) != ".md" {
 			return nil
 		}
-		if !d.Type().IsRegular() {
+		if !dirEntryIsRegular(d) {
 			logger.Debugf("discover", "skipping markdown %s: not a regular file", workspaceRelative(workspaceRoot, path))
 			return nil
 		}

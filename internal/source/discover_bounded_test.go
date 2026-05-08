@@ -180,29 +180,30 @@ Landing page.
 func TestDiscoverSpecBundles_SkipsSymlinkedSpecTOML(t *testing.T) {
 	t.Parallel()
 
-	repo := t.TempDir()
-	// Real bundle outside any spec dir to act as the symlink target.
-	realDir := filepath.Join(repo, "external")
-	if err := os.MkdirAll(realDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	mustWriteFile(t, filepath.Join(realDir, "spec.toml"), `
+	// Place the real bundle OUTSIDE the workspace so discovery cannot find
+	// it as a normal candidate. The only way SPEC-EXTERNAL can land in the
+	// generated config is if discovery follows the in-workspace symlink --
+	// which the regular-file guard must prevent.
+	external := t.TempDir()
+	mustWriteFile(t, filepath.Join(external, "spec.toml"), `
 id = "SPEC-EXTERNAL"
 title = "External"
 status = "draft"
 domain = "api"
 body = "body.md"
 `)
-	mustWriteFile(t, filepath.Join(realDir, "body.md"), `
+	mustWriteFile(t, filepath.Join(external, "body.md"), `
 # External
 
 Body.
 `)
+
+	repo := t.TempDir()
 	bundleDir := filepath.Join(repo, "specs", "via-symlink")
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.Symlink(filepath.Join(realDir, "spec.toml"), filepath.Join(bundleDir, "spec.toml")); err != nil {
+	if err := os.Symlink(filepath.Join(external, "spec.toml"), filepath.Join(bundleDir, "spec.toml")); err != nil {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
