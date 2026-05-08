@@ -232,14 +232,6 @@ func isSemanticEmbedderConfigured(cfg *config.Config) bool {
 	return provider != "" && provider != config.RuntimeProviderFixture
 }
 
-// sourceRefFromMetadata extracts the source_ref from artifact metadata.
-func sourceRefFromMetadata(metadata map[string]string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(metadata["source_ref"])
-}
-
 // convertSemanticMatchesToFindings converts semantic near-misses into
 // TerminologyFinding entries that integrate with the standard results.
 func convertSemanticMatchesToFindings(matches []semanticTerminologyMatch, governed map[string]terminologyGovernedTerm) []TerminologyFinding {

@@ -99,44 +99,6 @@ func snapshotSpecArtifactsContext(ctx context.Context, db *sql.DB) ([]snapshotAr
 	return artifacts, rows.Err()
 }
 
-// snapshotEdgesTxContext loads all edges from within a transaction.
-func snapshotEdgesTxContext(ctx context.Context, tx *sql.Tx) ([]snapshotEdge, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT from_ref, to_ref, edge_type, edge_source, confidence FROM edges`)
-	if err != nil {
-		return nil, fmt.Errorf("snapshot edges (tx): %w", err)
-	}
-	defer rows.Close()
-
-	var edges []snapshotEdge
-	for rows.Next() {
-		var e snapshotEdge
-		if err := rows.Scan(&e.fromRef, &e.toRef, &e.edgeType, &e.edgeSource, &e.confidence); err != nil {
-			return nil, fmt.Errorf("scan snapshot edge (tx): %w", err)
-		}
-		edges = append(edges, e)
-	}
-	return edges, rows.Err()
-}
-
-// snapshotSpecArtifactsTxContext loads spec artifact metadata from within a transaction.
-func snapshotSpecArtifactsTxContext(ctx context.Context, tx *sql.Tx) ([]snapshotArtifact, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT ref, COALESCE(title,''), COALESCE(status,''), COALESCE(domain,''), content_hash FROM artifacts WHERE kind = 'spec'`)
-	if err != nil {
-		return nil, fmt.Errorf("snapshot spec artifacts (tx): %w", err)
-	}
-	defer rows.Close()
-
-	var artifacts []snapshotArtifact
-	for rows.Next() {
-		var a snapshotArtifact
-		if err := rows.Scan(&a.ref, &a.title, &a.status, &a.domain, &a.contentHash); err != nil {
-			return nil, fmt.Errorf("scan snapshot artifact (tx): %w", err)
-		}
-		artifacts = append(artifacts, a)
-	}
-	return artifacts, rows.Err()
-}
-
 // computeGovernanceDelta computes the governance changes between old and new states.
 func computeGovernanceDelta(
 	oldArtifacts []snapshotArtifact, newArtifacts []snapshotArtifact,

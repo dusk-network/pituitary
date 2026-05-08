@@ -407,18 +407,6 @@ func relationRefs(relations []model.Relation, relationType model.RelationType) [
 	return uniqueStrings(refs)
 }
 
-func similarityScoreFromDistance(distance float64) float64 {
-	score := 1 - distance
-	switch {
-	case score < 0:
-		return 0
-	case score > 1:
-		return 1
-	default:
-		return score
-	}
-}
-
 func normalizeArtifactShortlistLimit(limit int) int {
 	if limit <= 0 {
 		return impactDocShortlistLimit

@@ -1,0 +1,109 @@
+# Harness-agnostic git hooks for Pituitary.
+#
+# These run no matter which AI tool produced the diff (Claude Code, Codex CLI,
+# pi, openclaw, hermes, …) and no matter whether you staged files by hand.
+# They encode the rules in AGENTS.md so the policy lives in one place.
+#
+# Install once per clone:
+#   brew install lefthook && lefthook install
+#
+# Skip a hook for one commit (use sparingly):
+#   LEFTHOOK=0 git commit ...           # all hooks off
+#   LEFTHOOK_EXCLUDE=test git push      # one command off
+
+pre-commit:
+  parallel: true
+  commands:
+
+    # ── Safety: refuse common unintended stages ──────────────────────────
+    # The closest portable equivalent of "never use git add ." — block the
+    # files you'd actually be sorry about staging.
+    block-secrets:
+      tags: safety
+      run: |
+        bad=$(printf '%s\n' {staged_files} | grep -E \
+          '(^|/)\.env(\.|$)|(^|/)secrets?\.(ya?ml|json|toml)$|\.pem$|(^|/)id_rsa(\.|$)' \
+          || true)
+        if [ -n "$bad" ]; then
+          printf 'refusing to commit secret-shaped files:\n%s\n' "$bad" >&2
+          exit 1
+        fi
+
+    block-ds-store:
+      tags: safety
+      glob: "**/.DS_Store"
+      run: |
+        echo "refusing to commit .DS_Store files" >&2
+        exit 1
+
+    # ── Generated mirrors should be regenerated, not hand-edited ────────
+    # AGENTS.md is canonical; CLAUDE.md and GEMINI.md are mirrors.
+    # Soft warning rather than a hard block — legitimate regeneration must
+    # still be committable. If/when a generator script lands, switch to
+    # `exit 1` here.
+    warn-mirror-edits:
+      tags: governance
+      glob: "{CLAUDE.md,GEMINI.md}"
+      run: |
+        echo "NOTE: committing changes to a generated mirror." >&2
+        echo "      AGENTS.md is canonical. Make sure these came from" >&2
+        echo "      regenerating, not hand-edits." >&2
+
+    # ── Go: format check on staged files only (fast) ────────────────────
+    gofmt:
+      tags: go
+      glob: "**/*.go"
+      run: |
+        out=$(gofmt -l {staged_files})
+        if [ -n "$out" ]; then
+          printf 'gofmt would change:\n%s\nrun: make fmt\n' "$out" >&2
+          exit 1
+        fi
+
+    # ── Go: architectural import boundaries + go vet ────────────────────
+    # `make vet` already enforces:
+    #   internal/             ↛ extensions/
+    #   internal/{index,analysis} ↛ internal/ast
+    go-vet:
+      tags: go
+      glob: "**/*.go"
+      run: make vet
+
+    # ── Docs: link integrity when docs change ───────────────────────────
+    docs-links:
+      tags: docs
+      glob: "{README.md,docs/**/*.md}"
+      run: make docs-check
+
+    # ── Release config: only when it changes ────────────────────────────
+    # Skip silently if goreleaser isn't installed — not every contributor
+    # ships releases. CI still gates this hard.
+    goreleaser:
+      tags: release
+      glob: ".goreleaser.yaml"
+      run: |
+        command -v goreleaser >/dev/null 2>&1 || {
+          echo "goreleaser not installed; skipping (CI will still check)" >&2
+          exit 0
+        }
+        goreleaser check
+
+pre-push:
+  parallel: false
+  commands:
+    fmt-check:
+      run: make fmt-check
+    test:
+      run: make test
+    # `make analyze` (staticcheck + govulncheck) intentionally not here —
+    # leave it to CI; locally it's slow and needs separate tool installs.
+
+# Optional: commit message shape. Uncomment if you want to enforce
+# Conventional Commits (recent log already follows it).
+#
+# commit-msg:
+#   commands:
+#     conventional:
+#       run: |
+#         head -1 {1} | grep -qE '^(feat|fix|docs|test|chore|refactor|perf|build|ci)(\([^)]+\))?: .+' \
+#           || { echo "first line must look like: feat(scope): message" >&2; exit 1; }

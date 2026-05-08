@@ -24,22 +24,6 @@ func complianceAdjudicatorWithTimings(ctx context.Context, adjudicator complianc
 	return timedComplianceAdjudicator{inner: adjudicator, tracker: tracker}
 }
 
-func impactSeverityClassifierWithTimings(ctx context.Context, classifier impactSeverityClassifier) impactSeverityClassifier {
-	tracker := resultmeta.TimingTrackerFromContext(ctx)
-	if classifier == nil || tracker == nil {
-		return classifier
-	}
-	return timedImpactSeverityClassifier{inner: classifier, tracker: tracker}
-}
-
-func metadataInferrerWithTimings(ctx context.Context, inferrer metadataInferrer) metadataInferrer {
-	tracker := resultmeta.TimingTrackerFromContext(ctx)
-	if inferrer == nil || tracker == nil {
-		return inferrer
-	}
-	return timedMetadataInferrer{inner: inferrer, tracker: tracker}
-}
-
 func embedderWithTimings(ctx context.Context, embedder index.Embedder) index.Embedder {
 	tracker := resultmeta.TimingTrackerFromContext(ctx)
 	if embedder == nil || tracker == nil {
@@ -82,30 +66,6 @@ type timedComplianceAdjudicator struct {
 func (t timedComplianceAdjudicator) AdjudicateCompliance(ctx context.Context, request complianceAdjudicationRequest) (*complianceAdjudicationResponse, error) {
 	start := time.Now()
 	result, err := t.inner.AdjudicateCompliance(ctx, request)
-	t.tracker.AddAnalysis(time.Since(start), 1)
-	return result, err
-}
-
-type timedImpactSeverityClassifier struct {
-	inner   impactSeverityClassifier
-	tracker *resultmeta.TimingTracker
-}
-
-func (t timedImpactSeverityClassifier) ClassifyImpactSeverity(ctx context.Context, request impactSeverityRequest) (*impactSeverityResponse, error) {
-	start := time.Now()
-	result, err := t.inner.ClassifyImpactSeverity(ctx, request)
-	t.tracker.AddAnalysis(time.Since(start), 1)
-	return result, err
-}
-
-type timedMetadataInferrer struct {
-	inner   metadataInferrer
-	tracker *resultmeta.TimingTracker
-}
-
-func (t timedMetadataInferrer) InferMetadata(ctx context.Context, request metadataInferenceRequest) (*MetadataInferenceResult, error) {
-	start := time.Now()
-	result, err := t.inner.InferMetadata(ctx, request)
 	t.tracker.AddAnalysis(time.Since(start), 1)
 	return result, err
 }

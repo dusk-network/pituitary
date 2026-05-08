@@ -48,6 +48,17 @@ make ci                 # Full check: fmt + smoke + test + vet
 
 If `make smoke-sqlite-vec` passes, your C toolchain is working and you're ready to develop.
 
+**Install git hooks (once per clone):**
+
+```sh
+brew install lefthook   # or: go install github.com/evilmartians/lefthook@latest
+lefthook install
+```
+
+If you used `go install`, make sure `$(go env GOPATH)/bin` (or `$GOBIN`) is on your `PATH` so the `lefthook` binary is found.
+
+This wires `pre-commit` and `pre-push` to the same `make` targets used in CI (`fmt-check`, `vet`, `test`, `docs-check`). The hooks are harness-agnostic — they enforce repo policy regardless of which AI tool produced the diff.
+
 If you want to mirror the Linux-only analyzer lane from CI locally, install the pinned tools and run:
 
 ```sh
