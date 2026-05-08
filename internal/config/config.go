@@ -138,11 +138,27 @@ type SearchConfig struct {
 	// SearchRerankerArmAwareHistorical opts in to reading
 	// HitProvenance.Arms.
 	Reranker string
+
+	// PrefilterDimension opts the hybrid retrieval arm into a
+	// truncated-prefix Matryoshka prefilter via stroma's
+	// SearchParams.SearchDimension. Zero (default) preserves the
+	// pre-#341 behavior — the full stored embedder dimension is
+	// used end-to-end. Positive values must be <= the stored
+	// embedder dimension and require an embedder trained with
+	// Matryoshka Representation Learning (MRL); non-MRL embedders
+	// will see recall regressions and should leave this zero.
+	//
+	// Stroma v3's VectorSearchQuery does not expose
+	// SearchDimension, so this knob only takes effect on the
+	// hybrid Search path. Pure vector-only call sites (semantic
+	// similarity, repository similarity, semantic terminology)
+	// continue to run at full dimension regardless of this value.
+	PrefilterDimension int
 }
 
 // IsZero reports whether no search override is configured.
 func (c SearchConfig) IsZero() bool {
-	return c.Fusion.IsZero() && strings.TrimSpace(c.Reranker) == ""
+	return c.Fusion.IsZero() && strings.TrimSpace(c.Reranker) == "" && c.PrefilterDimension == 0
 }
 
 // FusionConfig tunes the hybrid-search fusion strategy. A zero value
@@ -298,8 +314,9 @@ type rawRuntime struct {
 }
 
 type rawSearch struct {
-	Fusion   rawSearchFusion `toml:"fusion"`
-	Reranker string          `toml:"reranker"`
+	Fusion             rawSearchFusion `toml:"fusion"`
+	Reranker           string          `toml:"reranker"`
+	PrefilterDimension int             `toml:"matryoshka_prefilter_dimension"`
 }
 
 type rawSearchFusion struct {
@@ -1375,8 +1392,9 @@ func validateChunkingContextualizer(errs *validationErrors, label string, cfg Ch
 
 func buildSearchConfig(raw rawSearch) SearchConfig {
 	return SearchConfig{
-		Fusion:   buildFusionConfig(raw.Fusion),
-		Reranker: strings.TrimSpace(raw.Reranker),
+		Fusion:             buildFusionConfig(raw.Fusion),
+		Reranker:           strings.TrimSpace(raw.Reranker),
+		PrefilterDimension: raw.PrefilterDimension,
 	}
 }
 
@@ -1398,6 +1416,10 @@ func validateSearchConfig(errs *validationErrors, label string, cfg SearchConfig
 			SearchRerankerHistorical,
 			SearchRerankerArmAwareHistorical,
 		)
+	}
+	if cfg.PrefilterDimension < 0 {
+		errs.add("%s.matryoshka_prefilter_dimension: must be >= 0 (zero disables the prefilter); got %d",
+			label, cfg.PrefilterDimension)
 	}
 }
 

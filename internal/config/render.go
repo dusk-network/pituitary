@@ -65,9 +65,16 @@ func Render(cfg *Config) (string, error) {
 	}
 
 	if !cfg.Runtime.Search.IsZero() {
-		if reranker := strings.TrimSpace(cfg.Runtime.Search.Reranker); reranker != "" {
+		reranker := strings.TrimSpace(cfg.Runtime.Search.Reranker)
+		prefilter := cfg.Runtime.Search.PrefilterDimension
+		if reranker != "" || prefilter > 0 {
 			builder.WriteString("\n[runtime.search]\n")
-			fmt.Fprintf(&builder, "reranker = %s\n", strconv.Quote(reranker))
+			if reranker != "" {
+				fmt.Fprintf(&builder, "reranker = %s\n", strconv.Quote(reranker))
+			}
+			if prefilter > 0 {
+				fmt.Fprintf(&builder, "matryoshka_prefilter_dimension = %d\n", prefilter)
+			}
 		}
 		if !cfg.Runtime.Search.Fusion.IsZero() {
 			builder.WriteString("\n[runtime.search.fusion]\n")

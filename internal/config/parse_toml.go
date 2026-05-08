@@ -128,7 +128,7 @@ func undecodedKeyMessage(key toml.Key) string {
 					}
 					return unsupportedFieldMessage("runtime.search.fusion", strings.Join(key[3:], "."), searchFusionFields())
 				default:
-					return unsupportedFieldMessage("runtime.search", key[2], []string{"fusion", "reranker"})
+					return unsupportedFieldMessage("runtime.search", key[2], []string{"fusion", "reranker", "matryoshka_prefilter_dimension"})
 				}
 			default:
 				return fmt.Sprintf("unsupported runtime.%s field %q", key[1], strings.Join(key[2:], "."))

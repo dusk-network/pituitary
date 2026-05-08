@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -446,6 +449,208 @@ func TestSearchSpecsRejectsEmbedderFingerprintMismatch(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "embedder fingerprint") || !strings.Contains(got, "pituitary index --rebuild") {
 		t.Fatalf("SearchSpecs() error = %q, want fingerprint rebuild guidance", got)
+	}
+}
+
+// #341: cfg.Runtime.Search.PrefilterDimension threads through the hybrid
+// retrieval call site (loadRankedCandidatesContextWithFusion) and reaches
+// stroma as SearchParams.SearchDimension. The fixture embedder is non-MRL,
+// but stroma's API only requires SearchDimension <= stored embedder
+// dimension on a float32 snapshot, so a value <= the fixture's 8 dims is
+// accepted and the truncated-prefix path returns the same shape of result.
+func TestSearchSpecsHonorsMatryoshkaPrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	// Baseline: default zero leaves stroma at full stored dimension.
+	baseline, err := SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err != nil {
+		t.Fatalf("SearchSpecs(prefilter=0) error = %v", err)
+	}
+	if len(baseline.Matches) == 0 {
+		t.Fatal("baseline returned no matches; cannot validate threading")
+	}
+
+	// Truncated prefilter: must be threaded through and accepted.
+	cfg.Runtime.Search.PrefilterDimension = 4
+	truncated, err := SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err != nil {
+		t.Fatalf("SearchSpecs(prefilter=4) error = %v", err)
+	}
+	if len(truncated.Matches) == 0 {
+		t.Fatal("SearchSpecs(prefilter=4) returned no matches; expected non-empty truncated result")
+	}
+	if got, want := truncated.ScoreKind, SearchSpecScoreKindHybridRelevance; got != want {
+		t.Fatalf("truncated.ScoreKind = %q, want %q (threading must not change score kind)", got, want)
+	}
+}
+
+// #341: an oversized PrefilterDimension is rejected locally — before
+// the query is embedded — so a config typo cannot burn an OpenAI-
+// compatible round trip per failed search. The error must point at the
+// config key so operators can fix it without reading stroma's source.
+func TestSearchSpecsRejectsPrefilterDimensionAboveStored(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	// fixture-8d is 8 dimensions; 9 must be rejected before any query
+	// embedding is computed.
+	cfg.Runtime.Search.PrefilterDimension = 9
+	_, err = SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err == nil {
+		t.Fatal("SearchSpecs(prefilter > stored) error = nil, want preflight rejection")
+	}
+	if !strings.Contains(err.Error(), "runtime.search.matryoshka_prefilter_dimension") {
+		t.Fatalf("SearchSpecs() error = %q, want preflight to name the config key", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exceeds stored embedder_dimension") {
+		t.Fatalf("SearchSpecs() error = %q, want preflight to name the stored embedder dimension", err.Error())
+	}
+}
+
+// #341 preflight regression: the oversized-prefilter rejection must
+// fire BEFORE any embedder method is invoked. The OpenAI-compatible
+// embedder probes its dimension by issuing an EmbedQueries round trip
+// when its cache is empty, so a config typo would otherwise burn one
+// HTTP request per search call. We pin the order by pointing
+// runtime.embedder at an httptest server that fails the test if any
+// request lands — a real spy on the provider, not just a string match
+// on the error message.
+func TestSearchSpecsPrefilterPreflightSkipsEmbedder(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	// Spy on the embedder by serving an HTTP endpoint that fails the
+	// test on any request. If the preflight ever regresses to running
+	// after embedder.Dimension or any other provider call, the test
+	// will fail here even before we look at the returned error.
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		t.Errorf("embedder must not be called when preflight rejects; got %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg.Runtime.Embedder = config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "spy-embedder",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	}
+	cfg.Runtime.Search.PrefilterDimension = 9 // fixture-8d stores 8 dims
+
+	_, err = SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err == nil {
+		t.Fatal("SearchSpecs() error = nil, want preflight rejection")
+	}
+	// The preflight reads metadata.embedder_dimension from SQLite, not
+	// from the embedder. The error must come from our local preflight,
+	// not from stroma's post-embedding rejection downstream — this
+	// guards the OpenAI-quota safety property from regressing into a
+	// post-embed rejection that still burns a round trip.
+	if !strings.Contains(err.Error(), "runtime.search.matryoshka_prefilter_dimension") {
+		t.Fatalf("SearchSpecs() error = %q, want local preflight (not stroma) to reject the typo", err.Error())
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("embedder spy received %d request(s); want 0 — preflight regressed past the embedder", got)
+	}
+}
+
+// #341 preflight regression: the preflight runs before newEmbedder is
+// constructed, so even if the embedder's constructor itself made a
+// network call (it does for unreachable endpoints), the typo check
+// still lands first. We approximate this by pointing runtime.embedder
+// at a non-existent endpoint and verifying the prefilter error wins.
+func TestSearchSpecsPrefilterPreflightWinsOverEmbedderConstruction(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Runtime.Search.PrefilterDimension = 9
+	// Swap embedder to one that would make a remote call if reached.
+	// The preflight must reject before the embedder is constructed or
+	// invoked — even though this endpoint would otherwise burn a TCP
+	// dial attempt or an HTTP probe for Dimension().
+	cfg.Runtime.Embedder = config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "would-not-resolve",
+		Endpoint:  "http://127.0.0.1:1/v1",
+		TimeoutMS: 100,
+	}
+
+	_, err = SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err == nil {
+		t.Fatal("SearchSpecs() error = nil, want preflight rejection")
+	}
+	if !strings.Contains(err.Error(), "runtime.search.matryoshka_prefilter_dimension") {
+		t.Fatalf("SearchSpecs() error = %q, want preflight to reject before embedder construction/call", err.Error())
+	}
+}
+
+// #341: the vector-only semantic similarity path is intentionally not
+// threaded with PrefilterDimension because stroma v3's VectorSearchQuery
+// does not expose SearchDimension. Setting the config must therefore
+// neither error nor change the result of that path. This protects
+// callers from surprise regressions and pins the documented behavior.
+func TestSearchSpecsBySemanticSimilarityIgnoresPrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	baseline, err := SearchSpecsBySemanticSimilarityContext(context.Background(), cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err != nil {
+		t.Fatalf("baseline semantic-similarity error = %v", err)
+	}
+
+	// Even an oversized prefilter (which stroma would reject on the
+	// hybrid path) must be a no-op here because the vector-only path
+	// never forwards it to stroma.
+	cfg.Runtime.Search.PrefilterDimension = 9
+	got, err := SearchSpecsBySemanticSimilarityContext(context.Background(), cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
+	if err != nil {
+		t.Fatalf("semantic-similarity must ignore prefilter; got error = %v", err)
+	}
+	if len(got.Matches) != len(baseline.Matches) {
+		t.Fatalf("semantic-similarity match count = %d, want %d (prefilter must not affect this path)", len(got.Matches), len(baseline.Matches))
 	}
 }
 

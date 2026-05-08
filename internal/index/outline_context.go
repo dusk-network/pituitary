@@ -162,7 +162,12 @@ func RetrieveOutlineContextContext(ctx context.Context, cfg *config.Config, quer
 	if err != nil {
 		return nil, err
 	}
-	searchCtx, err := openSearchContext(ctx, cfg, embedder)
+	// #341 preflight runs inside openSearchContext against the
+	// already-open *sql.DB, so a typo in
+	// runtime.search.matryoshka_prefilter_dimension rejects before
+	// any embedder method is called and without paying for a second
+	// SQLite open.
+	searchCtx, err := openSearchContext(ctx, cfg, embedder, cfg.Runtime.Search.PrefilterDimension)
 	if err != nil {
 		return nil, err
 	}
@@ -188,19 +193,29 @@ func RetrieveOutlineContextWithSnapshotContext(ctx context.Context, cfg *config.
 	if err != nil {
 		return nil, err
 	}
+	// #341 preflight: also guard the with-snapshot entry point so
+	// direct callers (e.g. analysis/review) get the same OpenAI-round-
+	// trip protection. Uses the snapshot-handle variant since this
+	// entry point does not open its own SQLite DB; snapshot.Stats()
+	// exposes the same embedder_dimension the SQLite metadata
+	// preflight reads.
+	if err := preflightMatryoshkaPrefilterFromSnapshot(ctx, snapshot, cfg.Runtime.Search.PrefilterDimension); err != nil {
+		return nil, err
+	}
 	strategy, err := fusionStrategyFromConfig(cfg.Runtime.Search)
 	if err != nil {
 		return nil, err
 	}
 	hits, err := snapshot.SearchRecords(ctx, stindex.SnapshotRecordSearchQuery{
 		SearchParams: stindex.SearchParams{
-			Text:     query.Query,
-			Limit:    searchCandidateLimit(query.Limit),
-			Kinds:    query.Kinds,
-			Refs:     query.Refs,
-			Embedder: embedder,
-			Fusion:   strategy,
-			Reranker: selectSearchReranker(cfg.Runtime.Search.Reranker, ranking.SearchPrefersHistoricalContext(query.Query)),
+			Text:            query.Query,
+			Limit:           searchCandidateLimit(query.Limit),
+			Kinds:           query.Kinds,
+			Refs:            query.Refs,
+			Embedder:        embedder,
+			Fusion:          strategy,
+			Reranker:        selectSearchReranker(cfg.Runtime.Search.Reranker, ranking.SearchPrefersHistoricalContext(query.Query)),
+			SearchDimension: cfg.Runtime.Search.PrefilterDimension,
 		},
 		Aggregation: stindex.RecordAggregationOptions{Limit: query.Limit},
 	})
