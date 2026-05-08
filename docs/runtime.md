@@ -124,6 +124,23 @@ Lexical mode is selected in two ways:
 
    Successful hybrid responses carry `provenance.mode = "hybrid"`. Explicit lexical requests leave `fallback_reason` empty. Inspect `provenance` before treating lexical results as equivalent to hybrid: lexical recall is bounded by surface-form overlap with the query and will miss conceptual matches that hybrid retrieval would surface.
 
+### Matryoshka Prefilter (Hybrid Path)
+
+For large corpora — typically a few thousand chunks and up — the dense arm of hybrid retrieval can be sped up by running a truncated-prefix vector prefilter and rescoring the shortlist with full-dimension cosine. This is exposed as an explicit opt-in on the runtime config:
+
+```toml
+[runtime.search]
+matryoshka_prefilter_dimension = 256
+```
+
+- **Default `0` (off).** Hybrid search runs at the full stored embedder dimension end-to-end. This preserves byte-for-byte the pre-#341 behavior.
+- **Positive value.** Stroma's `SearchParams.SearchDimension` runs the first-pass scan at the truncated prefix length and rescores the shortlist with full-dim cosine. The value must be `>= 0`; if it exceeds the stored embedder dimension, stroma rejects the query at search time.
+- **Embedder requirement.** Only meaningful for embedders trained with Matryoshka Representation Learning (MRL) — most OpenAI embedding models, Nomic Embed Text v1.5, and a handful of OSS models. Non-MRL embedders (including the default `fixture` runtime) will see recall regressions if the prefilter is enabled, because their truncated prefixes do not preserve nearest-neighbour ranking. Pituitary cannot detect MRL training automatically; the gate is operator opt-in. Leave the field at `0` unless you know your embedder is MRL.
+- **Scope.** The knob only takes effect on the hybrid `Search` path. Stroma v3's `VectorSearchQuery` does not expose `SearchDimension`, so the vector-only call sites — `search-specs --semantic-similarity`, the artifact shortlist used by repository-similarity analysis, and the semantic terminology near-miss scan — continue to run at full stored dimension regardless of this config.
+- **Quantization.** Stroma rejects `SearchDimension` against int8 indexes. The prefilter is only valid for float32 snapshots.
+
+If you are unsure whether your embedder is MRL-trained, benchmark recall@k on a representative corpus with the prefilter on and off before enabling it in production.
+
 ## Indexing Pipeline
 
 When you run `pituitary index --rebuild`:

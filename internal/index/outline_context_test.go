@@ -69,6 +69,72 @@ func TestRetrieveOutlineContextReturnsOutlineAndExpandedContext(t *testing.T) {
 	}
 }
 
+// #341: outline-context retrieval is the second hybrid call site that
+// already consumes runtime.search; PrefilterDimension must reach
+// SearchRecords there too. A truncated value (<= stored embedder dim)
+// has to keep returning results, and an oversized value has to be
+// rejected by the local preflight before stroma embeds the query.
+func TestRetrieveOutlineContextHonorsMatryoshkaPrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Runtime.Search.PrefilterDimension = 4 // fixture-8d stores 8 dims
+	result, err := RetrieveOutlineContext(cfg, OutlineContextQuery{
+		Query:          "tenant-specific API rate-limit configuration",
+		Refs:           []string{"doc://guides/api-rate-limits"},
+		Kinds:          []string{model.ArtifactKindDoc},
+		Limit:          1,
+		IncludeParent:  true,
+		NeighborWindow: 1,
+	})
+	if err != nil {
+		t.Fatalf("RetrieveOutlineContext(prefilter=4) error = %v", err)
+	}
+	if len(result.Records) == 0 {
+		t.Fatal("RetrieveOutlineContext(prefilter=4) returned no records; expected truncated path to succeed")
+	}
+}
+
+func TestRetrieveOutlineContextRejectsPrefilterDimensionAboveStored(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	cfg.Runtime.Search.PrefilterDimension = 9 // fixture-8d stores 8 dims
+	_, err = RetrieveOutlineContext(cfg, OutlineContextQuery{
+		Query:          "tenant-specific API rate-limit configuration",
+		Refs:           []string{"doc://guides/api-rate-limits"},
+		Kinds:          []string{model.ArtifactKindDoc},
+		Limit:          1,
+		IncludeParent:  true,
+		NeighborWindow: 1,
+	})
+	if err == nil {
+		t.Fatal("RetrieveOutlineContext(prefilter > stored) error = nil, want preflight rejection")
+	}
+	if !strings.Contains(err.Error(), "runtime.search.matryoshka_prefilter_dimension") {
+		t.Fatalf("RetrieveOutlineContext() error = %q, want preflight to name the config key", err.Error())
+	}
+	if !strings.Contains(err.Error(), "exceeds stored embedder_dimension") {
+		t.Fatalf("RetrieveOutlineContext() error = %q, want preflight to name the stored dimension", err.Error())
+	}
+}
+
 func TestRetrieveOutlineContextFallsBackWhenSelectorFails(t *testing.T) {
 	t.Parallel()
 

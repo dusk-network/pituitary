@@ -130,6 +130,11 @@ func searchTermChunks(ctx context.Context, repo *analysisRepository, embedding [
 }
 
 func searchTermChunksForKind(ctx context.Context, repo *analysisRepository, embedding []float64, term, preferred, kind string, literalMatchers []terminologyMatcher) ([]semanticTerminologyMatch, error) {
+	// NOTE(#341): repo.cfg.Runtime.Search.PrefilterDimension is intentionally
+	// not threaded here. Stroma v3's VectorSearchQuery does not expose
+	// SearchDimension, so the matryoshka prefilter only takes effect on the
+	// hybrid Search path. This call site is a vector-only nearest-neighbour
+	// scan and always runs at full stored dimension.
 	hits, err := repo.snapshot.SearchVector(ctx, stindex.VectorSearchQuery{
 		Embedding: embedding,
 		Limit:     semanticTerminologyShortlistLimit,
