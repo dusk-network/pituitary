@@ -206,6 +206,11 @@ func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]
 		if d.Name() != "spec.toml" {
 			return nil
 		}
+		if !d.Type().IsRegular() {
+			rejected++
+			logger.Debugf("discover", "rejected spec bundle %s: spec.toml is not a regular file", workspaceRelative(workspaceRoot, path))
+			return nil
+		}
 
 		bundleDir := filepath.Dir(path)
 		ok, rationale, rejectionReason := assessDiscoveredSpecBundle(workspaceRoot, bundleDir)
@@ -246,8 +251,7 @@ func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]
 
 func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
-	// #nosec G304 -- specPath is the fixed bundle manifest inside a discovered workspace directory.
-	specBytes, err := os.ReadFile(specPath)
+	specBytes, err := readBoundedFile(specPath, maxSpecTOMLBytes)
 	if err != nil {
 		return "", "", fmt.Errorf("read discovered spec bundle %q: %w", filepath.ToSlash(bundleDir), err)
 	}
@@ -259,8 +263,7 @@ func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 	if !pathWithinRoot(bundleDir, bodyPath) {
 		return "", "", fmt.Errorf("read discovered spec body %q: path escapes bundle", filepath.ToSlash(bodyPath))
 	}
-	// #nosec G304 -- bodyPath is validated to remain inside the discovered bundle directory.
-	bodyBytes, err := os.ReadFile(bodyPath)
+	bodyBytes, err := readBoundedFile(bodyPath, maxMarkdownBodyBytes)
 	if err != nil {
 		return "", "", fmt.Errorf("read discovered spec body %q: %w", filepath.ToSlash(bodyPath), err)
 	}
@@ -269,8 +272,7 @@ func discoverSpecBundleIdentity(bundleDir string) (string, string, error) {
 
 func assessDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string, string) {
 	specPath := filepath.Join(bundleDir, "spec.toml")
-	// #nosec G304 -- specPath is the fixed bundle manifest inside a discovered workspace directory.
-	specBytes, err := os.ReadFile(specPath)
+	specBytes, err := readBoundedFile(specPath, maxSpecTOMLBytes)
 	if err != nil {
 		return false, nil, fmt.Sprintf("read spec.toml: %v", err)
 	}
@@ -286,12 +288,16 @@ func assessDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string
 	if !pathWithinRoot(bundleDir, bodyPath) {
 		return false, nil, fmt.Sprintf("body path %q escapes the bundle directory", raw.Body)
 	}
-	info, err := os.Stat(bodyPath)
+	info, err := os.Lstat(bodyPath)
 	switch {
 	case err != nil:
 		return false, nil, fmt.Sprintf("body file %s does not exist", workspaceRelative(workspaceRoot, bodyPath))
 	case info.IsDir():
 		return false, nil, fmt.Sprintf("body path %s is a directory", workspaceRelative(workspaceRoot, bodyPath))
+	case !info.Mode().IsRegular():
+		return false, nil, fmt.Sprintf("body file %s is not a regular file", workspaceRelative(workspaceRoot, bodyPath))
+	case info.Size() > maxMarkdownBodyBytes:
+		return false, nil, fmt.Sprintf("body file %s exceeds %d-byte size limit", workspaceRelative(workspaceRoot, bodyPath), maxMarkdownBodyBytes)
 	}
 
 	return true, []string{
@@ -317,6 +323,10 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 			return nil
 		}
 		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			logger.Debugf("discover", "skipping markdown %s: not a regular file", workspaceRelative(workspaceRoot, path))
 			return nil
 		}
 		if withinAnyDiscoveryRoot(path, specBundleDirs) {
@@ -353,8 +363,7 @@ func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]
 
 func classifyMarkdownCandidate(workspaceRoot, path string) (markdownCandidateAssessment, error) {
 	relPath := workspaceRelative(workspaceRoot, path)
-	// #nosec G304 -- path comes from filepath.WalkDir rooted at the workspace.
-	body, err := os.ReadFile(path)
+	body, err := readBoundedFile(path, maxMarkdownBodyBytes)
 	if err != nil {
 		return markdownCandidateAssessment{
 			RelativePath: relPath,
