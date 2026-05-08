@@ -102,6 +102,28 @@ For Nomic-compatible models, Pituitary automatically applies the required `searc
 
 The default `fixture` embedder is the deterministic baseline for tests, CI, and zero-credential evaluation. It is not the best retrieval runtime for real corpora. If you are evaluating search quality, overlap ranking, drift detection, or terminology audits on a real repo, switch to a real local embedding runtime first and then rebuild the index.
 
+### Hybrid vs Lexical Search
+
+`search-specs` answers queries in one of two retrieval modes:
+
+- **Hybrid** (default). Vector search is fused with the snapshot's FTS index and reranked. Requires the configured embedder to be reachable at query time. The `result.score_kind` is `hybrid_relevance`.
+- **Lexical** (FTS-only). The embedder is bypassed entirely; results come from the snapshot's FTS5 index. The `result.score_kind` is `lexical_relevance`.
+
+Lexical mode is selected in two ways:
+
+1. **Explicit opt-in.** Pass `--lexical` on the CLI or set `"mode": "lexical"` on the MCP `search_specs` request. Use this when you want a deterministic, embedder-free retrieval — for example, on CI without a configured runtime, in offline development, or when the embedder is rate-limited and you want to avoid the call.
+2. **Automatic fallback.** When hybrid retrieval is requested but the configured embedder runtime is unavailable (unloaded model, unreachable endpoint, transport failure), `search-specs` automatically retries the request as lexical instead of erroring. The result's `provenance` block records the downgrade:
+
+   ```json
+   "provenance": {
+     "mode": "lexical",
+     "embedder_bypassed": true,
+     "fallback_reason": "embedder_unavailable"
+   }
+   ```
+
+   Successful hybrid responses carry `provenance.mode = "hybrid"`. Explicit lexical requests leave `fallback_reason` empty. Inspect `provenance` before treating lexical results as equivalent to hybrid: lexical recall is bounded by surface-form overlap with the query and will miss conceptual matches that hybrid retrieval would surface.
+
 ## Indexing Pipeline
 
 When you run `pituitary index --rebuild`:

@@ -35,13 +35,14 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 		statuses searchSpecsFlagList
 		limit    int
 		familyID int
+		lexical  bool
 	)
 
 	return runCommand[index.SearchSpecRequest, index.SearchSpecResult](
 		ctx, args, stdout, stderr,
 		commandRun[index.SearchSpecRequest, index.SearchSpecResult]{
 			Name:  "search-specs",
-			Usage: "pituitary [--config PATH] search-specs (--query TEXT | --request-file PATH|-) [--domain VALUE] [--status VALUE]... [--limit N] [--format FORMAT]",
+			Usage: "pituitary [--config PATH] search-specs (--query TEXT | --request-file PATH|-) [--domain VALUE] [--status VALUE]... [--limit N] [--lexical] [--format FORMAT]",
 			Options: commandRunOptions{
 				RequestFile:   true,
 				ConfigForFile: true,
@@ -52,12 +53,17 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 				fs.Var(&statuses, "status", "filter by status; repeat to set multiple statuses")
 				fs.IntVar(&limit, "limit", 10, "maximum matches to return")
 				fs.IntVar(&familyID, "family", -1, "filter results to specs in the given family ID")
+				fs.BoolVar(&lexical, "lexical", false, "force FTS-only retrieval (skip the embedder)")
 			},
 			InlineFlagsSet: func(fs *flag.FlagSet) bool {
-				return strings.TrimSpace(query) != "" || strings.TrimSpace(domain) != "" || len(statuses) > 0 || flagWasSet(fs, "limit")
+				return strings.TrimSpace(query) != "" || strings.TrimSpace(domain) != "" || len(statuses) > 0 || flagWasSet(fs, "limit") || lexical
 			},
 			LoadRequestFile: autoLoadWorkspaceRequest[index.SearchSpecRequest],
 			BuildRequest: func(_ context.Context, _ *config.Config, _ string, _ []string) (index.SearchSpecRequest, error) {
+				mode := index.SearchSpecModeHybrid
+				if lexical {
+					mode = index.SearchSpecModeLexical
+				}
 				return index.SearchSpecRequest{
 					Query: strings.TrimSpace(query),
 					Filters: index.SearchSpecFilters{
@@ -65,6 +71,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 						Statuses: []string(statuses),
 					},
 					Limit: &limit,
+					Mode:  mode,
 				}, nil
 			},
 			Normalize: func(_ context.Context, req index.SearchSpecRequest, _ string) (index.SearchSpecRequest, error) {
@@ -75,6 +82,7 @@ func runSearchSpecsContext(ctx context.Context, args []string, stdout, stderr io
 				req.Filters.Statuses = queryArgs.Statuses
 				req.Query = queryArgs.Query
 				req.Filters.Domain = queryArgs.Domain
+				req.Mode = queryArgs.Mode
 				requestLimit := queryArgs.Limit
 				req.Limit = &requestLimit
 				if req.Query == "" {

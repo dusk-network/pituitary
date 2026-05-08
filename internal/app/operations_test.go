@@ -470,7 +470,63 @@ func TestCheckDocDriftClassifiesAnalysisProviderDependencyFailures(t *testing.T)
 	}
 }
 
-func TestSearchSpecsReportsActionableUnloadedModelErrorForOpenAICompatibleEmbedder(t *testing.T) {
+func TestSearchSpecsDoesNotFallBackOnAuthFailure(t *testing.T) {
+	// Auth failures indicate operator misconfiguration (missing API
+	// key); silently degrading to lexical would let CI/operators
+	// trust degraded results that never used the configured embedder.
+	// The original dependency_unavailable diagnostic must surface.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		response := map[string]any{"data": []map[string]any{}}
+		for i := range request.Input {
+			response["data"] = append(response["data"].([]map[string]any), map[string]any{
+				"index":     i,
+				"embedding": []float64{float64(i + 1), float64(i + 2), float64(i + 3)},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("PITUITARY_TEST_EMBED_KEY", "test-key")
+	configPath := writeOperationWorkspaceWithRuntime(t, fmt.Sprintf(`
+[runtime.embedder]
+provider = "openai_compatible"
+model = "pituitary-embed"
+endpoint = %q
+api_key_env = "PITUITARY_TEST_EMBED_KEY"
+timeout_ms = 1000
+max_retries = 0
+`, server.URL+"/v1"), "")
+
+	// Unset the API key after the index is built so that the
+	// embedder constructor at search time returns an auth-class
+	// dependency-unavailable error.
+	t.Setenv("PITUITARY_TEST_EMBED_KEY", "")
+
+	operation := SearchSpecs(context.Background(), configPath, index.SearchSpecRequest{
+		Query: "rate limiting",
+	})
+	if operation.Issue == nil {
+		t.Fatal("SearchSpecs() issue = nil, want auth dependency error (no fallback)")
+	}
+	if operation.Issue.Code != CodeDependencyUnavailable {
+		t.Fatalf("SearchSpecs() issue.code = %q, want %q (auth must not fall back)", operation.Issue.Code, CodeDependencyUnavailable)
+	}
+	if got := operation.Issue.Details["failure_class"]; got != runtimeerr.FailureClassAuth {
+		t.Fatalf("issue.details.failure_class = %#v, want %q", got, runtimeerr.FailureClassAuth)
+	}
+}
+
+func TestSearchSpecsFallsBackToLexicalWhenOpenAICompatibleEmbedderFails(t *testing.T) {
 	t.Parallel()
 
 	var failSearch atomic.Bool
@@ -522,27 +578,30 @@ max_retries = 0
 	operation := SearchSpecs(context.Background(), configPath, index.SearchSpecRequest{
 		Query: "rate limiting",
 	})
-	if operation.Issue == nil {
-		t.Fatal("SearchSpecs() issue = nil, want dependency error")
+	if operation.Issue != nil {
+		t.Fatalf("SearchSpecs() issue = %+v, want fallback success", operation.Issue)
 	}
-	if operation.Issue.Code != CodeDependencyUnavailable {
-		t.Fatalf("SearchSpecs() issue.code = %q, want %q", operation.Issue.Code, CodeDependencyUnavailable)
+	if operation.Result == nil {
+		t.Fatal("SearchSpecs() result = nil, want lexical fallback result")
 	}
-	if operation.Issue.ExitCode != 3 {
-		t.Fatalf("SearchSpecs() issue.exitCode = %d, want 3", operation.Issue.ExitCode)
+	if got, want := operation.Result.ScoreKind, index.SearchSpecScoreKindLexicalRelevance; got != want {
+		t.Fatalf("result.ScoreKind = %q, want %q", got, want)
 	}
-	wantDescriptor := fmt.Sprintf(`runtime.embedder (provider "openai_compatible", model "pituitary-embed", endpoint %q) is unavailable because the configured model appears to be unloaded`, server.URL+"/v1")
-	if !strings.Contains(operation.Issue.Message, wantDescriptor) {
-		t.Fatalf("SearchSpecs() issue.message = %q, want runtime descriptor and unloaded-model guidance", operation.Issue.Message)
+	prov := operation.Result.Provenance
+	if prov == nil {
+		t.Fatal("result.Provenance = nil, want lexical fallback provenance")
 	}
-	if !strings.Contains(operation.Issue.Message, "load or pin model") {
-		t.Fatalf("SearchSpecs() issue.message = %q, want model loading guidance", operation.Issue.Message)
+	if got, want := prov.Mode, "lexical"; got != want {
+		t.Fatalf("provenance.Mode = %q, want %q", got, want)
 	}
-	if !strings.Contains(operation.Issue.Message, "LM Studio") {
-		t.Fatalf("SearchSpecs() issue.message = %q, want LM Studio hint", operation.Issue.Message)
+	if !prov.EmbedderBypassed {
+		t.Fatal("provenance.EmbedderBypassed = false, want true after fallback")
 	}
-	if !strings.Contains(operation.Issue.Message, "Raw provider error:") || !strings.Contains(operation.Issue.Message, "Model unloaded..") {
-		t.Fatalf("SearchSpecs() issue.message = %q, want raw provider detail", operation.Issue.Message)
+	if got, want := prov.FallbackReason, index.SearchSpecFallbackReasonEmbedderUnavailable; got != want {
+		t.Fatalf("provenance.FallbackReason = %q, want %q", got, want)
+	}
+	if len(operation.Result.Matches) == 0 {
+		t.Fatal("result.Matches = empty, want lexical hits for 'rate limiting'")
 	}
 }
 

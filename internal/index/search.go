@@ -29,7 +29,26 @@ const (
 	// SearchSpecScoreKindSemanticSimilarity indicates scores from vector-only
 	// retrieval where the score remains cosine-similarity-like.
 	SearchSpecScoreKindSemanticSimilarity = "semantic_similarity"
+
+	// SearchSpecScoreKindLexicalRelevance indicates scores from FTS-only
+	// retrieval that bypassed the embedder.
+	SearchSpecScoreKindLexicalRelevance = "lexical_relevance"
 )
+
+const (
+	// SearchSpecModeHybrid is the default retrieval mode (vector + FTS fusion).
+	SearchSpecModeHybrid = ""
+
+	// SearchSpecModeLexical selects FTS-only retrieval that does not call
+	// the embedder. Useful as an explicit fallback when the embedder is
+	// unavailable or undesired.
+	SearchSpecModeLexical = "lexical"
+)
+
+// SearchSpecFallbackReasonEmbedderUnavailable is recorded on the result
+// provenance when the requested hybrid retrieval automatically degraded
+// to lexical because the embedder runtime was unavailable.
+const SearchSpecFallbackReasonEmbedderUnavailable = "embedder_unavailable"
 
 // SearchSpecFilters captures the optional search filters exposed by transports.
 type SearchSpecFilters struct {
@@ -42,6 +61,9 @@ type SearchSpecRequest struct {
 	Query   string            `json:"query"`
 	Filters SearchSpecFilters `json:"filters"`
 	Limit   *int              `json:"limit,omitempty"`
+	// Mode selects the retrieval mode. Empty means hybrid (default).
+	// "lexical" forces FTS-only retrieval that bypasses the embedder.
+	Mode string `json:"mode,omitempty"`
 }
 
 // SearchSpecQuery is the normalized search request for the spec index.
@@ -51,6 +73,7 @@ type SearchSpecQuery struct {
 	Domain   string   `json:"domain,omitempty"`
 	Statuses []string `json:"statuses"`
 	Limit    int      `json:"limit,omitempty"`
+	Mode     string   `json:"mode,omitempty"`
 }
 
 // SearchSpecMatch is one ranked section match.
@@ -74,6 +97,22 @@ type SearchSpecResult struct {
 	ScoreKind        string                   `json:"score_kind,omitempty"`
 	ScoreDescription string                   `json:"score_description,omitempty"`
 	ContentTrust     *resultmeta.ContentTrust `json:"content_trust,omitempty"`
+	Provenance       *SearchSpecProvenance    `json:"provenance,omitempty"`
+}
+
+// SearchSpecProvenance reports how a search request was actually
+// executed. It distinguishes the requested mode from the executed mode
+// so callers can detect when hybrid retrieval automatically fell back
+// to lexical because the embedder was unavailable.
+type SearchSpecProvenance struct {
+	// Mode is the retrieval mode actually used: "hybrid" or "lexical".
+	Mode string `json:"mode"`
+	// EmbedderBypassed is true when the request was answered without
+	// calling the embedder (explicit lexical or fallback).
+	EmbedderBypassed bool `json:"embedder_bypassed"`
+	// FallbackReason names why hybrid was downgraded to lexical, when
+	// applicable. Empty for explicit lexical or successful hybrid.
+	FallbackReason string `json:"fallback_reason,omitempty"`
 }
 
 type chunkCandidate struct {
@@ -242,13 +281,31 @@ func (r SearchSpecRequest) ToQuery() (SearchSpecQuery, error) {
 	if err != nil {
 		return SearchSpecQuery{}, err
 	}
+	mode, err := normalizeSearchMode(r.Mode)
+	if err != nil {
+		return SearchSpecQuery{}, err
+	}
 	return SearchSpecQuery{
 		Query:    strings.TrimSpace(r.Query),
 		Kind:     model.ArtifactKindSpec,
 		Domain:   strings.TrimSpace(r.Filters.Domain),
 		Statuses: statuses,
 		Limit:    limit,
+		Mode:     mode,
 	}, nil
+}
+
+// normalizeSearchMode validates the requested retrieval mode. Unknown
+// values reject; the empty string and SearchSpecModeLexical are the
+// only accepted inputs today.
+func normalizeSearchMode(mode string) (string, error) {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	switch mode {
+	case SearchSpecModeHybrid, SearchSpecModeLexical:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("unsupported search mode %q", mode)
+	}
 }
 
 // NormalizeSearchStatuses applies the canonical status filter defaults and validation.
@@ -279,10 +336,46 @@ func SearchSpecs(cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, 
 }
 
 // SearchSpecsContext executes semantic retrieval over the indexed spec corpus.
+//
+// When query.Mode is SearchSpecModeLexical the embedder is bypassed and
+// the request is answered from the snapshot's FTS index. When Mode is
+// the default hybrid mode, retrieval automatically falls back to lexical
+// if the embedder runtime is unavailable; the result's Provenance
+// records whether the fallback occurred.
 func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+
+	query, err := normalizeSearchSpecQuery(query)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(query.Query) == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	if query.Mode == SearchSpecModeLexical {
+		return searchSpecsLexical(ctx, cfg, query, "")
+	}
+
+	result, err := searchSpecsHybrid(ctx, cfg, query)
+	if err == nil {
+		return result, nil
+	}
+	// Only fall back for transient/recoverable embedder failures.
+	// Auth and schema-mismatch failures indicate operator
+	// misconfiguration; masking them with degraded lexical results
+	// would let callers (CI, operators) trust output that never used
+	// the configured embedder, so the original diagnostic surfaces
+	// instead.
+	if !IsRecoverableEmbedderFailure(err) {
+		return nil, err
+	}
+	return searchSpecsLexical(ctx, cfg, query, SearchSpecFallbackReasonEmbedderUnavailable)
+}
+
+func searchSpecsHybrid(ctx context.Context, cfg *config.Config, query SearchSpecQuery) (*SearchSpecResult, error) {
 	strategy, err := fusion.Resolve(fusionConfigFromRuntime(cfg.Runtime.Search))
 	if err != nil {
 		return nil, fmt.Errorf("resolve search fusion: %w", err)
@@ -290,7 +383,12 @@ func SearchSpecsContext(ctx context.Context, cfg *config.Config, query SearchSpe
 	loader := func(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
 		return loadRankedCandidatesContextWithFusion(ctx, db, snapshot, embedder, query, strategy, cfg.Runtime.Search.Reranker)
 	}
-	return searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loader)
+	result, err := searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loader)
+	if err != nil {
+		return nil, err
+	}
+	result.Provenance = &SearchSpecProvenance{Mode: "hybrid"}
+	return result, nil
 }
 
 func fusionConfigFromRuntime(cfg config.SearchConfig) fusion.Config {
@@ -312,6 +410,8 @@ func SearchSpecScoreColumnLabel(kind string) string {
 	switch kind {
 	case SearchSpecScoreKindSemanticSimilarity:
 		return "SIMILARITY"
+	case SearchSpecScoreKindLexicalRelevance:
+		return "LEXICAL"
 	default:
 		return "RELEVANCE"
 	}
@@ -323,6 +423,8 @@ func SearchSpecScoreDescription(kind string) string {
 	switch kind {
 	case SearchSpecScoreKindSemanticSimilarity:
 		return "cosine-style semantic similarity from vector-only retrieval"
+	case SearchSpecScoreKindLexicalRelevance:
+		return "lexical relevance from FTS-only retrieval; embedder was bypassed"
 	default:
 		return "hybrid relevance from fused vector and lexical retrieval; not a cosine similarity percentage"
 	}
@@ -371,11 +473,16 @@ func normalizeSearchSpecQuery(query SearchSpecQuery) (SearchSpecQuery, error) {
 	if err != nil {
 		return SearchSpecQuery{}, err
 	}
+	mode, err := normalizeSearchMode(query.Mode)
+	if err != nil {
+		return SearchSpecQuery{}, err
+	}
 	query.Query = strings.TrimSpace(query.Query)
 	query.Kind = defaultString(query.Kind, model.ArtifactKindSpec)
 	query.Domain = strings.TrimSpace(query.Domain)
 	query.Statuses = statuses
 	query.Limit = limit
+	query.Mode = mode
 	return query, nil
 }
 
