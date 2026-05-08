@@ -119,6 +119,34 @@ func TestLoadPathComplianceTargetsContext_RejectsSymlink(t *testing.T) {
 	}
 }
 
+func TestLoadPathComplianceTargetsContext_RejectsSymlinkedParentEscape(t *testing.T) {
+	t.Parallel()
+
+	// Outside-workspace target -- must never be read by --path, even via a
+	// symlinked parent directory inside the workspace. Final-component Lstat
+	// alone misses this; the symlink-safe containment check in
+	// resolveWorkspaceFilePath catches it.
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("SECRET"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	root := t.TempDir()
+	cfg := &config.Config{Workspace: config.Workspace{RootPath: root}}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	_, err := loadPathComplianceTargetsContext(t.Context(), cfg, []string{"escape/secret.txt"})
+	if err == nil {
+		t.Fatalf("loadPathComplianceTargetsContext: want symlink-escape error, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside workspace") {
+		t.Fatalf("loadPathComplianceTargetsContext error = %v, want outside-workspace error", err)
+	}
+}
+
 func TestReadBoundedCompliancePath_ReturnsExactSizeAtLimit(t *testing.T) {
 	t.Parallel()
 

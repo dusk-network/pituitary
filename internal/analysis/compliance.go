@@ -18,6 +18,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"github.com/dusk-network/pituitary/internal/source"
 	"github.com/dusk-network/pituitary/internal/temporal"
 	"golang.org/x/sync/errgroup"
 )
@@ -609,11 +610,13 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			return nil, fmt.Errorf("path %q appears to be a binary file; --path expects text content", rawPath)
 		}
 
-		content := string(data)
+		// Compute the digest from the raw bytes to avoid a redundant
+		// string→[]byte copy on near-limit files; the string conversion
+		// for Content remains a single allocation.
 		targets = append(targets, complianceTarget{
 			Path:         relPath,
-			Content:      content,
-			DuplicateKey: complianceContentDigest(content),
+			Content:      string(data),
+			DuplicateKey: complianceContentDigestBytes(data),
 		})
 	}
 	return targets, nil
@@ -831,7 +834,7 @@ func complianceDuplicateKey(workspaceRoot, relPath, fallbackContent string) stri
 		_, absPath, err := resolveWorkspaceFilePath(workspaceRoot, relPath)
 		if err == nil {
 			if data, readErr := readBoundedCompliancePath(absPath, maxCompliancePathBytes); readErr == nil && !looksLikeBinary(data) {
-				return complianceContentDigest(string(data))
+				return complianceContentDigestBytes(data)
 			}
 		}
 	}
@@ -846,6 +849,17 @@ func complianceContentDigest(content string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+// complianceContentDigestBytes mirrors complianceContentDigest but accepts the
+// raw byte slice already in hand, avoiding a transient string allocation when
+// the caller has just read the file into memory.
+func complianceContentDigestBytes(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(content)
 	return fmt.Sprintf("%x", sum[:])
 }
 
@@ -893,6 +907,26 @@ func resolveWorkspaceFilePath(rootPath, rawPath string) (string, string, error) 
 	}
 	if relPath == ".." || stringsHasPrefix(relPath, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("path %q is outside workspace root %s", rawPath, rootPath)
+	}
+
+	// Lexical containment alone is not enough: a parent component may be a
+	// symlink that resolves outside the workspace. Re-check containment with
+	// symlink resolution so `--path workspace_link/passwd` cannot read
+	// /etc/passwd via a workspace-resident symlink.
+	realRoot, err := source.EvalSymlinksBestEffort(rootPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace root %q: %w", rootPath, err)
+	}
+	realPath, err := source.EvalSymlinksBestEffort(absPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path %q: %w", rawPath, err)
+	}
+	realRel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path %q relative to workspace: %w", rawPath, err)
+	}
+	if realRel == ".." || stringsHasPrefix(realRel, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("path %q resolves outside workspace root %s via symlinks", rawPath, rootPath)
 	}
 
 	return normalizeCompliancePath(relPath), absPath, nil
