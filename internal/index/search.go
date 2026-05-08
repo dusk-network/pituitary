@@ -380,19 +380,15 @@ func searchSpecsHybrid(ctx context.Context, cfg *config.Config, query SearchSpec
 	if err != nil {
 		return nil, fmt.Errorf("resolve search fusion: %w", err)
 	}
-	// #341 preflight: reject an oversized matryoshka prefilter using
-	// the index's stored embedder_dimension metadata, before any
-	// embedder is constructed or invoked. Stroma also validates
-	// SearchDimension inside Snapshot.Search, but only after embedding
-	// the query — which would burn an OpenAI-compatible round trip per
-	// failed search. Reading metadata is a local SQLite read.
-	if err := preflightMatryoshkaPrefilterContext(ctx, cfg); err != nil {
-		return nil, err
-	}
 	loader := func(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, embedder Embedder, query SearchSpecQuery) ([]chunkCandidate, error) {
 		return loadRankedCandidatesContextWithFusion(ctx, db, snapshot, embedder, query, strategy, cfg.Runtime.Search.Reranker, cfg.Runtime.Search.PrefilterDimension)
 	}
-	result, err := searchSpecsContextWithScoreKind(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loader)
+	// #341 preflight: reject an oversized matryoshka prefilter using
+	// the index's stored embedder_dimension metadata, before any
+	// embedder method is called. Threaded through openSearchContext so
+	// the preflight reuses the same *sql.DB the search will, instead
+	// of opening (and closing) a second handle on every hybrid query.
+	result, err := searchSpecsContextWithScoreKindAndPrefilter(ctx, cfg, query, SearchSpecScoreKindHybridRelevance, loader, cfg.Runtime.Search.PrefilterDimension)
 	if err != nil {
 		return nil, err
 	}
@@ -400,13 +396,13 @@ func searchSpecsHybrid(ctx context.Context, cfg *config.Config, query SearchSpec
 	return result, nil
 }
 
-// preflightMatryoshkaPrefilterContext rejects an oversized
+// preflightMatryoshkaPrefilter rejects an oversized
 // runtime.search.matryoshka_prefilter_dimension by comparing it against
 // the index's stored embedder_dimension metadata. Returns nil when the
 // prefilter is disabled (zero) or when the stored dimension is at least
-// as large as the configured prefilter. Reads SQLite metadata only — it
-// must not call any embedder method, so a typo never burns an
-// OpenAI-compatible round trip.
+// as large as the configured prefilter. Reads SQLite metadata through
+// the supplied *sql.DB only — it must not call any embedder method, so
+// a typo never burns an OpenAI-compatible round trip.
 //
 // This reads the business index's embedder_dimension. Pituitary keeps
 // the business DB and the referenced stroma snapshot's metadata in
@@ -415,19 +411,31 @@ func searchSpecsHybrid(ctx context.Context, cfg *config.Config, query SearchSpec
 // only writes float32 snapshots today; if int8 quantization is ever
 // added, mirror stroma's float32-only constraint here too so the
 // rejection still fires before the embedder is invoked.
-func preflightMatryoshkaPrefilterContext(ctx context.Context, cfg *config.Config) error {
-	prefilter := cfg.Runtime.Search.PrefilterDimension
+// preflightMatryoshkaPrefilterFromSnapshot is the snapshot-handle
+// variant for callers that already hold a stroma snapshot but no
+// SQLite handle (e.g. RetrieveOutlineContextWithSnapshotContext).
+// EmbedderDimension on snapshot.Stats() mirrors the metadata
+// embedder_dimension the SQLite preflight reads.
+func preflightMatryoshkaPrefilterFromSnapshot(ctx context.Context, snapshot *stindex.Snapshot, prefilter int) error {
 	if prefilter <= 0 {
 		return nil
 	}
-	db, err := OpenReadOnlyContext(ctx, cfg.Workspace.ResolvedIndexPath)
+	stats, err := snapshot.Stats(ctx)
 	if err != nil {
-		return fmt.Errorf("open index for prefilter preflight: %w", err)
+		return fmt.Errorf("read stroma snapshot stats for prefilter preflight: %w", err)
 	}
-	defer db.Close()
+	if prefilter > stats.EmbedderDimension {
+		return fmt.Errorf("runtime.search.matryoshka_prefilter_dimension %d exceeds stored embedder_dimension %d; lower the value or rebuild the index with a higher-dimension embedder", prefilter, stats.EmbedderDimension)
+	}
+	return nil
+}
 
+func preflightMatryoshkaPrefilter(ctx context.Context, db *sql.DB, prefilter int) error {
+	if prefilter <= 0 {
+		return nil
+	}
 	var raw string
-	err = db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
+	err := db.QueryRowContext(ctx, `SELECT value FROM metadata WHERE key = 'embedder_dimension'`).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("index is missing embedder metadata; run `pituitary index --rebuild`")
 	}
@@ -486,6 +494,14 @@ func SearchSpecScoreDescription(kind string) string {
 type candidateLoader func(context.Context, *sql.DB, *stindex.Snapshot, Embedder, SearchSpecQuery) ([]chunkCandidate, error)
 
 func searchSpecsContextWithScoreKind(ctx context.Context, cfg *config.Config, query SearchSpecQuery, scoreKind string, loader candidateLoader) (*SearchSpecResult, error) {
+	return searchSpecsContextWithScoreKindAndPrefilter(ctx, cfg, query, scoreKind, loader, 0)
+}
+
+// searchSpecsContextWithScoreKindAndPrefilter is the hybrid-aware
+// variant: prefilterDimension > 0 runs the matryoshka preflight against
+// the same SQLite handle the search will use, before any embedder
+// method is invoked. Non-hybrid callers pass zero to skip the check.
+func searchSpecsContextWithScoreKindAndPrefilter(ctx context.Context, cfg *config.Config, query SearchSpecQuery, scoreKind string, loader candidateLoader, prefilterDimension int) (*SearchSpecResult, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -503,7 +519,7 @@ func searchSpecsContextWithScoreKind(ctx context.Context, cfg *config.Config, qu
 		return nil, err
 	}
 
-	searchCtx, err := openSearchContext(ctx, cfg, embedder)
+	searchCtx, err := openSearchContext(ctx, cfg, embedder, prefilterDimension)
 	if err != nil {
 		return nil, err
 	}
@@ -614,7 +630,7 @@ type searchContext struct {
 	embedder Embedder
 }
 
-func openSearchContext(ctx context.Context, cfg *config.Config, embedder Embedder) (*searchContext, error) {
+func openSearchContext(ctx context.Context, cfg *config.Config, embedder Embedder, prefilterDimension int) (*searchContext, error) {
 	db, err := OpenReadOnlyContext(ctx, cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
 		return nil, fmt.Errorf("open index %s: %w", cfg.Workspace.ResolvedIndexPath, err)
@@ -622,6 +638,17 @@ func openSearchContext(ctx context.Context, cfg *config.Config, embedder Embedde
 
 	snapshot, err := OpenStromaSnapshotContext(ctx, db, cfg.Workspace.ResolvedIndexPath)
 	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	// #341 preflight runs against the already-open db, before any
+	// embedder method is called. A typo in
+	// runtime.search.matryoshka_prefilter_dimension therefore rejects
+	// without burning an OpenAI-compatible round trip from
+	// embedder.Dimension below.
+	if err := preflightMatryoshkaPrefilter(ctx, db, prefilterDimension); err != nil {
+		_ = snapshot.Close()
 		_ = db.Close()
 		return nil, err
 	}
@@ -698,12 +725,15 @@ func loadSemanticSimilarityCandidatesContext(ctx context.Context, db *sql.DB, sn
 		return nil, fmt.Errorf("embedder returned %d query vectors, want 1", len(vectors))
 	}
 
-	// NOTE(#341): runtime.search.matryoshka_prefilter_dimension is honoured
-	// only on the hybrid path (loadRankedCandidatesContextWithFusion).
-	// Stroma v3's VectorSearchQuery does not expose SearchDimension, so
-	// the vector-only similarity path always runs at full stored dimension.
-	// If/when stroma surfaces SearchDimension on VectorSearchQuery, plumb
-	// cfg.Runtime.Search.PrefilterDimension into the query below.
+	// NOTE(#341): runtime.search.matryoshka_prefilter_dimension is
+	// honoured only on the hybrid path
+	// (loadRankedCandidatesContextWithFusion). Stroma v3's
+	// VectorSearchQuery does not expose SearchDimension, so the
+	// vector-only similarity path always runs at full stored
+	// dimension. If/when stroma surfaces SearchDimension on
+	// VectorSearchQuery, this function will need an additional
+	// prefilterDimension parameter (cfg is not in scope here today)
+	// threaded through from SearchSpecsBySemanticSimilarityContext.
 	hits, err := snapshot.SearchVector(ctx, stindex.VectorSearchQuery{
 		Embedding: vectors[0],
 		Limit:     searchCandidateLimit(query.Limit),

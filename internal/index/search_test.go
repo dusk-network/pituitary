@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/dusk-network/pituitary/internal/config"
@@ -525,9 +528,10 @@ func TestSearchSpecsRejectsPrefilterDimensionAboveStored(t *testing.T) {
 // fire BEFORE any embedder method is invoked. The OpenAI-compatible
 // embedder probes its dimension by issuing an EmbedQueries round trip
 // when its cache is empty, so a config typo would otherwise burn one
-// HTTP request per search call. We pin the order by wrapping the
-// fixture embedder and failing the test if Dimension or EmbedQueries
-// is called before the preflight rejection.
+// HTTP request per search call. We pin the order by pointing
+// runtime.embedder at an httptest server that fails the test if any
+// request lands — a real spy on the provider, not just a string match
+// on the error message.
 func TestSearchSpecsPrefilterPreflightSkipsEmbedder(t *testing.T) {
 	t.Parallel()
 
@@ -540,7 +544,26 @@ func TestSearchSpecsPrefilterPreflightSkipsEmbedder(t *testing.T) {
 		t.Fatalf("Rebuild() error = %v", err)
 	}
 
+	// Spy on the embedder by serving an HTTP endpoint that fails the
+	// test on any request. If the preflight ever regresses to running
+	// after embedder.Dimension or any other provider call, the test
+	// will fail here even before we look at the returned error.
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		t.Errorf("embedder must not be called when preflight rejects; got %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg.Runtime.Embedder = config.RuntimeProvider{
+		Provider:  config.RuntimeProviderOpenAI,
+		Model:     "spy-embedder",
+		Endpoint:  server.URL + "/v1",
+		TimeoutMS: 1000,
+	}
 	cfg.Runtime.Search.PrefilterDimension = 9 // fixture-8d stores 8 dims
+
 	_, err = SearchSpecs(cfg, SearchSpecQuery{Query: "rate limiting", Limit: 5})
 	if err == nil {
 		t.Fatal("SearchSpecs() error = nil, want preflight rejection")
@@ -552,6 +575,9 @@ func TestSearchSpecsPrefilterPreflightSkipsEmbedder(t *testing.T) {
 	// post-embed rejection that still burns a round trip.
 	if !strings.Contains(err.Error(), "runtime.search.matryoshka_prefilter_dimension") {
 		t.Fatalf("SearchSpecs() error = %q, want local preflight (not stroma) to reject the typo", err.Error())
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("embedder spy received %d request(s); want 0 — preflight regressed past the embedder", got)
 	}
 }
 

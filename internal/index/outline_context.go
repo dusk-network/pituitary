@@ -158,19 +158,16 @@ func RetrieveOutlineContextContext(ctx context.Context, cfg *config.Config, quer
 		return nil, err
 	}
 
-	// #341 preflight: reject an oversized matryoshka prefilter using
-	// the index's stored embedder_dimension metadata, before any
-	// embedder is constructed or invoked. See
-	// preflightMatryoshkaPrefilterContext for rationale.
-	if err := preflightMatryoshkaPrefilterContext(ctx, cfg); err != nil {
-		return nil, err
-	}
-
 	embedder, err := newEmbedder(cfg.Runtime.Embedder)
 	if err != nil {
 		return nil, err
 	}
-	searchCtx, err := openSearchContext(ctx, cfg, embedder)
+	// #341 preflight runs inside openSearchContext against the
+	// already-open *sql.DB, so a typo in
+	// runtime.search.matryoshka_prefilter_dimension rejects before
+	// any embedder method is called and without paying for a second
+	// SQLite open.
+	searchCtx, err := openSearchContext(ctx, cfg, embedder, cfg.Runtime.Search.PrefilterDimension)
 	if err != nil {
 		return nil, err
 	}
@@ -198,8 +195,11 @@ func RetrieveOutlineContextWithSnapshotContext(ctx context.Context, cfg *config.
 	}
 	// #341 preflight: also guard the with-snapshot entry point so
 	// direct callers (e.g. analysis/review) get the same OpenAI-round-
-	// trip protection as RetrieveOutlineContextContext above.
-	if err := preflightMatryoshkaPrefilterContext(ctx, cfg); err != nil {
+	// trip protection. Uses the snapshot-handle variant since this
+	// entry point does not open its own SQLite DB; snapshot.Stats()
+	// exposes the same embedder_dimension the SQLite metadata
+	// preflight reads.
+	if err := preflightMatryoshkaPrefilterFromSnapshot(ctx, snapshot, cfg.Runtime.Search.PrefilterDimension); err != nil {
 		return nil, err
 	}
 	strategy, err := fusionStrategyFromConfig(cfg.Runtime.Search)
