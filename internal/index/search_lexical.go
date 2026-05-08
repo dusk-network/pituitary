@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/ranking"
 	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
@@ -45,6 +46,8 @@ func searchSpecsLexical(ctx context.Context, cfg *config.Config, query SearchSpe
 }
 
 func loadLexicalCandidatesContext(ctx context.Context, db *sql.DB, snapshot *stindex.Snapshot, query SearchSpecQuery) ([]chunkCandidate, error) {
+	preferHistorical := ranking.SearchPrefersHistoricalContext(query.Query)
+
 	hits, err := snapshot.SearchLexical(ctx, stindex.SnapshotLexicalSearchQuery{
 		LexicalSearchParams: stindex.LexicalSearchParams{
 			Text:  query.Query,
@@ -59,6 +62,7 @@ func loadLexicalCandidatesContext(ctx context.Context, db *sql.DB, snapshot *sti
 	// the historical-section ordering applies as it would in the
 	// non-arm-aware default. Pass scorePreAdjusted=false so
 	// buildRankedCandidatesContext computes the historical adjustment
-	// once on the raw FTS score.
-	return buildRankedCandidatesContext(ctx, db, hits, query, false, false)
+	// once on the raw FTS score, using the same query-aware
+	// preferHistorical signal as the hybrid and vector paths.
+	return buildRankedCandidatesContext(ctx, db, hits, query, preferHistorical, false)
 }
