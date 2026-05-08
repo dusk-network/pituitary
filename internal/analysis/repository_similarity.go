@@ -169,6 +169,11 @@ func (r *analysisRepository) shortlistSimilarArtifactRefs(sections []embeddedSec
 }
 
 func (r *analysisRepository) shortlistScoresForEmbedding(embedding []float64, query artifactShortlistQuery) (map[string]float64, error) {
+	// NOTE(#341): r.cfg.Runtime.Search.PrefilterDimension is intentionally
+	// not threaded here. Stroma v3's VectorSearchQuery does not expose
+	// SearchDimension, so the matryoshka prefilter only takes effect on the
+	// hybrid Search path. The artifact shortlist runs vector-only at full
+	// stored dimension regardless of the configured prefilter.
 	hits, err := r.snapshot.SearchVector(r.ctx, stindex.VectorSearchQuery{
 		Embedding: embedding,
 		Limit:     shortlistChunkProbeLimit(normalizeArtifactShortlistLimit(query.Limit)),

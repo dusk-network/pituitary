@@ -270,3 +270,144 @@ reranker = "arm_aware_historical"
 		t.Fatalf("round-tripped search.reranker = %q, want %q", got, SearchRerankerArmAwareHistorical)
 	}
 }
+
+// #341: matryoshka_prefilter_dimension parses as a non-negative int and
+// flows into SearchConfig.PrefilterDimension. Default zero must keep
+// SearchConfig.IsZero() = true so the runtime renderer skips it.
+func TestLoadRuntimeSearchParsesPrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.search]
+matryoshka_prefilter_dimension = 256
+`)
+
+	if got := cfg.Runtime.Search.PrefilterDimension; got != 256 {
+		t.Fatalf("matryoshka_prefilter_dimension = %d, want 256", got)
+	}
+	if cfg.Runtime.Search.IsZero() {
+		t.Fatalf("SearchConfig should not be zero with prefilter dimension set; got %+v", cfg.Runtime.Search)
+	}
+}
+
+func TestLoadRuntimeSearchPrefilterDefaultsToZero(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`)
+
+	if got := cfg.Runtime.Search.PrefilterDimension; got != 0 {
+		t.Fatalf("default prefilter dimension = %d, want 0", got)
+	}
+	if !cfg.Runtime.Search.IsZero() {
+		t.Fatalf("SearchConfig should be zero by default; got %+v", cfg.Runtime.Search)
+	}
+}
+
+func TestLoadRuntimeSearchRejectsNegativePrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadChunkingFixtureErr(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.search]
+matryoshka_prefilter_dimension = -1
+`)
+	if err == nil {
+		t.Fatal("expected error for negative matryoshka_prefilter_dimension")
+	}
+	if !strings.Contains(err.Error(), "matryoshka_prefilter_dimension") {
+		t.Fatalf("error should mention matryoshka_prefilter_dimension; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "must be >= 0") {
+		t.Fatalf("error should call out non-negative requirement; got %v", err)
+	}
+}
+
+// Regression for the strict-field parser: an unknown key alongside the
+// new prefilter knob must still reject so a typo does not silently fall
+// through. The error must steer users toward the supported keys.
+func TestLoadRuntimeSearchRejectsGhostFieldUnderSearch(t *testing.T) {
+	t.Parallel()
+
+	_, err := loadChunkingFixtureErr(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.search]
+matryoshka_prefilter_dimension = 128
+prefilter_dim = 256
+`)
+	if err == nil {
+		t.Fatal("expected ghost-field error for runtime.search.prefilter_dim")
+	}
+	if !strings.Contains(err.Error(), "prefilter_dim") {
+		t.Fatalf("error should name the unknown field; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "matryoshka_prefilter_dimension") {
+		t.Fatalf("error should suggest the supported key; got %v", err)
+	}
+}
+
+func TestRenderRoundTripPreservesPrefilterDimension(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+
+[runtime.search]
+matryoshka_prefilter_dimension = 384
+`)
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(rendered, "[runtime.search]") {
+		t.Fatalf("rendered output missing search block:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "matryoshka_prefilter_dimension = 384") {
+		t.Fatalf("rendered output missing prefilter dimension:\n%s", rendered)
+	}
+
+	round := loadRenderedConfig(t, rendered)
+	if got := round.Runtime.Search.PrefilterDimension; got != 384 {
+		t.Fatalf("round-tripped prefilter dimension = %d, want 384", got)
+	}
+}
+
+// When the prefilter is left at zero the renderer must not emit a
+// [runtime.search] block (mirrors the fusion/reranker zero-render
+// behavior). This guards against accidental drift in render.go.
+func TestRenderOmitsSearchBlockWhenPrefilterZero(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadChunkingFixture(t, `
+[workspace]
+root = "workspace"
+index_path = ".pituitary/pituitary.db"
+`)
+
+	rendered, err := Render(cfg)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(rendered, "[runtime.search]") {
+		t.Fatalf("rendered output should omit search block when zero; got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "matryoshka_prefilter_dimension") {
+		t.Fatalf("rendered output should omit prefilter dimension when zero; got:\n%s", rendered)
+	}
+}
