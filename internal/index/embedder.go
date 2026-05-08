@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dusk-network/pituitary/internal/config"
+	"github.com/dusk-network/pituitary/internal/runtimeerr"
 	stembed "github.com/dusk-network/stroma/v3/embed"
 )
 
@@ -55,6 +56,38 @@ func DependencyUnavailableRuntime(err error) string {
 		return ""
 	}
 	return strings.TrimSpace(target.RuntimeName())
+}
+
+// DependencyUnavailableFailureClass returns the failure class recorded
+// on a dependency-unavailable error, or empty string if none.
+func DependencyUnavailableFailureClass(err error) string {
+	details := DependencyUnavailableDetails(err)
+	if details == nil {
+		return ""
+	}
+	if class, ok := details["failure_class"].(string); ok {
+		return strings.TrimSpace(class)
+	}
+	return ""
+}
+
+// IsRecoverableEmbedderFailure reports whether a dependency-unavailable
+// embedder error is the kind that should permit automatic fallback to a
+// degraded retrieval path. Auth and schema-mismatch failures indicate
+// operator misconfiguration that masking with degraded results would
+// hide; transient classes (timeout, transport, server, rate-limit, and
+// the generic dependency_unavailable that covers unloaded-model
+// returns) are recoverable by definition.
+func IsRecoverableEmbedderFailure(err error) bool {
+	if !IsDependencyUnavailable(err) {
+		return false
+	}
+	switch DependencyUnavailableFailureClass(err) {
+	case runtimeerr.FailureClassAuth, runtimeerr.FailureClassSchemaMismatch:
+		return false
+	default:
+		return true
+	}
 }
 
 // DependencyUnavailableDetails reports structured diagnostic fields associated

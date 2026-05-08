@@ -153,6 +153,7 @@ func SearchSpecs(ctx context.Context, configPath string, request index.SearchSpe
 	request.Query = query.Query
 	request.Filters.Domain = query.Domain
 	request.Filters.Statuses = query.Statuses
+	request.Mode = query.Mode
 	limit := query.Limit
 	request.Limit = &limit
 

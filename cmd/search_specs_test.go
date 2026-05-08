@@ -638,6 +638,64 @@ path = "rfcs"
 	return root
 }
 
+func TestRunSearchSpecsLexicalFlag(t *testing.T) {
+	repo := writeSearchWorkspace(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := withWorkingDir(t, repo, func() int {
+		if code := runIndex([]string{"--rebuild"}, ioDiscard{}, ioDiscard{}); code != 0 {
+			t.Fatalf("runIndex() exit code = %d, want 0", code)
+		}
+		return runSearchSpecs([]string{"--query", "rate limiting", "--lexical", "--format", "json"}, &stdout, &stderr)
+	})
+	if exitCode != 0 {
+		t.Fatalf("runSearchSpecs(--lexical) exit code = %d, want 0", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runSearchSpecs(--lexical) wrote unexpected stderr: %q", stderr.String())
+	}
+
+	var payload struct {
+		Request struct {
+			Mode string `json:"mode"`
+		} `json:"request"`
+		Result struct {
+			ScoreKind  string `json:"score_kind"`
+			Provenance struct {
+				Mode             string `json:"mode"`
+				EmbedderBypassed bool   `json:"embedder_bypassed"`
+				FallbackReason   string `json:"fallback_reason"`
+			} `json:"provenance"`
+			Matches []struct {
+				Ref string `json:"ref"`
+			} `json:"matches"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal lexical payload: %v", err)
+	}
+	if payload.Request.Mode != "lexical" {
+		t.Fatalf("request.mode = %q, want %q", payload.Request.Mode, "lexical")
+	}
+	if payload.Result.ScoreKind != "lexical_relevance" {
+		t.Fatalf("result.score_kind = %q, want lexical_relevance", payload.Result.ScoreKind)
+	}
+	if payload.Result.Provenance.Mode != "lexical" {
+		t.Fatalf("provenance.mode = %q, want lexical", payload.Result.Provenance.Mode)
+	}
+	if !payload.Result.Provenance.EmbedderBypassed {
+		t.Fatal("provenance.embedder_bypassed = false, want true for explicit lexical")
+	}
+	if payload.Result.Provenance.FallbackReason != "" {
+		t.Fatalf("provenance.fallback_reason = %q, want empty for explicit lexical", payload.Result.Provenance.FallbackReason)
+	}
+	if len(payload.Result.Matches) == 0 {
+		t.Fatal("matches = empty, want lexical hits")
+	}
+}
+
 func copyTree(t *testing.T, src, dst string) {
 	t.Helper()
 
