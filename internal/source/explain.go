@@ -259,8 +259,16 @@ func explainMarkdownContractSource(workspaceRoot string, explanation SourceFileE
 		return explanation, nil
 	}
 
-	// #nosec G304 -- absolutePath is derived from the selected workspace source and explanation target.
-	body, err := os.ReadFile(absolutePath)
+	// Short-circuit before reading: an excluded markdown_contract file does
+	// not need its content read or inferred just to report why it was
+	// excluded. This keeps `explain-file` fast on large excluded files and
+	// avoids buffering arbitrary-sized markdown into memory for diagnostics.
+	if !selection.Selected {
+		explanation.Reason = selection.Reason
+		return explanation, nil
+	}
+
+	body, err := readBoundedFile(absolutePath, maxMarkdownBodyBytes)
 	if err != nil {
 		return SourceFileExplanation{}, fmt.Errorf(
 			"source %q contract %q: read markdown: %w",
@@ -288,11 +296,6 @@ func explainMarkdownContractSource(workspaceRoot string, explanation SourceFileE
 		RelatesTo:  relationRefs(record.Relations, model.RelationRelatesTo),
 		AppliesTo:  append([]string(nil), record.AppliesTo...),
 		Inference:  record.Inference,
-	}
-
-	if !selection.Selected {
-		explanation.Reason = selection.Reason
-		return explanation, nil
 	}
 
 	explanation.Selected = true
