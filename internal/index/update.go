@@ -443,8 +443,11 @@ func updateStromaSnapshotContext(
 	}
 	// SyncFromSource streams the full desired corpus into stroma. It
 	// computes the (ref, content_hash) diff against the existing
-	// snapshot itself — unchanged records are reused without loading
-	// their bodies, and stored records absent from the stream are
+	// snapshot itself — unchanged records are reused without
+	// re-chunking or re-embedding their bodies (the bodies are still
+	// resident here because the loader handed us a fully materialized
+	// LoadResult; loader-side body reduction is the deferred follow-up
+	// noted above), and stored records absent from the stream are
 	// removed. Pituitary's per-source loader produces the union of all
 	// configured sources, so SyncFromSource's auto-removal preserves
 	// today's "configure source change → next update reflects

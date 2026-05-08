@@ -56,10 +56,15 @@ func NewLoadResultRecordSource(records *LoadResult) RecordSource {
 
 	specIdx := 0
 	docIdx := 0
+	var terminalErr error
 	exhausted := false
 	return RecordSourceFunc(func(_ context.Context) (stcorpus.Record, bool, error) {
 		if exhausted {
-			return stcorpus.Record{}, false, nil
+			// Sticky terminal state: a normalization failure on a
+			// prior Next must keep surfacing the same error so
+			// callers (and stroma's RebuildFromSource) cannot
+			// silently treat the stream as cleanly exhausted.
+			return stcorpus.Record{}, false, terminalErr
 		}
 		if specIdx < len(records.Specs) {
 			spec := records.Specs[specIdx]
@@ -67,6 +72,7 @@ func NewLoadResultRecordSource(records *LoadResult) RecordSource {
 			record, err := corpusRecordFromSpec(spec)
 			if err != nil {
 				exhausted = true
+				terminalErr = err
 				return stcorpus.Record{}, false, err
 			}
 			return record, true, nil
@@ -77,6 +83,7 @@ func NewLoadResultRecordSource(records *LoadResult) RecordSource {
 			record, err := corpusRecordFromDoc(doc)
 			if err != nil {
 				exhausted = true
+				terminalErr = err
 				return stcorpus.Record{}, false, err
 			}
 			return record, true, nil

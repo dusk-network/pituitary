@@ -60,6 +60,36 @@ func TestLoadResultRecordSourceHandlesNilLoadResult(t *testing.T) {
 	}
 }
 
+func TestLoadResultRecordSourceStickyErrorAfterNormalizationFailure(t *testing.T) {
+	t.Parallel()
+
+	// A spec record with no Ref fails stcorpus.Record.Normalize. The
+	// adapter must surface that error on the failing Next and on every
+	// subsequent Next, not silently flip to (zero, false, nil) — that
+	// would let stroma's RebuildFromSource treat the stream as cleanly
+	// exhausted and commit a partial snapshot.
+	bad := model.SpecRecord{Kind: model.ArtifactKindSpec, Title: "no ref", BodyText: "x", BodyFormat: "markdown", ContentHash: "h"}
+	src := NewLoadResultRecordSource(&LoadResult{Specs: []model.SpecRecord{bad}})
+	ctx := context.Background()
+
+	_, ok, firstErr := src.Next(ctx)
+	if firstErr == nil {
+		t.Fatal("Next() error = nil, want normalization failure on bad spec")
+	}
+	if ok {
+		t.Fatal("Next() ok = true, want false on the failing record")
+	}
+	for i := 0; i < 3; i++ {
+		_, ok, err := src.Next(ctx)
+		if ok {
+			t.Fatalf("Next() #%d ok = true, want sticky terminal state", i)
+		}
+		if !errors.Is(err, firstErr) {
+			t.Fatalf("Next() #%d error = %v, want sticky %v", i, err, firstErr)
+		}
+	}
+}
+
 func TestRecordSourceFuncImplementsRecordSource(t *testing.T) {
 	t.Parallel()
 

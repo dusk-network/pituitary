@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -47,14 +48,19 @@ func BenchmarkRebuildLargeCorpus(b *testing.B) {
 	indexDir := b.TempDir()
 	cfg := minimalRebuildConfig(b, filepath.Join(indexDir, "pituitary.db"))
 	records := syntheticLargeCorpus(docCount, bodyKB)
-	if _, err := Rebuild(cfg, records); err != nil {
+	if _, err := RebuildContextWithOptions(context.Background(), cfg, records, RebuildOptions{Full: true}); err != nil {
 		b.Fatalf("warm Rebuild() error = %v", err)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := Rebuild(cfg, records); err != nil {
+		// RebuildOptions{Full: true} disables chunk reuse so each
+		// iteration actually exercises the embed-and-flush path the
+		// streaming switch targets. Without Full=true the second
+		// call onward would reuse the prior snapshot and the bench
+		// would measure reuse cache lookups, not streaming rebuild.
+		if _, err := RebuildContextWithOptions(context.Background(), cfg, records, RebuildOptions{Full: true}); err != nil {
 			b.Fatalf("Rebuild() error = %v", err)
 		}
 	}
