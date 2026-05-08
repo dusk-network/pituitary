@@ -155,6 +155,8 @@ When you run `pituitary index --rebuild`:
 
 Use `--full` to skip reuse and force a complete re-embed.
 
+The chunking and embedding stages run as a streaming pipeline against stroma: records are yielded one at a time into `stindex.RebuildFromSource`, which chunks, embeds, and flushes to the staging snapshot in bounded internal batches. Peak memory inside stroma's pipeline therefore scales with its batch size rather than with corpus size, so large workspaces no longer accumulate the full chunks-and-vectors plan before commit. The source loader still materializes a `LoadResult` of all spec and doc records up front today; reducing that resident set requires a loader-side change that yields records lazily from disk, which is tracked separately. Incremental updates use the same streaming entry point: `pituitary update` consumes the union of configured sources via `stindex.SyncFromSource`, which preserves today's "configure source change → next update reflects removals" behavior without paying full-rebuild cost. Stroma retains changed records and their planned chunks/vectors until commit, so a single update that touches a very large fraction of the corpus is still bounded by available memory; for that case `pituitary index --rebuild` remains the safer path.
+
 Query commands validate index freshness before executing. A stale index fails fast with a rebuild hint.
 
 ## JSON Timings

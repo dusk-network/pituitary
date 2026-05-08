@@ -137,7 +137,7 @@ func storedArtifactForRecord(state *reuseState, ref string) storedArtifact {
 
 func updateRebuildReuseCountsForSpecs(result *RebuildResult, records []model.SpecRecord, state *reuseState) error {
 	for _, spec := range records {
-		record, err := corpusRecordFromSpec(spec)
+		record, err := source.CorpusRecordFromSpec(spec)
 		if err != nil {
 			return fmt.Errorf("normalize spec %s for reuse accounting: %w", spec.Ref, err)
 		}
@@ -153,7 +153,7 @@ func updateRebuildReuseCountsForSpecs(result *RebuildResult, records []model.Spe
 
 func updateRebuildReuseCountsForDocs(result *RebuildResult, records []model.DocRecord, state *reuseState) error {
 	for _, doc := range records {
-		record, err := corpusRecordFromDoc(doc)
+		record, err := source.CorpusRecordFromDoc(doc)
 		if err != nil {
 			return fmt.Errorf("normalize doc %s for reuse accounting: %w", doc.Ref, err)
 		}
