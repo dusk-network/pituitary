@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/dusk-network/pituitary/internal/index"
 	"github.com/dusk-network/pituitary/internal/model"
 	"github.com/dusk-network/pituitary/internal/resultmeta"
+	"github.com/dusk-network/pituitary/internal/source"
 	"github.com/dusk-network/pituitary/internal/temporal"
 	"golang.org/x/sync/errgroup"
 )
@@ -570,6 +572,16 @@ func loadComplianceTargetsContext(ctx context.Context, cfg *config.Config, reque
 	return loadDiffComplianceTargetsContext(ctx, cfg, request.DiffText)
 }
 
+// maxCompliancePathBytes caps the size of a single --path target so a crafted
+// or accidentally large file in the workspace cannot trigger an unbounded
+// allocation during compliance analysis. Mirrors the markdown body limit used
+// by the indexed source loader.
+const maxCompliancePathBytes = 10 * 1024 * 1024 // 10 MiB
+
+// binarySniffWindow is the number of leading bytes inspected for NUL bytes
+// when screening compliance targets for binary content.
+const binarySniffWindow = 8000
+
 func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, paths []string) ([]complianceTarget, error) {
 	targets := make([]complianceTarget, 0, len(paths))
 
@@ -579,27 +591,72 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			return nil, err
 		}
 
-		info, err := os.Stat(absPath)
+		info, err := os.Lstat(absPath)
 		if err != nil {
 			return nil, fmt.Errorf("read path %q: %w", rawPath, err)
 		}
 		if info.IsDir() {
 			return nil, fmt.Errorf("path %q is a directory; --path expects a file", rawPath)
 		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("path %q is not a regular file; --path expects a workspace-resident text file", rawPath)
+		}
 
-		// #nosec G304 -- absPath is resolved under the workspace root by resolveWorkspaceFilePath.
-		data, err := os.ReadFile(absPath)
+		data, err := readBoundedCompliancePath(absPath, maxCompliancePathBytes)
 		if err != nil {
 			return nil, fmt.Errorf("read path %q: %w", rawPath, err)
 		}
+		if looksLikeBinary(data) {
+			return nil, fmt.Errorf("path %q appears to be a binary file; --path expects text content", rawPath)
+		}
 
+		// Compute the digest from the raw bytes to avoid a redundant
+		// string→[]byte copy on near-limit files; the string conversion
+		// for Content remains a single allocation.
 		targets = append(targets, complianceTarget{
 			Path:         relPath,
 			Content:      string(data),
-			DuplicateKey: complianceContentDigest(string(data)),
+			DuplicateKey: complianceContentDigestBytes(data),
 		})
 	}
 	return targets, nil
+}
+
+// readBoundedCompliancePath reads at most maxBytes from path, rejecting larger
+// inputs with an explicit error. The read is wrapped in io.LimitReader so a
+// file that grows between Stat and Read still cannot exceed the bound.
+func readBoundedCompliancePath(path string, maxBytes int64) ([]byte, error) {
+	// #nosec G304 -- callers resolve path containment via resolveWorkspaceFilePath; LimitReader enforces the allocation bound.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d-byte size limit", filepath.ToSlash(path), maxBytes)
+	}
+	return data, nil
+}
+
+// looksLikeBinary returns true when the leading binarySniffWindow bytes of
+// data contain a NUL byte. This is the same heuristic git uses for its
+// "binary files differ" detection and is sufficient to keep obvious binaries
+// out of compliance analysis prompts.
+func looksLikeBinary(data []byte) bool {
+	n := len(data)
+	if n > binarySniffWindow {
+		n = binarySniffWindow
+	}
+	for i := 0; i < n; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func loadDiffComplianceTargetsContext(ctx context.Context, cfg *config.Config, diffText string) ([]complianceTarget, error) {
@@ -776,8 +833,8 @@ func complianceDuplicateKey(workspaceRoot, relPath, fallbackContent string) stri
 	if workspaceRoot != "" && relPath != "" {
 		_, absPath, err := resolveWorkspaceFilePath(workspaceRoot, relPath)
 		if err == nil {
-			if data, readErr := os.ReadFile(absPath); readErr == nil {
-				return complianceContentDigest(string(data))
+			if data, readErr := readBoundedCompliancePath(absPath, maxCompliancePathBytes); readErr == nil && !looksLikeBinary(data) {
+				return complianceContentDigestBytes(data)
 			}
 		}
 	}
@@ -792,6 +849,17 @@ func complianceContentDigest(content string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(content))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+// complianceContentDigestBytes mirrors complianceContentDigest but accepts the
+// raw byte slice already in hand, avoiding a transient string allocation when
+// the caller has just read the file into memory.
+func complianceContentDigestBytes(content []byte) string {
+	if len(content) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(content)
 	return fmt.Sprintf("%x", sum[:])
 }
 
@@ -839,6 +907,26 @@ func resolveWorkspaceFilePath(rootPath, rawPath string) (string, string, error) 
 	}
 	if relPath == ".." || stringsHasPrefix(relPath, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("path %q is outside workspace root %s", rawPath, rootPath)
+	}
+
+	// Lexical containment alone is not enough: a parent component may be a
+	// symlink that resolves outside the workspace. Re-check containment with
+	// symlink resolution so `--path workspace_link/passwd` cannot read
+	// /etc/passwd via a workspace-resident symlink.
+	realRoot, err := source.EvalSymlinksBestEffort(rootPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve workspace root %q: %w", rootPath, err)
+	}
+	realPath, err := source.EvalSymlinksBestEffort(absPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path %q: %w", rawPath, err)
+	}
+	realRel, err := filepath.Rel(realRoot, realPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path %q relative to workspace: %w", rawPath, err)
+	}
+	if realRel == ".." || stringsHasPrefix(realRel, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("path %q resolves outside workspace root %s via symlinks", rawPath, rootPath)
 	}
 
 	return normalizeCompliancePath(relPath), absPath, nil
