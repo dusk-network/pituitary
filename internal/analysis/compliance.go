@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -570,6 +571,16 @@ func loadComplianceTargetsContext(ctx context.Context, cfg *config.Config, reque
 	return loadDiffComplianceTargetsContext(ctx, cfg, request.DiffText)
 }
 
+// maxCompliancePathBytes caps the size of a single --path target so a crafted
+// or accidentally large file in the workspace cannot trigger an unbounded
+// allocation during compliance analysis. Mirrors the markdown body limit used
+// by the indexed source loader.
+const maxCompliancePathBytes = 10 * 1024 * 1024 // 10 MiB
+
+// binarySniffWindow is the number of leading bytes inspected for NUL bytes
+// when screening compliance targets for binary content.
+const binarySniffWindow = 8000
+
 func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, paths []string) ([]complianceTarget, error) {
 	targets := make([]complianceTarget, 0, len(paths))
 
@@ -579,27 +590,70 @@ func loadPathComplianceTargetsContext(ctx context.Context, cfg *config.Config, p
 			return nil, err
 		}
 
-		info, err := os.Stat(absPath)
+		info, err := os.Lstat(absPath)
 		if err != nil {
 			return nil, fmt.Errorf("read path %q: %w", rawPath, err)
 		}
 		if info.IsDir() {
 			return nil, fmt.Errorf("path %q is a directory; --path expects a file", rawPath)
 		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("path %q is not a regular file; --path expects a workspace-resident text file", rawPath)
+		}
 
-		// #nosec G304 -- absPath is resolved under the workspace root by resolveWorkspaceFilePath.
-		data, err := os.ReadFile(absPath)
+		data, err := readBoundedCompliancePath(absPath, maxCompliancePathBytes)
 		if err != nil {
 			return nil, fmt.Errorf("read path %q: %w", rawPath, err)
 		}
+		if looksLikeBinary(data) {
+			return nil, fmt.Errorf("path %q appears to be a binary file; --path expects text content", rawPath)
+		}
 
+		content := string(data)
 		targets = append(targets, complianceTarget{
 			Path:         relPath,
-			Content:      string(data),
-			DuplicateKey: complianceContentDigest(string(data)),
+			Content:      content,
+			DuplicateKey: complianceContentDigest(content),
 		})
 	}
 	return targets, nil
+}
+
+// readBoundedCompliancePath reads at most maxBytes from path, rejecting larger
+// inputs with an explicit error. The read is wrapped in io.LimitReader so a
+// file that grows between Stat and Read still cannot exceed the bound.
+func readBoundedCompliancePath(path string, maxBytes int64) ([]byte, error) {
+	// #nosec G304 -- callers resolve path containment via resolveWorkspaceFilePath; LimitReader enforces the allocation bound.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%s exceeds %d-byte size limit", filepath.ToSlash(path), maxBytes)
+	}
+	return data, nil
+}
+
+// looksLikeBinary returns true when the leading binarySniffWindow bytes of
+// data contain a NUL byte. This is the same heuristic git uses for its
+// "binary files differ" detection and is sufficient to keep obvious binaries
+// out of compliance analysis prompts.
+func looksLikeBinary(data []byte) bool {
+	n := len(data)
+	if n > binarySniffWindow {
+		n = binarySniffWindow
+	}
+	for i := 0; i < n; i++ {
+		if data[i] == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func loadDiffComplianceTargetsContext(ctx context.Context, cfg *config.Config, diffText string) ([]complianceTarget, error) {
@@ -776,7 +830,7 @@ func complianceDuplicateKey(workspaceRoot, relPath, fallbackContent string) stri
 	if workspaceRoot != "" && relPath != "" {
 		_, absPath, err := resolveWorkspaceFilePath(workspaceRoot, relPath)
 		if err == nil {
-			if data, readErr := os.ReadFile(absPath); readErr == nil {
+			if data, readErr := readBoundedCompliancePath(absPath, maxCompliancePathBytes); readErr == nil && !looksLikeBinary(data) {
 				return complianceContentDigest(string(data))
 			}
 		}
