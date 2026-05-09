@@ -28,7 +28,12 @@ func init() {
 type filesystemAdapter struct{}
 
 func (a *filesystemAdapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterResult, error) {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	source := config.Source{
 		Name:         cfg.Name,
@@ -52,19 +57,19 @@ func (a *filesystemAdapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sd
 
 	switch source.Kind {
 	case config.SourceKindSpecBundle:
-		specs, err := loadSpecBundles(cfg.WorkspaceRoot, source)
+		specs, err := loadSpecBundles(ctx, cfg.WorkspaceRoot, source)
 		if err != nil {
 			return nil, err
 		}
 		return &sdk.AdapterResult{Specs: specs}, nil
 	case config.SourceKindMarkdownDocs:
-		docs, err := loadMarkdownDocs(cfg.WorkspaceRoot, source)
+		docs, err := loadMarkdownDocs(ctx, cfg.WorkspaceRoot, source)
 		if err != nil {
 			return nil, err
 		}
 		return &sdk.AdapterResult{Docs: docs}, nil
 	case config.SourceKindMarkdownContract:
-		specs, err := loadMarkdownContracts(cfg.WorkspaceRoot, source)
+		specs, err := loadMarkdownContracts(ctx, cfg.WorkspaceRoot, source)
 		if err != nil {
 			return nil, err
 		}
@@ -149,14 +154,17 @@ func describeOrigin(itemLabel string, origin artifactOrigin) string {
 	return fmt.Sprintf("source %q path %q %s %q", origin.sourceName, origin.sourcePath, itemLabel, origin.itemPath)
 }
 
-func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
-	bundleDirs, err := discoverSpecBundles(source)
+func loadSpecBundles(ctx context.Context, workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
+	bundleDirs, err := discoverSpecBundles(ctx, source)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", source.Name, err)
 	}
 
 	var records []model.SpecRecord
 	for _, bundleDir := range bundleDirs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		record, err := loadSpecBundle(workspaceRoot, source, bundleDir)
 		if err != nil {
 			return nil, err
@@ -166,8 +174,8 @@ func loadSpecBundles(workspaceRoot string, source config.Source) ([]model.SpecRe
 	return records, nil
 }
 
-func discoverSpecBundles(source config.Source) ([]string, error) {
-	bundleDirs, err := discoverSpecBundleDirs(source.ResolvedPath)
+func discoverSpecBundles(ctx context.Context, source config.Source) ([]string, error) {
+	bundleDirs, err := discoverSpecBundleDirs(ctx, source.ResolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -196,9 +204,12 @@ func discoverSpecBundles(source config.Source) ([]string, error) {
 	return filtered, nil
 }
 
-func discoverSpecBundleDirs(root string) ([]string, error) {
+func discoverSpecBundleDirs(ctx context.Context, root string) ([]string, error) {
 	var bundleDirs []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return err
 		}
@@ -344,13 +355,16 @@ func isValidSpecStatus(status string) bool {
 	}
 }
 
-func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRecord, error) {
+func loadMarkdownDocs(ctx context.Context, workspaceRoot string, source config.Source) ([]model.DocRecord, error) {
 	var records []model.DocRecord
-	matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "doc")
+	matches, err := enumerateSelectedMarkdownPaths(ctx, workspaceRoot, source, "doc")
 	if err != nil {
 		return nil, err
 	}
 	for _, match := range matches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q doc %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
@@ -376,13 +390,16 @@ func loadMarkdownDocs(workspaceRoot string, source config.Source) ([]model.DocRe
 	return records, nil
 }
 
-func loadMarkdownContracts(workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
+func loadMarkdownContracts(ctx context.Context, workspaceRoot string, source config.Source) ([]model.SpecRecord, error) {
 	var records []model.SpecRecord
-	matches, err := enumerateSelectedMarkdownPaths(workspaceRoot, source, "contract")
+	matches, err := enumerateSelectedMarkdownPaths(ctx, workspaceRoot, source, "contract")
 	if err != nil {
 		return nil, err
 	}
 	for _, match := range matches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		bodyBytes, err := readBoundedFile(match.AbsolutePath, maxMarkdownBodyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("source %q contract %q: read markdown: %w", source.Name, workspaceRelative(workspaceRoot, match.AbsolutePath), err)
@@ -402,9 +419,12 @@ type selectedMarkdownPath struct {
 	RelativePath string
 }
 
-func enumerateSelectedMarkdownPaths(workspaceRoot string, source config.Source, label string) ([]selectedMarkdownPath, error) {
+func enumerateSelectedMarkdownPaths(ctx context.Context, workspaceRoot string, source config.Source, label string) ([]selectedMarkdownPath, error) {
 	matches := make([]selectedMarkdownPath, 0)
 	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return err
 		}

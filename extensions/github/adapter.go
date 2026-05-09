@@ -38,6 +38,12 @@ type adapter struct {
 }
 
 func (a *adapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(cfg.Kind) != kindIssue {
 		return nil, fmt.Errorf("unsupported kind %q", cfg.Kind)
 	}
@@ -70,6 +76,13 @@ func (a *adapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterR
 		Docs:  make([]sdk.DocRecord, 0, len(issues)),
 	}
 	for _, issue := range issues {
+		// Re-check between records so a non-cooperating issue client
+		// (one that ignores ctx and returns the full set anyway)
+		// cannot trick the adapter into building all records after
+		// cancellation.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if issue.IsPullRequest {
 			continue
 		}

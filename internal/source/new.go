@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -201,7 +202,7 @@ func inspectExistingSpecBundles(workspaceRoot, specRoot string) ([]string, map[s
 		return nil, nil, "", fmt.Errorf("spec root %q is not a directory", workspaceRelative(workspaceRoot, specRoot))
 	}
 
-	bundleDirs, err := discoverSpecBundleDirs(specRoot)
+	bundleDirs, err := discoverSpecBundleDirs(context.Background(), specRoot)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("scan spec root %q: %w", workspaceRelative(workspaceRoot, specRoot), err)
 	}

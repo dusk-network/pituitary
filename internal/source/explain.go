@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -305,7 +306,7 @@ func explainMarkdownContractSource(workspaceRoot string, explanation SourceFileE
 }
 
 func explainSpecBundleSource(workspaceRoot string, explanation SourceFileExplanation, source config.Source, absolutePath string) (SourceFileExplanation, error) {
-	candidateDirs, err := discoverSpecBundleDirs(source.ResolvedPath)
+	candidateDirs, err := discoverSpecBundleDirs(context.Background(), source.ResolvedPath)
 	if err != nil {
 		return SourceFileExplanation{}, err
 	}

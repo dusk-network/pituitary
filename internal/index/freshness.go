@@ -210,7 +210,7 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 		return status, nil
 	}
 
-	records, err := source.LoadFromConfig(cfg)
+	records, err := source.LoadFromConfigContext(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("load current sources for freshness check: %w", err)
 	}

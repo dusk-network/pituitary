@@ -76,7 +76,7 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 		DryRun:     dryRun,
 	}
 	logger := cliLoggerFromContext(ctx)
-	discovered, err := source.DiscoverWorkspace(source.DiscoverOptions{
+	discovered, err := source.DiscoverWorkspaceContext(ctx, source.DiscoverOptions{
 		RootPath:   path,
 		ConfigPath: request.ConfigPath,
 		Write:      false,
@@ -115,7 +115,7 @@ func runInitContext(ctx context.Context, args []string, stdout, stderr io.Writer
 			Message: "generated config is invalid:\n" + err.Error(),
 		}, 2)
 	}
-	records, err := source.LoadFromConfigWithOptions(cfg, source.LoadOptions{Logger: logger})
+	records, err := source.LoadFromConfigWithOptionsContext(ctx, cfg, source.LoadOptions{Logger: logger})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "init", request, cliIssue{
 			Code:    "source_error",

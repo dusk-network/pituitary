@@ -67,7 +67,7 @@ func runPreviewSourcesContext(ctx context.Context, args []string, stdout, stderr
 	}
 	emitMultirepoShadowWarning(resolution)
 
-	result, err := source.PreviewFromConfigWithOptions(cfg, source.PreviewOptions{
+	result, err := source.PreviewFromConfigWithOptionsContext(ctx, cfg, source.PreviewOptions{
 		Logger:  cliLoggerFromContext(ctx),
 		Verbose: verbose,
 	})

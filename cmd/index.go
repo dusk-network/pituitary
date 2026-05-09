@@ -121,7 +121,7 @@ func runIndexContext(ctx context.Context, args []string, stdout, stderr io.Write
 		return writeCLIError(stdout, stderr, format, "index", request, configLoadIssue("invalid config:\n"+err.Error(), resolution), 2)
 	}
 	emitMultirepoShadowWarning(resolution)
-	records, err := source.LoadFromConfigWithOptions(cfg, source.LoadOptions{Logger: cliLoggerFromContext(ctx)})
+	records, err := source.LoadFromConfigWithOptionsContext(ctx, cfg, source.LoadOptions{Logger: cliLoggerFromContext(ctx)})
 	if err != nil {
 		return writeCLIError(stdout, stderr, format, "index", request, cliIssue{
 			Code:    "source_error",

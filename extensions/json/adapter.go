@@ -33,7 +33,13 @@ func init() {
 type adapter struct{}
 
 func (a *adapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterResult, error) {
-	files, kind, err := enumerateSelectedJSONFiles(cfg)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	files, kind, err := enumerateSelectedJSONFiles(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -44,6 +50,9 @@ func (a *adapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterR
 
 	result := &sdk.AdapterResult{}
 	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		record, err := loadJSONArtifact(ctx, cfg, options, kind, file)
 		if err != nil {
 			return nil, err
@@ -61,9 +70,14 @@ func (a *adapter) Load(ctx context.Context, cfg sdk.SourceConfig) (*sdk.AdapterR
 }
 
 func (a *adapter) Preview(ctx context.Context, cfg sdk.SourceConfig) ([]sdk.PreviewItem, error) {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	files, kind, err := enumerateSelectedJSONFiles(cfg)
+	files, kind, err := enumerateSelectedJSONFiles(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +179,7 @@ type selectedJSONFile struct {
 	RelativePath string
 }
 
-func enumerateSelectedJSONFiles(cfg sdk.SourceConfig) ([]selectedJSONFile, string, error) {
+func enumerateSelectedJSONFiles(ctx context.Context, cfg sdk.SourceConfig) ([]selectedJSONFile, string, error) {
 	kind := normalizeKind(cfg.Kind)
 	if kind == "" {
 		return nil, "", fmt.Errorf("unsupported kind %q", cfg.Kind)
@@ -181,6 +195,9 @@ func enumerateSelectedJSONFiles(cfg sdk.SourceConfig) ([]selectedJSONFile, strin
 
 	matches := make([]selectedJSONFile, 0)
 	err = filepath.WalkDir(resolvedPath, func(path string, d os.DirEntry, walkErr error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -343,7 +360,9 @@ type loadedArtifact struct {
 }
 
 func loadJSONArtifact(ctx context.Context, cfg sdk.SourceConfig, options sourceOptions, kind string, file selectedJSONFile) (loadedArtifact, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return loadedArtifact{}, err
+	}
 
 	raw, err := os.ReadFile(file.AbsolutePath)
 	if err != nil {

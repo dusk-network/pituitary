@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,7 +89,21 @@ type markdownCandidateAssessment struct {
 
 // DiscoverWorkspace scans one repo-like directory and proposes a starting
 // local config plus a preview of what that config would index.
+//
+// Convenience wrapper without cancellation. Prefer DiscoverWorkspaceContext
+// on request paths so canceled CLI/MCP calls stop discovery walks promptly.
 func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
+	return DiscoverWorkspaceContext(context.Background(), options)
+}
+
+// DiscoverWorkspaceContext is the cancellation-aware variant of
+// DiscoverWorkspace. ctx is checked between phases and inside the
+// filesystem walk callbacks that scan for spec bundles and markdown
+// candidates.
+func DiscoverWorkspaceContext(ctx context.Context, options DiscoverOptions) (*DiscoverResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger := options.Logger
 	rootPath := strings.TrimSpace(options.RootPath)
 	if rootPath == "" {
@@ -108,11 +123,11 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	}
 	logger.Infof("discover", "scanning workspace %s", filepath.ToSlash(workspaceRoot))
 
-	specCandidates, specBundleDirs, rejectedSpecBundles, err := discoverSpecBundleCandidates(workspaceRoot, logger)
+	specCandidates, specBundleDirs, rejectedSpecBundles, err := discoverSpecBundleCandidates(ctx, workspaceRoot, logger)
 	if err != nil {
 		return nil, err
 	}
-	contractCandidates, docCandidates, rejectedMarkdown, err := discoverMarkdownCandidates(workspaceRoot, specBundleDirs, logger)
+	contractCandidates, docCandidates, rejectedMarkdown, err := discoverMarkdownCandidates(ctx, workspaceRoot, specBundleDirs, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +159,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	preview, err := PreviewFromConfigWithOptions(cfg, PreviewOptions{Logger: logger})
+	preview, err := PreviewFromConfigWithOptionsContext(ctx, cfg, PreviewOptions{Logger: logger})
 	if err != nil {
 		return nil, fmt.Errorf("preview discovered config: %w", err)
 	}
@@ -163,6 +178,12 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 	}
 
 	if options.Write {
+		// Guard the disk-mutating boundary: refuse to write a fresh
+		// config when the caller has already canceled, so a canceled
+		// `init`/`discover` cannot leave behind partial side effects.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := writeDiscoveredConfig(cfg.ConfigPath, configText); err != nil {
 			return nil, err
 		}
@@ -170,7 +191,7 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reload written config: %w", err)
 		}
-		preview, err := PreviewFromConfigWithOptions(loaded, PreviewOptions{Logger: logger})
+		preview, err := PreviewFromConfigWithOptionsContext(ctx, loaded, PreviewOptions{Logger: logger})
 		if err != nil {
 			return nil, fmt.Errorf("preview written config: %w", err)
 		}
@@ -209,12 +230,15 @@ func dirEntryIsRegular(d os.DirEntry) bool {
 	return typ.IsRegular()
 }
 
-func discoverSpecBundleCandidates(workspaceRoot string, logger *diag.Logger) ([]discoveredCandidate, map[string]struct{}, int, error) {
+func discoverSpecBundleCandidates(ctx context.Context, workspaceRoot string, logger *diag.Logger) ([]discoveredCandidate, map[string]struct{}, int, error) {
 	var candidates []discoveredCandidate
 	bundleDirs := make(map[string]struct{})
 	rejected := 0
 
 	err := filepath.WalkDir(workspaceRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -328,12 +352,15 @@ func assessDiscoveredSpecBundle(workspaceRoot, bundleDir string) (bool, []string
 	}, ""
 }
 
-func discoverMarkdownCandidates(workspaceRoot string, specBundleDirs map[string]struct{}, logger *diag.Logger) ([]discoveredCandidate, []discoveredCandidate, int, error) {
+func discoverMarkdownCandidates(ctx context.Context, workspaceRoot string, specBundleDirs map[string]struct{}, logger *diag.Logger) ([]discoveredCandidate, []discoveredCandidate, int, error) {
 	var contractCandidates []discoveredCandidate
 	var docCandidates []discoveredCandidate
 	rejected := 0
 
 	err := filepath.WalkDir(workspaceRoot, func(path string, d os.DirEntry, walkErr error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if walkErr != nil {
 			return walkErr
 		}
