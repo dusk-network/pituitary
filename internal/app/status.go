@@ -47,7 +47,7 @@ type RuntimeProviderStatus struct {
 // Status loads config, inspects the current index, and optionally probes runtime dependencies.
 func Status(ctx context.Context, configPath string, request StatusRequest) Response[StatusRequest, StatusResult] {
 	return executeWithConfig(ctx, configPath, request, func(cfg *config.Config) (*StatusResult, error) {
-		records, err := source.LoadFromConfig(cfg)
+		records, err := source.LoadFromConfigContext(ctx, cfg)
 		if err != nil {
 			return nil, err
 		}

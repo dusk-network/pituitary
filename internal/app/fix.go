@@ -103,7 +103,7 @@ func runFixDocDrift(ctx context.Context, cfg *config.Config, request FixRequest)
 		}, nil
 	}
 
-	records, err := source.LoadFromConfig(cfg)
+	records, err := source.LoadFromConfigContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func resolveFixTargets(ctx context.Context, cfg *config.Config, request FixReque
 	}
 
 	if hasPath {
-		records, err := source.LoadFromConfig(cfg)
+		records, err := source.LoadFromConfigContext(ctx, cfg)
 		if err != nil {
 			return "", nil, err
 		}

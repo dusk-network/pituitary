@@ -56,19 +56,41 @@ type PreviewOptions struct {
 }
 
 // PreviewFromConfig enumerates source items without rebuilding the index.
+//
+// Convenience wrapper without cancellation. Prefer PreviewFromConfigContext
+// on request paths so canceled CLI/MCP calls stop preview walks promptly.
 func PreviewFromConfig(cfg *config.Config) (*PreviewResult, error) {
-	return PreviewFromConfigWithOptions(cfg, PreviewOptions{})
+	return PreviewFromConfigContext(context.Background(), cfg)
+}
+
+// PreviewFromConfigContext enumerates source items without rebuilding the
+// index, threading ctx into the underlying filesystem walks.
+func PreviewFromConfigContext(ctx context.Context, cfg *config.Config) (*PreviewResult, error) {
+	return PreviewFromConfigWithOptionsContext(ctx, cfg, PreviewOptions{})
 }
 
 // PreviewFromConfigWithOptions enumerates source items without rebuilding the index.
+//
+// Convenience wrapper without cancellation; see
+// PreviewFromConfigWithOptionsContext for the cancellation-aware variant.
 func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*PreviewResult, error) {
+	return PreviewFromConfigWithOptionsContext(context.Background(), cfg, options)
+}
+
+// PreviewFromConfigWithOptionsContext enumerates source items without
+// rebuilding the index. The supplied ctx is checked between sources and
+// inside filesystem walk callbacks.
+func PreviewFromConfigWithOptionsContext(ctx context.Context, cfg *config.Config, options PreviewOptions) (*PreviewResult, error) {
 	logger := options.Logger
 	result := &PreviewResult{
 		Sources: make([]SourcePreview, 0, len(cfg.Sources)),
 	}
 
 	for _, source := range cfg.Sources {
-		preview, err := previewSource(cfg.Workspace.RootPath, source, options.Verbose)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		preview, err := previewSource(ctx, cfg.Workspace.RootPath, source, options.Verbose)
 		if err != nil {
 			return nil, err
 		}
@@ -83,7 +105,7 @@ func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*
 	return result, nil
 }
 
-func previewSource(workspaceRoot string, source config.Source, verbose bool) (SourcePreview, error) {
+func previewSource(ctx context.Context, workspaceRoot string, source config.Source, verbose bool) (SourcePreview, error) {
 	preview := SourcePreview{
 		Name:         source.Name,
 		Adapter:      source.Adapter,
@@ -96,12 +118,12 @@ func previewSource(workspaceRoot string, source config.Source, verbose bool) (So
 	}
 
 	if source.Adapter != config.AdapterFilesystem {
-		return previewViaAdapter(preview, source)
+		return previewViaAdapter(ctx, preview, source)
 	}
 
 	switch source.Kind {
 	case config.SourceKindSpecBundle:
-		bundleDirs, err := discoverSpecBundles(source)
+		bundleDirs, err := discoverSpecBundles(ctx, source)
 		if err != nil {
 			return SourcePreview{}, fmt.Errorf("source %q: %w", source.Name, err)
 		}
@@ -113,7 +135,7 @@ func previewSource(workspaceRoot string, source config.Source, verbose bool) (So
 			})
 		}
 	case config.SourceKindMarkdownDocs:
-		matches, candidateCount, rejected, err := previewMarkdownPaths(workspaceRoot, source, "doc", verbose)
+		matches, candidateCount, rejected, err := previewMarkdownPaths(ctx, workspaceRoot, source, "doc", verbose)
 		if err != nil {
 			return SourcePreview{}, err
 		}
@@ -128,7 +150,7 @@ func previewSource(workspaceRoot string, source config.Source, verbose bool) (So
 		}
 		preview.RejectedItems = rejected
 	case config.SourceKindMarkdownContract:
-		matches, candidateCount, rejected, err := previewMarkdownPaths(workspaceRoot, source, "contract", verbose)
+		matches, candidateCount, rejected, err := previewMarkdownPaths(ctx, workspaceRoot, source, "contract", verbose)
 		if err != nil {
 			return SourcePreview{}, err
 		}
@@ -155,11 +177,14 @@ type previewMarkdownPath struct {
 	Selection sourcePathSelection
 }
 
-func previewMarkdownPaths(workspaceRoot string, source config.Source, label string, verbose bool) ([]previewMarkdownPath, int, []PreviewRejectedItem, error) {
+func previewMarkdownPaths(ctx context.Context, workspaceRoot string, source config.Source, label string, verbose bool) ([]previewMarkdownPath, int, []PreviewRejectedItem, error) {
 	matches := make([]previewMarkdownPath, 0)
 	rejected := make([]PreviewRejectedItem, 0)
 	candidateCount := 0
 	err := filepath.WalkDir(source.ResolvedPath, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return err
 		}
@@ -203,7 +228,7 @@ func previewMarkdownPaths(workspaceRoot string, source config.Source, label stri
 	return matches, candidateCount, rejected, nil
 }
 
-func previewViaAdapter(preview SourcePreview, source config.Source) (SourcePreview, error) {
+func previewViaAdapter(ctx context.Context, preview SourcePreview, source config.Source) (SourcePreview, error) {
 	factory := LookupAdapter(source.Adapter)
 	if factory == nil {
 		return SourcePreview{}, unknownAdapterError(source.Name, source.Adapter)
@@ -215,7 +240,7 @@ func previewViaAdapter(preview SourcePreview, source config.Source) (SourcePrevi
 		return SourcePreview{}, fmt.Errorf("source %q: adapter %q does not support preview", source.Name, source.Adapter)
 	}
 
-	items, err := previewer.Preview(context.Background(), sdk.SourceConfig{
+	items, err := previewer.Preview(ctx, sdk.SourceConfig{
 		Name:          source.Name,
 		Adapter:       source.Adapter,
 		Kind:          source.Kind,

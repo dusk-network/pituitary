@@ -62,7 +62,7 @@ func runDiscoverContext(ctx context.Context, args []string, stdout, stderr io.Wr
 		ConfigPath: strings.TrimSpace(configPath),
 		Write:      write,
 	}
-	result, err := source.DiscoverWorkspace(source.DiscoverOptions{
+	result, err := source.DiscoverWorkspaceContext(ctx, source.DiscoverOptions{
 		RootPath:   path,
 		ConfigPath: request.ConfigPath,
 		Write:      write,

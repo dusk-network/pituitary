@@ -38,12 +38,33 @@ type LoadOptions struct {
 }
 
 // LoadFromConfig loads and normalizes all configured sources.
+//
+// This is a context-free convenience wrapper kept for callers that don't
+// thread cancellation. It delegates to LoadFromConfigContext with a
+// background context. Prefer LoadFromConfigContext on request paths so
+// canceled CLI/MCP calls stop walking large workspaces promptly.
 func LoadFromConfig(cfg *config.Config) (*LoadResult, error) {
-	return LoadFromConfigWithOptions(cfg, LoadOptions{})
+	return LoadFromConfigContext(context.Background(), cfg)
+}
+
+// LoadFromConfigContext loads and normalizes all configured sources,
+// passing ctx into adapter Load() so cancellation propagates into
+// filesystem walks and bounded file reads.
+func LoadFromConfigContext(ctx context.Context, cfg *config.Config) (*LoadResult, error) {
+	return LoadFromConfigWithOptionsContext(ctx, cfg, LoadOptions{})
 }
 
 // LoadFromConfigWithOptions loads and normalizes all configured sources.
+//
+// Convenience wrapper for callers without a context; see
+// LoadFromConfigWithOptionsContext for the cancellation-aware variant.
 func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadResult, error) {
+	return LoadFromConfigWithOptionsContext(context.Background(), cfg, options)
+}
+
+// LoadFromConfigWithOptionsContext loads and normalizes all configured
+// sources with the supplied options, passing ctx into adapter Load().
+func LoadFromConfigWithOptionsContext(ctx context.Context, cfg *config.Config, options LoadOptions) (*LoadResult, error) {
 	logger := options.Logger
 	result := &LoadResult{
 		Sources: make([]LoadSourceSummary, 0, len(cfg.Sources)),
@@ -53,6 +74,9 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 	logger.Infof("source", "loading %d configured source(s)", len(cfg.Sources))
 
 	for _, source := range cfg.Sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		resolvedRepo := strings.TrimSpace(source.ResolvedRepo)
 		if resolvedRepo == "" {
 			resolvedRepo = config.PrimaryRepoID(cfg)
@@ -78,7 +102,7 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 		if factory == nil {
 			return nil, unknownAdapterError(source.Name, source.Adapter)
 		}
-		adapterResult, err := factory().Load(context.Background(), sdk.SourceConfig{
+		adapterResult, err := factory().Load(ctx, sdk.SourceConfig{
 			Name:          source.Name,
 			Adapter:       source.Adapter,
 			Kind:          source.Kind,
