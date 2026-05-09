@@ -65,6 +65,9 @@ func LoadFromConfigWithOptions(cfg *config.Config, options LoadOptions) (*LoadRe
 // LoadFromConfigWithOptionsContext loads and normalizes all configured
 // sources with the supplied options, passing ctx into adapter Load().
 func LoadFromConfigWithOptionsContext(ctx context.Context, cfg *config.Config, options LoadOptions) (*LoadResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger := options.Logger
 	result := &LoadResult{
 		Sources: make([]LoadSourceSummary, 0, len(cfg.Sources)),

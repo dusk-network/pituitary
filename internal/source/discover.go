@@ -101,6 +101,9 @@ func DiscoverWorkspace(options DiscoverOptions) (*DiscoverResult, error) {
 // filesystem walk callbacks that scan for spec bundles and markdown
 // candidates.
 func DiscoverWorkspaceContext(ctx context.Context, options DiscoverOptions) (*DiscoverResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger := options.Logger
 	rootPath := strings.TrimSpace(options.RootPath)
 	if rootPath == "" {

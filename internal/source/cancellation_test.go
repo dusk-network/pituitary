@@ -289,6 +289,59 @@ func TestPreviewFromConfigContextHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+// TestLoadFromConfigContextNilContextDoesNotPanic guards the nil-ctx
+// defense added on the public Context entrypoints.
+func TestLoadFromConfigContextNilContextDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	cfg := &config.Config{
+		ConfigPath: filepath.Join(workspaceRoot, "pituitary.toml"),
+		Workspace:  config.Workspace{RootPath: workspaceRoot},
+	}
+
+	//nolint:staticcheck // exercising the nil-context guard
+	if _, err := LoadFromConfigContext(nil, cfg); err != nil {
+		t.Fatalf("LoadFromConfigContext(nil ctx) error = %v, want nil", err)
+	}
+}
+
+// TestPreviewFromConfigContextNilContextDoesNotPanic mirrors the above
+// for the preview path.
+func TestPreviewFromConfigContextNilContextDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	cfg := &config.Config{
+		ConfigPath: filepath.Join(workspaceRoot, "pituitary.toml"),
+		Workspace:  config.Workspace{RootPath: workspaceRoot},
+	}
+
+	//nolint:staticcheck // exercising the nil-context guard
+	if _, err := PreviewFromConfigContext(nil, cfg); err != nil {
+		t.Fatalf("PreviewFromConfigContext(nil ctx) error = %v, want nil", err)
+	}
+}
+
+// TestDiscoverWorkspaceContextNilContextDoesNotPanic mirrors the above
+// for the discover path.
+func TestDiscoverWorkspaceContextNilContextDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, "specs"), 0o755); err != nil {
+		t.Fatalf("mkdir specs: %v", err)
+	}
+
+	//nolint:staticcheck // exercising the nil-context guard
+	_, err := DiscoverWorkspaceContext(nil, DiscoverOptions{RootPath: workspaceRoot})
+	// DiscoverWorkspaceContext returns an error when no sources are
+	// discovered; we only care that it does not panic.
+	if err != nil && !strings.Contains(err.Error(), "no likely sources discovered") {
+		t.Fatalf("DiscoverWorkspaceContext(nil ctx) unexpected error = %v", err)
+	}
+}
+
 // TestFilesystemAdapterLoadHonorsNilContext defensively checks the
 // adapter does not panic if a caller passes a nil context.
 func TestFilesystemAdapterLoadHonorsNilContext(t *testing.T) {

@@ -81,6 +81,9 @@ func PreviewFromConfigWithOptions(cfg *config.Config, options PreviewOptions) (*
 // rebuilding the index. The supplied ctx is checked between sources and
 // inside filesystem walk callbacks.
 func PreviewFromConfigWithOptionsContext(ctx context.Context, cfg *config.Config, options PreviewOptions) (*PreviewResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logger := options.Logger
 	result := &PreviewResult{
 		Sources: make([]SourcePreview, 0, len(cfg.Sources)),
