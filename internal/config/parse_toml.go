@@ -80,7 +80,7 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking", "search"})
+			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking", "search", "quantization"})
 		default:
 			switch key[1] {
 			case "embedder", "analysis":

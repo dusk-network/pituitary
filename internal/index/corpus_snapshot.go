@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dusk-network/pituitary/internal/config"
 	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
@@ -90,6 +91,42 @@ func OpenStromaSnapshotContext(ctx context.Context, db *sql.DB, indexPath string
 		return nil, fmt.Errorf("open stroma snapshot %s: %w", path, err)
 	}
 	return snapshot, nil
+}
+
+// readStoredSnapshotQuantizationContext returns the snapshot's stored
+// quantization metadata, normalized so an empty stored value resolves to
+// QuantizationFloat32. Older snapshots that predate stroma's quantization
+// metadata key are treated as float32 to match stroma's snapshot_read.go
+// default. Shared by the update-path eligibility gate
+// (validateStoredQuantizationContext) and the rebuild reuse-state loader
+// (loadReuseStateContext) so both layers see the same notion of "stored
+// quantization" and a single change-source can't desynchronize them.
+func readStoredSnapshotQuantizationContext(ctx context.Context, snapshotPath string) (string, error) {
+	snapshotDB, err := OpenReadOnlyContext(ctx, snapshotPath)
+	if err != nil {
+		return "", fmt.Errorf("open stroma snapshot %s for quantization read: %w", snapshotPath, err)
+	}
+	defer snapshotDB.Close()
+	stored, err := readOptionalMetadataValueContext(ctx, snapshotDB, "quantization")
+	if err != nil {
+		return "", fmt.Errorf("read snapshot quantization metadata: %w", err)
+	}
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
+		return config.QuantizationFloat32, nil
+	}
+	return stored, nil
+}
+
+// normalizeConfiguredQuantization mirrors readStoredSnapshotQuantizationContext
+// for configured values: empty resolves to QuantizationFloat32 so a
+// configured "" and a stored "float32" compare equal at the gates.
+func normalizeConfiguredQuantization(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return config.QuantizationFloat32
+	}
+	return configured
 }
 
 func readOptionalMetadataValueContext(ctx context.Context, db *sql.DB, key string) (string, error) {
