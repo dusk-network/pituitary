@@ -1066,7 +1066,8 @@ func buildPituitaryBinary(t *testing.T) string {
 
 	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"CGO_ENABLED=1",
 	)
 

@@ -221,7 +221,8 @@ func queryGovernanceHotspotsContext(ctx context.Context, db *sql.DB) (*Governanc
 }
 
 func queryGovernanceSpecHotspotsContext(ctx context.Context, db *sql.DB, hasConfidence bool) ([]GovernanceSpecHotspot, error) {
-	query := fmt.Sprintf(`
+	query := fmt.Sprintf(
+		`
 SELECT
   s.ref,
   COALESCE(s.title, ''),
@@ -270,7 +271,8 @@ LIMIT 5`,
 }
 
 func queryGovernanceArtifactHotspotsContext(ctx context.Context, db *sql.DB, hasConfidence bool, filter string, orderBy string) ([]GovernanceArtifactHotspot, error) {
-	aggregateQuery := fmt.Sprintf(`
+	aggregateQuery := fmt.Sprintf(
+		`
 SELECT
   e.to_ref AS ref,
   COALESCE(a.title, '') AS title,

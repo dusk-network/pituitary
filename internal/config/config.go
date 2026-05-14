@@ -1340,7 +1340,8 @@ func validateRuntimeQuantization(errs *validationErrors, label string, quantizat
 	switch quantization {
 	case "", QuantizationFloat32, QuantizationInt8, QuantizationBinary:
 	default:
-		errs.add("%s: unsupported value %q (supported: %q, %q, %q)",
+		errs.add(
+			"%s: unsupported value %q (supported: %q, %q, %q)",
 			label, quantization,
 			QuantizationFloat32, QuantizationInt8, QuantizationBinary,
 		)
@@ -1423,7 +1424,8 @@ func validateChunkingContextualizer(errs *validationErrors, label string, cfg Ch
 		ChunkContextualizerFormatRefTitle:
 		// valid
 	default:
-		errs.add("%s.format: unsupported format %q (supported: %q, %q)",
+		errs.add(
+			"%s.format: unsupported format %q (supported: %q, %q)",
 			label, cfg.Format,
 			ChunkContextualizerFormatTitleAncestry,
 			ChunkContextualizerFormatRefTitle,
@@ -1452,7 +1454,8 @@ func validateSearchConfig(errs *validationErrors, label string, cfg SearchConfig
 	case "", SearchRerankerHistorical, SearchRerankerArmAwareHistorical:
 		// valid
 	default:
-		errs.add("%s.reranker: unsupported reranker %q (supported: %q, %q)",
+		errs.add(
+			"%s.reranker: unsupported reranker %q (supported: %q, %q)",
 			label, cfg.Reranker,
 			SearchRerankerHistorical,
 			SearchRerankerArmAwareHistorical,
@@ -1478,7 +1481,8 @@ func validateFusionConfig(errs *validationErrors, label string, cfg FusionConfig
 			errs.add("%s.k: must be > 0 for strategy %q", label, SearchFusionStrategyRRF)
 		}
 	default:
-		errs.add("%s.strategy: unsupported strategy %q (supported: %q, %q)",
+		errs.add(
+			"%s.strategy: unsupported strategy %q (supported: %q, %q)",
 			label, cfg.Strategy,
 			SearchFusionStrategyDefault,
 			SearchFusionStrategyRRF,
@@ -1532,11 +1536,9 @@ func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]Runtim
 	}
 	if !endpointResolved && hasProfile && profile.endpointSet {
 		resolved.Endpoint = profile.Endpoint
-		endpointResolved = true
 	}
 	if !apiKeyEnvResolved && hasProfile && profile.apiKeyEnvSet {
 		resolved.APIKeyEnv = profile.APIKeyEnv
-		apiKeyEnvResolved = true
 	}
 	if !timeoutResolved && hasProfile && profile.timeoutMSSet {
 		resolved.TimeoutMS = profile.TimeoutMS

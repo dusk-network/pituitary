@@ -57,8 +57,10 @@ type configResolutionCandidate struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-type cliConfigPathContextKey struct{}
-type cliLoggerContextKey struct{}
+type (
+	cliConfigPathContextKey struct{}
+	cliLoggerContextKey     struct{}
+)
 
 func parseGlobalCLIOptions(args []string) (cliGlobalOptions, []string, error) {
 	fs := flag.NewFlagSet("pituitary", flag.ContinueOnError)

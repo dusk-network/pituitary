@@ -20,8 +20,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
-var artifactReferencePattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._-]*\.(?:db|json|md|toml|yaml|yml)`)
+var (
+	requestsPerMinutePattern = regexp.MustCompile(`(?i)(\d+)\s+requests per minute`)
+	artifactReferencePattern = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._-]*\.(?:db|json|md|toml|yaml|yml)`)
+)
 
 const (
 	driftClassificationSemantic = "semantic_contradiction"
@@ -1130,13 +1132,15 @@ func artifactMentionsFromSections(sections []embeddedSection) map[string][]artif
 				continue
 			}
 			lower := strings.ToLower(line)
-			active := containsAny(lower,
+			active := containsAny(
+				lower,
 				" read ", " reads ", " load ", " loads ",
 				" write ", " writes ", " uses ", " use ",
 				" cache", " cached", " storing ", " stored ",
 				" refresh", " refreshes ", " startup", " start ",
 			)
-			aligned := containsAny(lower,
+			aligned := containsAny(
+				lower,
 				"optional", "derived", "historical", "history", "archive",
 				"legacy", "not part of", "not required", "must not",
 				"implementation detail", "safe to discard",
@@ -1236,12 +1240,14 @@ func classifyArtifactConstraint(line, artifact string) (string, string, bool) {
 	}
 
 	switch {
-	case containsAny(runtimeLocal,
+	case containsAny(
+		runtimeLocal,
 		"must not read", "must not load", "must not parse",
 		"must not reparse", "must not treat",
 	):
 		return "runtime_input", "not a canonical runtime input", true
-	case containsAny(local,
+	case containsAny(
+		local,
 		artifact+"` is not a required artifact",
 		artifact+" is not a required artifact",
 		artifact+"` is not part of the accepted runtime contract",
@@ -1250,9 +1256,11 @@ func classifyArtifactConstraint(line, artifact string) (string, string, bool) {
 		artifact+" is not part of the persisted runtime contract",
 	):
 		return "contract", "not part of the accepted runtime contract", true
-	case containsAny(lower,
+	case containsAny(
+		lower,
 		"legacy derived files",
-	) && containsAny(lower,
+	) && containsAny(
+		lower,
 		"not part of the accepted runtime contract",
 		"not part of the persisted runtime contract",
 	):

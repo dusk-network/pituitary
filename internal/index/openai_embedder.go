@@ -40,8 +40,10 @@ type openAICompatibleEmbedder struct {
 	dimension int
 }
 
-var _ Embedder = (*openAICompatibleEmbedder)(nil)
-var _ stembed.ContextualEmbedder = (*openAICompatibleEmbedder)(nil)
+var (
+	_ Embedder                   = (*openAICompatibleEmbedder)(nil)
+	_ stembed.ContextualEmbedder = (*openAICompatibleEmbedder)(nil)
+)
 
 func newOpenAICompatibleEmbedder(cfg config.RuntimeProvider) (Embedder, error) {
 	endpoint := strings.TrimRight(strings.TrimSpace(cfg.Endpoint), "/")

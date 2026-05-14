@@ -23,8 +23,10 @@ const (
 	RelationRelatesTo  = sdk.RelationRelatesTo
 )
 
-type Relation = sdk.Relation
-type InferenceFieldConfidence = sdk.InferenceFieldConfidence
-type InferenceConfidence = sdk.InferenceConfidence
-type SpecRecord = sdk.SpecRecord
-type DocRecord = sdk.DocRecord
+type (
+	Relation                 = sdk.Relation
+	InferenceFieldConfidence = sdk.InferenceFieldConfidence
+	InferenceConfidence      = sdk.InferenceConfidence
+	SpecRecord               = sdk.SpecRecord
+	DocRecord                = sdk.DocRecord
+)

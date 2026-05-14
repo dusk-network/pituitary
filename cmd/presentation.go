@@ -106,99 +106,116 @@ func (p renderPresentation) headerMark() string {
 	}
 	return p.bold("---*")
 }
+
 func (p renderPresentation) cross() string {
 	if p.utf8 {
 		return p.red("✗")
 	}
 	return p.red("x")
 }
+
 func (p renderPresentation) check() string {
 	if p.utf8 {
 		return p.green("✓")
 	}
 	return p.green("+")
 }
+
 func (p renderPresentation) arrow() string {
 	if p.utf8 {
 		return p.yellow("→")
 	}
 	return p.yellow("->")
 }
+
 func (p renderPresentation) info() string {
 	if p.utf8 {
 		return p.dim("ℹ")
 	}
 	return p.dim("i")
 }
+
 func (p renderPresentation) treeMid() string {
 	if p.utf8 {
 		return p.dim("├─")
 	}
 	return p.dim("|-")
 }
+
 func (p renderPresentation) treeLast() string {
 	if p.utf8 {
 		return p.dim("└─")
 	}
 	return p.dim("\\-")
 }
+
 func (p renderPresentation) treeBranch(last bool) string {
 	if last {
 		return p.treeLast()
 	}
 	return p.treeMid()
 }
+
 func (p renderPresentation) treeItem(last bool) string {
 	return p.treeBranch(last)
 }
+
 func (p renderPresentation) blockHigh() string {
 	if p.utf8 {
 		return p.red("██")
 	}
 	return p.red("[!]")
 }
+
 func (p renderPresentation) blockMedium() string {
 	if p.utf8 {
 		return p.yellow("▒▒")
 	}
 	return p.yellow("[~]")
 }
+
 func (p renderPresentation) okBadge() string {
 	if p.utf8 {
 		return p.green("██ OK")
 	}
 	return p.green("[OK]")
 }
+
 func (p renderPresentation) driftBadge() string {
 	if p.utf8 {
 		return p.red("██ DRIFT")
 	}
 	return p.red("[DRIFT]")
 }
+
 func (p renderPresentation) reviewBadge() string {
 	if p.utf8 {
 		return p.yellow("▒▒ REVIEW")
 	}
 	return p.yellow("[REVIEW]")
 }
+
 func (p renderPresentation) conflictBadge() string {
 	if p.utf8 {
 		return p.red("██ CONFLICT")
 	}
 	return p.red("[CONFLICT]")
 }
+
 func (p renderPresentation) compliantBadge() string {
 	if p.utf8 {
 		return p.green("██ OK")
 	}
 	return p.green("[OK]")
 }
+
 func (p renderPresentation) unspecifiedBadge() string {
 	if p.utf8 {
 		return p.yellow("▒▒ UNSPEC")
 	}
 	return p.yellow("[UNSPEC]")
 }
+
 func (p renderPresentation) headerLine(command, suffix string) string {
 	line := p.headerMark() + " " + p.white(command)
 	if suffix != "" {

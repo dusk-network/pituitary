@@ -599,7 +599,8 @@ func renderTextReport(w io.Writer, report *benchmarkReport) {
 	fmt.Fprintf(w, "config: %s\n", report.ConfigPath)
 	fmt.Fprintf(w, "cases: %s\n", report.CasesDir)
 	fmt.Fprintf(w, "analysis runtime: %s\n", defaultString(report.AnalysisProvider, "disabled"))
-	fmt.Fprintf(w, "summary: %d/%d passed | mean latency %.2fms | runtime-used %d case(s)\n\n",
+	fmt.Fprintf(
+		w, "summary: %d/%d passed | mean latency %.2fms | runtime-used %d case(s)\n\n",
 		report.Summary.PassedCases,
 		report.Summary.TotalCases,
 		report.Summary.MeanLatencyMS,
