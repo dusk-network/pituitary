@@ -34,11 +34,13 @@ func TestInspectRelationGraphDetectsSupersedesCycleAndContradictions(t *testing.
 	t.Parallel()
 
 	status := InspectRelationGraph([]model.SpecRecord{
-		specWithRelations("SPEC-200",
+		specWithRelations(
+			"SPEC-200",
 			model.Relation{Type: model.RelationSupersedes, Ref: "SPEC-201"},
 			model.Relation{Type: model.RelationDependsOn, Ref: "SPEC-201"},
 		),
-		specWithRelations("SPEC-201",
+		specWithRelations(
+			"SPEC-201",
 			model.Relation{Type: model.RelationSupersedes, Ref: "SPEC-200"},
 			model.Relation{Type: model.RelationDependsOn, Ref: "SPEC-200"},
 		),
@@ -79,10 +81,12 @@ func TestInspectRelationGraphAllowsMutualRelatesToWithoutCycle(t *testing.T) {
 	t.Parallel()
 
 	status := InspectRelationGraph([]model.SpecRecord{
-		specWithRelations("SPEC-400",
+		specWithRelations(
+			"SPEC-400",
 			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-401"},
 		),
-		specWithRelations("SPEC-401",
+		specWithRelations(
+			"SPEC-401",
 			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-400"},
 		),
 	})
@@ -96,7 +100,8 @@ func TestInspectRelationGraphAllowsRelatesToAlongsideDependsOn(t *testing.T) {
 	t.Parallel()
 
 	status := InspectRelationGraph([]model.SpecRecord{
-		specWithRelations("SPEC-500",
+		specWithRelations(
+			"SPEC-500",
 			model.Relation{Type: model.RelationDependsOn, Ref: "SPEC-501"},
 			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-502"},
 		),
@@ -113,7 +118,8 @@ func TestInspectRelationGraphDetectsRelatesToSelfReference(t *testing.T) {
 	t.Parallel()
 
 	status := InspectRelationGraph([]model.SpecRecord{
-		specWithRelations("SPEC-600",
+		specWithRelations(
+			"SPEC-600",
 			model.Relation{Type: model.RelationRelatesTo, Ref: "SPEC-600"},
 		),
 	})

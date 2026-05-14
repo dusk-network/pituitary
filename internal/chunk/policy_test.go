@@ -46,7 +46,8 @@ func TestResolve_ZeroConfigDefaultsDocsToLateChunk(t *testing.T) {
 	if docPolicy.ParentMaxTokens != DefaultDocLateChunkParentMaxTokens ||
 		docPolicy.ChildMaxTokens != DefaultDocLateChunkChildMaxTokens ||
 		docPolicy.ChildOverlapTokens != DefaultDocLateChunkChildOverlapTokens {
-		t.Fatalf("default doc LateChunkPolicy = %+v, want parent=%d child=%d overlap=%d",
+		t.Fatalf(
+			"default doc LateChunkPolicy = %+v, want parent=%d child=%d overlap=%d",
 			docPolicy,
 			DefaultDocLateChunkParentMaxTokens,
 			DefaultDocLateChunkChildMaxTokens,

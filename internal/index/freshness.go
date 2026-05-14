@@ -135,7 +135,8 @@ func InspectFreshnessContext(ctx context.Context, cfg *config.Config) (*Freshnes
 	}
 	defer db.Close()
 
-	metadata, err := readMetadataContext(ctx, db,
+	metadata, err := readMetadataContext(
+		ctx, db,
 		"schema_version",
 		"embedder_fingerprint",
 		"source_fingerprint",

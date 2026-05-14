@@ -337,7 +337,8 @@ func armBPromptContext(outline *OutlineContextResult) (string, []armBContextSect
 					continue
 				}
 				seen[section.ChunkID] = struct{}{}
-				fmt.Fprintf(&builder, "[chunk:%d ref:%s role:%s heading:%s]\n%s\n\n",
+				fmt.Fprintf(
+					&builder, "[chunk:%d ref:%s role:%s heading:%s]\n%s\n\n",
 					section.ChunkID,
 					section.Ref,
 					section.Role,

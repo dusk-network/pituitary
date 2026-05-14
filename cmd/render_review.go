@@ -728,7 +728,8 @@ func renderReviewHTMLOverlapSection(w io.Writer, result *analysis.ReviewResult, 
 	}
 	fmt.Fprint(w, "</p><ul class=\"compact-list\">\n")
 	for _, item := range result.Overlap.Overlaps {
-		fmt.Fprintf(w, "<li><strong><code>%s</code></strong> %s <span class=\"muted\">(%s, %.3f, %s)</span></li>\n",
+		fmt.Fprintf(
+			w, "<li><strong><code>%s</code></strong> %s <span class=\"muted\">(%s, %.3f, %s)</span></li>\n",
 			escape(item.Ref),
 			escape(item.Title),
 			escape(item.Relationship),
@@ -823,7 +824,8 @@ func renderReviewHTMLImpactedDocs(w io.Writer, result *analysis.AnalyzeImpactRes
 		}
 		fmt.Fprint(w, ")</span>")
 		if item.Evidence != nil {
-			fmt.Fprintf(w, "<br><span class=\"subtle\">Evidence: %s / %s -> %s / %s</span>",
+			fmt.Fprintf(
+				w, "<br><span class=\"subtle\">Evidence: %s / %s -> %s / %s</span>",
 				escape(item.Evidence.SpecRef),
 				escape(displayDefault(item.Evidence.SpecSection, "(body)")),
 				escape(item.Evidence.DocSourceRef),
