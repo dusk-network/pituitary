@@ -1536,11 +1536,9 @@ func resolveRuntimeProvider(provider RuntimeProvider, profiles map[string]Runtim
 	}
 	if !endpointResolved && hasProfile && profile.endpointSet {
 		resolved.Endpoint = profile.Endpoint
-		endpointResolved = true
 	}
 	if !apiKeyEnvResolved && hasProfile && profile.apiKeyEnvSet {
 		resolved.APIKeyEnv = profile.APIKeyEnv
-		apiKeyEnvResolved = true
 	}
 	if !timeoutResolved && hasProfile && profile.timeoutMSSet {
 		resolved.TimeoutMS = profile.TimeoutMS

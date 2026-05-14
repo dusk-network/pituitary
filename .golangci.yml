@@ -1,0 +1,39 @@
+# Project-level golangci-lint config for pituitary.
+#
+# Tuned to keep meaningful safety lints on (govet, staticcheck SA*,
+# ineffassign, errcheck for non-close/non-cleanup calls) while
+# suppressing style suggestions and idiomatic patterns:
+#
+#   * errcheck:    skip fmt.Fprint family + Close() + os.Remove cleanup +
+#                  Scan in tests
+#   * staticcheck: skip QF* (quickfix style) and ST1000 (package docs)
+#
+# Real findings (ineffassign, unused) still fail CI.
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - io.Copy
+        - os.Remove
+    staticcheck:
+      checks:
+        - all
+        - -QF*
+        - -ST1000
+  exclusions:
+    rules:
+      # Defer-close patterns on io.Closer values: not actionable in CLI code.
+      - linters:
+          - errcheck
+        text: "Error return value of `[^`]+\\.Close` is not checked"
+      # Tests don't need to check Scan errors on sql.Row.
+      - path: _test\.go
+        linters:
+          - errcheck
+        text: "Error return value of `\\(\\*database/sql\\.Row\\)\\.Scan` is not checked"
