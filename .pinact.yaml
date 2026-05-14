@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/suzuki-shunsuke/pinact/refs/heads/main/json-schema/pinact.json
+version: 3
+
+ignore_actions:
+  # Reusable workflows in nantobv/.github are referenced at @main so that
+  # org-wide CI updates propagate without per-repo PRs.
+  - name: nantobv/.github/.*
+    ref: main

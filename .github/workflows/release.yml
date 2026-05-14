@@ -34,19 +34,19 @@ jobs:
         run: git config --global core.autocrlf input
 
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
 
       - name: Install Windows CGO toolchain
         id: msys2
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@e9898307ac31d1a803454791be09ab9973336e1c # v2.31.1
         with:
           msystem: UCRT64
           update: true
@@ -56,7 +56,7 @@ jobs:
 
       - name: Run GoReleaser packaging
         if: runner.os != 'Windows'
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7.2.1
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -66,7 +66,7 @@ jobs:
 
       - name: Run GoReleaser packaging
         if: runner.os == 'Windows'
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7.2.1
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -76,7 +76,7 @@ jobs:
           CC: ${{ runner.os == 'Windows' && format('{0}/ucrt64/bin/gcc.exe', steps.msys2.outputs.msys2-location) || '' }}
 
       - name: Upload packaged artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -91,17 +91,17 @@ jobs:
       TAG: ${{ github.ref_name }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
 
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           pattern: release-*
           merge-multiple: true

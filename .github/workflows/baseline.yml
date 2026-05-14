@@ -1,0 +1,19 @@
+# Org-wide CI baseline.
+# Calls nantobv/.github reusable workflows for Go CI + pinact enforcement.
+# Runs alongside the existing ci.yml (which owns smoke-sqlite-vec, macos,
+# docker, goreleaser, and other project-specific tests).
+name: CI baseline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    uses: nantobv/.github/.github/workflows/go-ci.yml@main
+    with:
+      go-version: 'stable'
+
+  pinact-check:
+    uses: nantobv/.github/.github/workflows/pinact-check.yml@main
