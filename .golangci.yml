@@ -8,12 +8,22 @@
 #                  Scan in tests
 #   * staticcheck: skip QF* (quickfix style) and ST1000 (package docs)
 #
-# Real findings (ineffassign, unused) still fail CI.
+# Real findings (ineffassign, unused) still fail CI. The structural linters
+# below are an initial ratchet against agent-generated bloat: they should block
+# new worse hotspots without forcing this config change to refactor existing
+# long-lived command/config/analysis code.
 version: "2"
 
 linters:
   default: standard
+  enable:
+    - dupl
+    - funlen
+    - gocognit
+    - gocyclo
   settings:
+    dupl:
+      threshold: 260
     errcheck:
       exclude-functions:
         - fmt.Fprint
@@ -21,6 +31,13 @@ linters:
         - fmt.Fprintf
         - io.Copy
         - os.Remove
+    funlen:
+      lines: 260
+      statements: 170
+    gocognit:
+      min-complexity: 70
+    gocyclo:
+      min-complexity: 50
     staticcheck:
       checks:
         - all
@@ -37,3 +54,11 @@ linters:
         linters:
           - errcheck
         text: "Error return value of `\\(\\*database/sql\\.Row\\)\\.Scan` is not checked"
+      # Test fixtures and table-driven scenarios often need breadth; keep the
+      # ratchet focused on production code first.
+      - path: _test\.go
+        linters:
+          - dupl
+          - funlen
+          - gocognit
+          - gocyclo
