@@ -56,13 +56,13 @@ runs:
   using: "composite"
   steps:
     - name: Check out repository
-      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 1
 
     - name: Resolve Pituitary version
       id: resolve-version
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         script: |
           const explicit = `${{ inputs.pituitary-version }}`.trim();
@@ -117,7 +117,7 @@ runs:
 
     - name: List changed pull request files
       id: changed-files
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         script: |
           if (context.eventName !== 'pull_request') {
@@ -146,7 +146,7 @@ runs:
 
     - name: Post or update pull request comment
       if: ${{ github.event_name == 'pull_request' }}
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       env:
         COMMENT_BODY: ${{ steps.review-spec.outputs.comment-body }}
         HAS_REVIEWS: ${{ steps.review-spec.outputs.has-reviews }}
