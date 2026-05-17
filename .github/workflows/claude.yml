@@ -41,7 +41,25 @@ permissions:
 
 jobs:
   claude:
-    uses: nantobv/.github/.github/workflows/claude-reusable.yml@main # zizmor: ignore[unpinned-uses] same-org reusable workflow tracks @main by design; matching exception lives in .pinact.yaml.
+    # Short-circuit before invoking the reusable: only fire when an
+    # @claude mention comes from OWNER/MEMBER/COLLABORATOR. Without
+    # this, every issue comment / PR review on this repo spins up a
+    # runner just to let the reusable's identical filter no-op. The
+    # reusable keeps the same filter as defense-in-depth.
+    if: |
+      (github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+        contains(github.event.review.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+      (github.event_name == 'issues' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+    uses: nantobv/.github/.github/workflows/claude-reusable.yml@main # zizmor: ignore[unpinned-uses] same-org reusable workflow tracks @main by design; pinact exception declared org-wide in nantobv/.github/.pinact.yaml.
     # Pass only the secret the reusable declares it needs; avoid the
     # blast radius of `secrets: inherit`.
     secrets:
