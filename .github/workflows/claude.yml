@@ -1,3 +1,15 @@
+# Created from the nantobv/.github workflow template "Claude Code".
+# Wires this repo into the nantobv reusable Claude Code responder.
+#
+# Prerequisites (one-time, org-level — already in place for nantobv):
+#   - The Anthropic Claude GitHub App installed on the org with
+#     "All repositories" scope.
+#   - An org-level Actions secret CLAUDE_CODE_OAUTH_TOKEN reachable
+#     from this repo.
+#
+# Behavior, security gate (@claude must come from OWNER/MEMBER/COLLABORATOR),
+# and SHA-pinned action versions live in the reusable workflow:
+#   nantobv/.github/.github/workflows/claude-reusable.yml
 name: Claude Code
 
 on:
@@ -6,56 +18,31 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    # Only `opened`. Adding `assigned` would re-fire @claude on every
+    # assignment change of an issue whose body/title already contains
+    # @claude, burning quota on routine triage actions.
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+# Caller-level permissions must be at least as broad as what the
+# reusable workflow's job-level block requests, otherwise GitHub
+# pre-validates and rejects the run with `startup_failure` before any
+# job starts. These mirror claude-reusable.yml's `jobs.claude.permissions:`
+# block one-for-one. Each is required: contents (post a comment / branch),
+# issues + pull-requests (write replies), id-token (OIDC for the
+# action's auth), actions read (read workflow context).
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
 
 jobs:
   claude:
-    if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
-      actions: read # Required for Claude to read CI results on PRs
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 1
-
-      - name: Install Bun
-        env:
-          BUN_INSTALL: ${{ runner.temp }}/bun
-        run: |
-          curl -fsSL https://bun.sh/install | bash
-          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
-          "$BUN_INSTALL/bin/bun" --version
-
-      - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@86eb26bf0139bdd75acd15ea5f00f45ee0a284c2 # v1.0.122
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          path_to_bun_executable: ${{ runner.temp }}/bun/bin/bun
-
-          # This is an optional setting that allows Claude to read CI results on PRs
-          additional_permissions: |
-            actions: read
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
+    uses: nantobv/.github/.github/workflows/claude-reusable.yml@main # zizmor: ignore[unpinned-uses] same-org reusable workflow tracks @main by design; matching exception lives in .pinact.yaml.
+    # Pass only the secret the reusable declares it needs; avoid the
+    # blast radius of `secrets: inherit`.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
