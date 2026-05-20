@@ -16,7 +16,6 @@ import (
 
 	"github.com/dusk-network/pituitary/internal/pathselector"
 	"github.com/dusk-network/pituitary/sdk"
-	ststore "github.com/dusk-network/stroma/v3/store"
 )
 
 const (
@@ -67,13 +66,6 @@ const (
 	// when query terminology matches the hit's section heading.
 	SearchRerankerHistorical         = "historical"
 	SearchRerankerArmAwareHistorical = "arm_aware_historical"
-
-	// Quantization* mirror stroma v3's store.Quantization* accept-listed
-	// values (#340). Empty resolves to QuantizationFloat32 to keep the
-	// pre-#340 storage format byte-for-byte.
-	QuantizationFloat32 = ststore.QuantizationFloat32
-	QuantizationInt8    = ststore.QuantizationInt8
-	QuantizationBinary  = ststore.QuantizationBinary
 )
 
 // Config is the validated workspace configuration resolved from pituitary.toml.
@@ -132,13 +124,6 @@ type Runtime struct {
 	Analysis RuntimeProvider
 	Chunking ChunkingConfig
 	Search   SearchConfig
-
-	// Quantization selects the vector storage format. Empty preserves
-	// the pre-#340 float32 default. Valid values: QuantizationFloat32,
-	// QuantizationInt8, QuantizationBinary. A change forces a rebuild
-	// (stroma's update path rejects cross-quantization reuse, surfaced
-	// via normalizeStromaUpdateError as an UpdatePreconditionError).
-	Quantization string
 }
 
 // SearchConfig groups search-time overrides for the retrieval pipeline.
@@ -321,12 +306,11 @@ type rawWorkspaceRepo struct {
 }
 
 type rawRuntime struct {
-	Profiles     map[string]rawRuntimeProvider `toml:"profiles"`
-	Embedder     rawRuntimeProvider            `toml:"embedder"`
-	Analysis     rawRuntimeProvider            `toml:"analysis"`
-	Chunking     rawChunking                   `toml:"chunking"`
-	Search       rawSearch                     `toml:"search"`
-	Quantization string                        `toml:"quantization"`
+	Profiles map[string]rawRuntimeProvider `toml:"profiles"`
+	Embedder rawRuntimeProvider            `toml:"embedder"`
+	Analysis rawRuntimeProvider            `toml:"analysis"`
+	Chunking rawChunking                   `toml:"chunking"`
+	Search   rawSearch                     `toml:"search"`
 }
 
 type rawSearch struct {
@@ -518,12 +502,11 @@ func buildFromRaw(configPath string, raw rawConfig, enforceSchemaVersion bool) (
 			Repos:             make([]WorkspaceRepo, 0, len(raw.Workspace.Repos)),
 		},
 		Runtime: Runtime{
-			Profiles:     make(map[string]RuntimeProvider, len(raw.Runtime.Profiles)),
-			Embedder:     buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
-			Analysis:     buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
-			Chunking:     buildChunkingConfig(raw.Runtime.Chunking),
-			Search:       buildSearchConfig(raw.Runtime.Search),
-			Quantization: strings.ToLower(strings.TrimSpace(raw.Runtime.Quantization)),
+			Profiles: make(map[string]RuntimeProvider, len(raw.Runtime.Profiles)),
+			Embedder: buildRuntimeProvider(raw.Runtime.Embedder, RuntimeProviderFixture),
+			Analysis: buildRuntimeProvider(raw.Runtime.Analysis, RuntimeProviderDisabled),
+			Chunking: buildChunkingConfig(raw.Runtime.Chunking),
+			Search:   buildSearchConfig(raw.Runtime.Search),
 		},
 		Terminology: Terminology{
 			ExcludePaths:           uniqueStringList(raw.Terminology.ExcludePaths),
@@ -1327,32 +1310,7 @@ func validateRuntime(runtime *Runtime) error {
 	validateChunkingKind(&errs, "runtime.chunking.doc", runtime.Chunking.Doc)
 	validateChunkingContextualizer(&errs, "runtime.chunking.contextualizer", runtime.Chunking.Contextualizer)
 	validateSearchConfig(&errs, "runtime.search", runtime.Search)
-	validateRuntimeQuantization(&errs, "runtime.quantization", runtime.Quantization, runtime.Search)
 	return errs.err()
-}
-
-// validateRuntimeQuantization accept-lists the configured vector storage
-// format and rejects the int8/binary + matryoshka_prefilter_dimension
-// combination at config-load time. Stroma v3's snapshot search would
-// otherwise reject the same combination at search time with
-// "SearchDimension is only supported for float32 indexes".
-func validateRuntimeQuantization(errs *validationErrors, label string, quantization string, search SearchConfig) {
-	switch quantization {
-	case "", QuantizationFloat32, QuantizationInt8, QuantizationBinary:
-	default:
-		errs.add(
-			"%s: unsupported value %q (supported: %q, %q, %q)",
-			label, quantization,
-			QuantizationFloat32, QuantizationInt8, QuantizationBinary,
-		)
-		return
-	}
-	if search.PrefilterDimension > 0 && quantization != "" && quantization != QuantizationFloat32 {
-		errs.add(
-			"%s: matryoshka_prefilter_dimension is only supported with %q (got quantization %q); set runtime.quantization back to %q or clear runtime.search.matryoshka_prefilter_dimension",
-			label, QuantizationFloat32, quantization, QuantizationFloat32,
-		)
-	}
 }
 
 func buildChunkingConfig(raw rawChunking) ChunkingConfig {

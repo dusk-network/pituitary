@@ -80,9 +80,14 @@ func undecodedKeyMessage(key toml.Key) string {
 	case "runtime":
 		switch len(key) {
 		case 2:
-			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking", "search", "quantization"})
+			if key[1] == "quantization" {
+				return removedRuntimeQuantizationMessage()
+			}
+			return unsupportedFieldMessage("runtime", key[1], []string{"profiles", "embedder", "analysis", "chunking", "search"})
 		default:
 			switch key[1] {
+			case "quantization":
+				return removedRuntimeQuantizationMessage()
 			case "embedder", "analysis":
 				return unsupportedFieldMessage(
 					"runtime."+key[1],
@@ -167,6 +172,10 @@ func undecodedKeyMessage(key toml.Key) string {
 	default:
 		return fmt.Sprintf("unsupported section %q", key[0])
 	}
+}
+
+func removedRuntimeQuantizationMessage() string {
+	return `unsupported runtime field "quantization"; runtime.quantization was removed because vector storage format is a Hippocampus/Stroma concern, not a Pituitary config contract; remove the key and run "pituitary index --rebuild"`
 }
 
 func runtimeProviderFields() []string {

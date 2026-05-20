@@ -31,16 +31,6 @@ func Render(cfg *Config) (string, error) {
 		fmt.Fprintf(&builder, "root = %s\n", strconv.Quote(repo.Root))
 	}
 
-	if quantization := strings.TrimSpace(cfg.Runtime.Quantization); quantization != "" {
-		// Emit the standalone [runtime] table before any subtable so the
-		// bootstrap parser places `quantization` on rawRuntime, not on
-		// the last preceding [runtime.*] subtable. Without this, a
-		// migrate-config round-trip silently drops runtime.quantization
-		// (#340 — caught in adversarial review).
-		builder.WriteString("\n[runtime]\n")
-		fmt.Fprintf(&builder, "quantization = %s\n", strconv.Quote(quantization))
-	}
-
 	profileNames := make([]string, 0, len(cfg.Runtime.Profiles))
 	for name := range cfg.Runtime.Profiles {
 		profileNames = append(profileNames, name)

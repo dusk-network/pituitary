@@ -407,12 +407,8 @@ func searchSpecsHybrid(ctx context.Context, cfg *config.Config, query SearchSpec
 // This reads the business index's embedder_dimension. Pituitary keeps
 // the business DB and the referenced stroma snapshot's metadata in
 // lock-step at rebuild time, so reading either is equivalent for the
-// dimension check. The quantization-vs-prefilter combination is rejected
-// at config-load time (validateRuntimeQuantization) so a non-float32
-// snapshot can never coexist with a configured matryoshka prefilter; if
-// a stale snapshot somehow does, stroma's snapshot search rejects the
-// pair with "SearchDimension is only supported for float32 indexes"
-// before a real embedder call.
+// dimension check. Pituitary writes float32 snapshots, so no additional
+// vector-storage-format check is needed here.
 // preflightMatryoshkaPrefilterFromSnapshot is the snapshot-handle
 // variant for callers that already hold a stroma snapshot but no
 // SQLite handle (e.g. RetrieveOutlineContextWithSnapshotContext).

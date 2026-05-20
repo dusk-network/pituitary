@@ -133,7 +133,7 @@ func updateContext(ctx context.Context, cfg *config.Config, records *source.Load
 		return rebuildUpdateContext(ctx, cfg, records, diff, options, reporter, oldArtifacts, oldEdges)
 	}
 
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, cfg.Runtime.Quantization, RebuildOptions{})
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, RebuildOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -344,27 +344,19 @@ func validateIncrementalUpdateEligibilityContext(ctx context.Context, db *sql.DB
 			Action: "run `pituitary index --rebuild`",
 		}
 	}
-	if err := validateStoredQuantizationContext(ctx, snapshotPath, cfg.Runtime.Quantization); err != nil {
+	if err := validateStoredSnapshotVectorFormatContext(ctx, snapshotPath); err != nil {
 		return "", &UpdatePreconditionError{Reason: err.Error(), Action: "run `pituitary index --rebuild`"}
 	}
 	return snapshotPath, nil
 }
 
-// validateStoredQuantizationContext rejects an incremental update whose
-// configured runtime.quantization diverges from the stored snapshot's
-// quantization. Without this gate, a quantization-only config flip with
-// no record diffs takes the no-op fast path in updateStromaSnapshotContext
-// (line ~412) and silently keeps the stale storage format. Stroma's
-// SyncFromSource guards the changed-records path with the same check, but
-// the no-diff fast path bypasses that call entirely.
-func validateStoredQuantizationContext(ctx context.Context, snapshotPath, configured string) error {
-	stored, err := readStoredSnapshotQuantizationContext(ctx, snapshotPath)
+func validateStoredSnapshotVectorFormatContext(ctx context.Context, snapshotPath string) error {
+	storedFormat, err := readStoredSnapshotVectorFormatContext(ctx, snapshotPath)
 	if err != nil {
 		return err
 	}
-	want := normalizeConfiguredQuantization(configured)
-	if stored != want {
-		return fmt.Errorf("runtime.quantization changed since last rebuild (stored %q, configured %q)", stored, want)
+	if storedFormat != defaultStromaVectorFormat {
+		return fmt.Errorf("stroma snapshot vector storage format %q is unsupported by this Pituitary version", storedFormat)
 	}
 	return nil
 }
@@ -487,12 +479,6 @@ func updateStromaSnapshotContext(
 		Embedder:       embedder,
 		ChunkPolicy:    chunkPolicy,
 		Contextualizer: contextualizer,
-		// #340: pass the configured quantization so stroma compares it
-		// against the stored metadata. A divergence surfaces as
-		// "quantization mismatch", which normalizeStromaUpdateError maps
-		// to a UpdatePreconditionError telling the operator to rebuild.
-		// Empty (the pre-#340 default) reuses the stored value.
-		Quantization: cfg.Runtime.Quantization,
 	}); err != nil {
 		if cleanupSnapshot != nil {
 			cleanupSnapshot()
@@ -606,7 +592,6 @@ func normalizeStromaUpdateError(snapshotPath string, err error) error {
 	for _, marker := range []string{
 		"embedder fingerprint mismatch",
 		"embedder dimension mismatch",
-		"quantization mismatch",
 		"update embedder is required when adding records",
 	} {
 		if strings.Contains(message, marker) {

@@ -59,6 +59,65 @@ func TestUpdateNoOp(t *testing.T) {
 	assertCount(t, db, `SELECT COUNT(*) FROM artifacts`, result.ArtifactCount)
 }
 
+func TestUpdateFromUnsupportedSnapshotVectorFormatForcesFullRebuild(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	setCurrentStromaSnapshotMetadata(t, cfg.Workspace.ResolvedIndexPath, "quantization", "int8")
+
+	result, err := UpdateContextWithOptions(context.Background(), cfg, records)
+	if err != nil {
+		t.Fatalf("UpdateContextWithOptions() error = %v", err)
+	}
+	if !result.FullRebuild {
+		t.Fatalf("result.FullRebuild = false, want full rebuild for unsupported stored vector format")
+	}
+	if !strings.Contains(result.ReuseDisabledReason, "vector storage format") {
+		t.Fatalf("ReuseDisabledReason = %q, want vector storage format gate", result.ReuseDisabledReason)
+	}
+
+	db := mustOpenCorpusReadOnly(t, cfg.Workspace.ResolvedIndexPath)
+	defer db.Close()
+	assertMetadataValue(t, db, "quantization", defaultStromaVectorFormat)
+}
+
+func TestRebuildFromUnsupportedSnapshotVectorFormatDisablesReuse(t *testing.T) {
+	t.Parallel()
+
+	cfg := loadFixtureConfig(t)
+	records, err := source.LoadFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("source.LoadFromConfig() error = %v", err)
+	}
+	if _, err := Rebuild(cfg, records); err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+
+	setCurrentStromaSnapshotMetadata(t, cfg.Workspace.ResolvedIndexPath, "quantization", "int8")
+
+	result, err := Rebuild(cfg, records)
+	if err != nil {
+		t.Fatalf("Rebuild() error = %v", err)
+	}
+	if !strings.Contains(result.ReuseDisabledReason, "vector storage format") {
+		t.Fatalf("ReuseDisabledReason = %q, want vector storage format gate", result.ReuseDisabledReason)
+	}
+	if result.ReusedArtifactCount != 0 {
+		t.Fatalf("ReusedArtifactCount = %d, want 0", result.ReusedArtifactCount)
+	}
+	if result.ReusedChunkCount != 0 {
+		t.Fatalf("ReusedChunkCount = %d, want 0", result.ReusedChunkCount)
+	}
+}
+
 func TestUpdateAddsNewArtifact(t *testing.T) {
 	t.Parallel()
 
@@ -562,7 +621,6 @@ func TestNormalizeStromaUpdateErrorTreatsCompatibilityErrorsAsPreconditions(t *t
 	markers := []string{
 		"embedder fingerprint mismatch",
 		"embedder dimension mismatch",
-		"quantization mismatch",
 		"update embedder is required when adding records",
 	}
 	for _, marker := range markers {
@@ -797,8 +855,26 @@ name = "docs"
 adapter = "filesystem"
 kind = "markdown_docs"
 path = "docs"
-include = ["guides/*.md"]
-`)
+	include = ["guides/*.md"]
+	`)
+}
+
+func setCurrentStromaSnapshotMetadata(t *testing.T, indexPath, key, value string) string {
+	t.Helper()
+
+	snapshotPath, err := currentStromaSnapshotPathContext(context.Background(), indexPath)
+	if err != nil {
+		t.Fatalf("currentStromaSnapshotPathContext() error = %v", err)
+	}
+	db, err := openReadWriteContext(context.Background(), snapshotPath)
+	if err != nil {
+		t.Fatalf("open stroma snapshot %s read-write: %v", snapshotPath, err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(), `INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)`, key, value); err != nil {
+		t.Fatalf("set stroma snapshot metadata %s: %v", key, err)
+	}
+	return snapshotPath
 }
 
 // TestUpdateChunkPolicyAppliedToChangedRecord is the regression guard
