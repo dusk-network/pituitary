@@ -31,7 +31,7 @@ type artifactChunkPlan struct {
 	artifactUnchanged  bool
 }
 
-func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, configuredQuantization string, options RebuildOptions) (*reuseState, error) {
+func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprint string, embedderDimension int, options RebuildOptions) (*reuseState, error) {
 	if options.Full {
 		return &reuseState{artifacts: map[string]storedArtifact{}}, nil
 	}
@@ -59,19 +59,12 @@ func loadReuseStateContext(ctx context.Context, snapshotPath, embedderFingerprin
 	if stats.EmbedderFingerprint != embedderFingerprint || stats.EmbedderDimension != embedderDimension {
 		return emptyReuseState("existing stroma snapshot embedder does not match current runtime"), nil
 	}
-	// #340: reject cross-quantization reuse here as well as at stroma's
-	// own loadReuseState. Without this check stroma silently disables
-	// reuse internally while pituitary's reuseState still says
-	// "embedder unchanged → reuse OK", inflating the reported
-	// ReusedArtifactCount/ReusedChunkCount and surfacing a misleading
-	// ReuseDisabledReason. Snapshot.Stats() doesn't expose quantization,
-	// so read the metadata key directly via the shared helper.
-	storedQuantization, err := readStoredSnapshotQuantizationContext(ctx, snapshotPath)
+	storedFormat, err := readStoredSnapshotVectorFormatContext(ctx, snapshotPath)
 	if err != nil {
-		return emptyReuseState(fmt.Sprintf("read existing stroma snapshot quantization: %v", err)), nil
+		return emptyReuseState(fmt.Sprintf("read existing stroma snapshot vector format: %v", err)), nil
 	}
-	if storedQuantization != normalizeConfiguredQuantization(configuredQuantization) {
-		return emptyReuseState(fmt.Sprintf("existing stroma snapshot quantization %q does not match current runtime %q", storedQuantization, normalizeConfiguredQuantization(configuredQuantization))), nil
+	if storedFormat != defaultStromaVectorFormat {
+		return emptyReuseState(fmt.Sprintf("existing stroma snapshot vector storage format %q requires full rebuild", storedFormat)), nil
 	}
 
 	return loadStoredArtifactsContext(ctx, snapshot)

@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dusk-network/pituitary/internal/config"
 	stindex "github.com/dusk-network/stroma/v3/index"
 )
 
-const stromaSnapshotPathKey = "stroma_snapshot_path"
+const (
+	stromaSnapshotPathKey     = "stroma_snapshot_path"
+	defaultStromaVectorFormat = "float32"
+)
 
 func stromaSnapshotPathForContent(indexPath, contentFingerprint string) string {
 	dir := filepath.Dir(indexPath)
@@ -93,40 +95,26 @@ func OpenStromaSnapshotContext(ctx context.Context, db *sql.DB, indexPath string
 	return snapshot, nil
 }
 
-// readStoredSnapshotQuantizationContext returns the snapshot's stored
-// quantization metadata, normalized so an empty stored value resolves to
-// QuantizationFloat32. Older snapshots that predate stroma's quantization
-// metadata key are treated as float32 to match stroma's snapshot_read.go
-// default. Shared by the update-path eligibility gate
-// (validateStoredQuantizationContext) and the rebuild reuse-state loader
-// (loadReuseStateContext) so both layers see the same notion of "stored
-// quantization" and a single change-source can't desynchronize them.
-func readStoredSnapshotQuantizationContext(ctx context.Context, snapshotPath string) (string, error) {
+func readStoredSnapshotVectorFormatContext(ctx context.Context, snapshotPath string) (string, error) {
 	snapshotDB, err := OpenReadOnlyContext(ctx, snapshotPath)
 	if err != nil {
-		return "", fmt.Errorf("open stroma snapshot %s for quantization read: %w", snapshotPath, err)
+		return "", fmt.Errorf("open stroma snapshot %s for metadata read: %w", snapshotPath, err)
 	}
 	defer snapshotDB.Close()
-	stored, err := readOptionalMetadataValueContext(ctx, snapshotDB, "quantization")
+
+	format, err := readOptionalMetadataValueContext(ctx, snapshotDB, "quantization")
 	if err != nil {
-		return "", fmt.Errorf("read snapshot quantization metadata: %w", err)
+		return "", fmt.Errorf("read stroma snapshot vector format metadata: %w", err)
 	}
-	stored = strings.TrimSpace(stored)
-	if stored == "" {
-		return config.QuantizationFloat32, nil
-	}
-	return stored, nil
+	return normalizeStoredSnapshotVectorFormat(format), nil
 }
 
-// normalizeConfiguredQuantization mirrors readStoredSnapshotQuantizationContext
-// for configured values: empty resolves to QuantizationFloat32 so a
-// configured "" and a stored "float32" compare equal at the gates.
-func normalizeConfiguredQuantization(configured string) string {
-	configured = strings.TrimSpace(configured)
-	if configured == "" {
-		return config.QuantizationFloat32
+func normalizeStoredSnapshotVectorFormat(format string) string {
+	format = strings.TrimSpace(format)
+	if format == "" {
+		return defaultStromaVectorFormat
 	}
-	return configured
+	return format
 }
 
 func readOptionalMetadataValueContext(ctx context.Context, db *sql.DB, key string) (string, error) {

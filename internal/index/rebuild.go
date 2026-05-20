@@ -109,7 +109,7 @@ func PrepareRebuildContextWithOptions(ctx context.Context, cfg *config.Config, r
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, cfg.Runtime.Quantization, options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 	if err != nil {
 		return nil, err
 	}
-	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, cfg.Runtime.Quantization, options)
+	reuseState, err := loadReuseStateContext(ctx, currentSnapshotPath, embedder.Fingerprint(), dimension, options)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,6 @@ func rebuildContext(ctx context.Context, cfg *config.Config, records *source.Loa
 		Embedder:       embedder,
 		ChunkPolicy:    chunkPolicy,
 		Contextualizer: contextualizer,
-		Quantization:   cfg.Runtime.Quantization,
 	}
 	if !options.Full {
 		// Stroma rebuilds through Path+".new", so reusing the currently published

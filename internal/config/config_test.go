@@ -1889,6 +1889,58 @@ repo = "dusk-network/pituitary"
 	}
 }
 
+func TestLoadRejectsRuntimeQuantization(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime]
+quantization = "int8"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unsupported runtime.quantization")
+	}
+	for _, want := range []string{
+		`unsupported runtime field "quantization"`,
+		"runtime.quantization was removed",
+		"pituitary index --rebuild",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Load() error = %q, want substring %q", err, want)
+		}
+	}
+}
+
+func TestLoadRejectsRuntimeQuantizationSubtable(t *testing.T) {
+	t.Parallel()
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "pituitary.toml")
+	writeFile(t, configPath, `
+[workspace]
+root = "."
+index_path = ".pituitary/pituitary.db"
+
+[runtime.quantization]
+mode = "int8"
+`)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Fatal("Load() error = nil, want unsupported runtime.quantization")
+	}
+	if !strings.Contains(err.Error(), `unsupported runtime field "quantization"`) {
+		t.Fatalf("Load() error = %q, want runtime.quantization removal message", err)
+	}
+}
+
 func TestLoadRejectsUnknownTerminologyField(t *testing.T) {
 	t.Parallel()
 
